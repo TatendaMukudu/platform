@@ -41,6 +41,38 @@
           of them, and only above the two-sided floor every other group surface uses. "Two of six
           did not get it" is a name in a small squad.
 
+   L-MT6  WHAT KIND OF THING THIS IS, IS DECLARED AND CHECKED — NEVER ASSUMED FROM THE UPLOAD.
+
+          A file arriving in this product could be three completely different things, and the
+          difference is not in the file:
+
+            EXTERNAL CONTEXT       a scouting deck, an article, somebody else's research. Useful
+                                   to read from. It says nothing about anybody here, and it is
+                                   the DEFAULT, because "somebody attached a file" is not a claim.
+            PERSONAL EVIDENCE      the attacher's own account of their own experience. They are
+                                   the authority on that and need nobody's permission for it.
+            ORGANISATION EVIDENCE  a claim about the organisation or the people in it. This is
+                                   the one that can change what the product believes about
+                                   somebody, and it is the one a person cannot simply assert.
+
+          USER ASSERTION ALONE IS NOT AUTHORITATIVE EVIDENCE. Organisation evidence needs three
+          separate things, and each blocks a different way of being wrong:
+
+            PERMISSION    somebody entitled to speak for the group it concerns. Without this,
+                          anybody could upload a document asserting what the squad is like.
+            PROVENANCE    where it came from, stated. Without this, a claim about an organisation
+                          has no source, and a source is what distinguishes evidence from
+                          opinion — the same rule the citation gate applies to the outside world.
+            CONFIRMATION  the person deliberately says "this is evidence about the organisation",
+                          separately from attaching it. Without this, the classification is a
+                          side effect of an upload, and consequential things must never be side
+                          effects.
+
+          A request that fails any of them is not refused outright — it is DOWNGRADED to external
+          context and told why. Refusing the upload would lose the file; silently accepting it
+          would let an assertion become a fact. Downgrading keeps the material and refuses only
+          the claim, which is the part that was not earned.
+
    Pure: no IO, no LLM, no clock of its own.
    ============================================================ */
 
@@ -56,6 +88,91 @@ const CONTEXT_CAP  = 12000;    // what the assistant may be handed from one atta
    There is no third state meaning "seemed unsure", because that state could only be arrived at
    by reading somebody's words for hesitancy. */
 const ENGAGEMENT = Object.freeze(['got_it', 'not_yet']);
+
+/* L-MT6 — the closed vocabulary. Three, in increasing order of what they can do, and the default
+   is deliberately the one that can do nothing. */
+/* IS THERE ANYTHING A PERSON COULD READ IN THIS?
+
+   `"".trim()` is the obvious check and it is not enough: String.prototype.trim strips WHITESPACE,
+   and a NUL is not whitespace. A corrupt binary file — a .pptx that failed to parse, an image
+   renamed to .txt — arrives as control characters, survives `text.trim()` intact, and becomes a
+   material with a control-character heading that a coach then sees in their attachment list.
+   Found by attaching one.
+
+   So "readable" means what it says: at least one character somebody could actually read. Letters,
+   digits and ordinary punctuation count; control characters and lone whitespace do not. */
+const _READABLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
+function hasReadableText(text) {
+  const t = String(text == null ? '' : text);
+  // Strip the C0 and C1 control ranges before asking, so a file that is ONLY control characters
+  // answers no rather than answering yes because it is non-empty.
+  return _READABLE.test(t.replace(/[\u0000-\u001F\u007F-\u009F]/g, ''));
+}
+
+const CLASSES = Object.freeze(['external_context', 'personal_evidence', 'organisation_evidence']);
+const DEFAULT_CLASS = 'external_context';
+
+/* What each one MEANS, in the words a person reads before they choose it. Held here rather than
+   in a template so the screen, the confirmation card and the report cannot describe the same
+   choice three ways. */
+const CLASS_TEXT = Object.freeze({
+  external_context: {
+    label: 'Something to read from',
+    means: 'Material to work from. It says nothing about anybody here and changes nothing IntelliQ believes.',
+  },
+  personal_evidence: {
+    label: 'My own account',
+    means: 'Your own experience, in your own words. You are the authority on that, and it is yours alone unless you share it.',
+  },
+  organisation_evidence: {
+    label: 'Evidence about this organisation',
+    means: 'A claim about this organisation or its people. It needs somebody entitled to say it, a stated source, and your explicit confirmation — attaching a file is not enough on its own.',
+  },
+});
+
+/* THE DECISION, PURE. Given what was asked for and what is true about the asker, returns the
+   class that will actually be recorded, whether the request was granted, and — when it was not —
+   which of the three requirements was missing, in words.
+
+   It DOWNGRADES rather than refuses, for the reason in L-MT6: refusing loses the file, accepting
+   silently lets an assertion become a fact, and downgrading refuses only the claim. */
+function classifyRequest({ requested = '', mayAttest = false, provenance = '', confirmed = false } = {}) {
+  const want = CLASSES.includes(String(requested)) ? String(requested) : DEFAULT_CLASS;
+
+  // External context asks for nothing and is therefore always available.
+  if (want === 'external_context') return { class: want, granted: true, missing: [], reason: '' };
+
+  /* Personal evidence needs only that the person meant it. They are the authority on their own
+     experience, so there is nobody to ask — but it is still a deliberate act rather than a
+     property of the upload, because "I attached a file" is not "this is my account". */
+  if (want === 'personal_evidence') {
+    if (!confirmed) {
+      return { class: DEFAULT_CLASS, granted: false, missing: ['confirmation'],
+        reason: 'Kept as something to read from. Say deliberately that it is your own account and it will be recorded as that.' };
+    }
+    return { class: want, granted: true, missing: [], reason: '' };
+  }
+
+  // Organisation evidence. All three, and each is named separately when it is missing, because
+  // "you cannot do that" teaches nothing and "you need X" is actionable.
+  const missing = [];
+  if (!mayAttest) missing.push('permission');
+  if (!String(provenance || '').trim()) missing.push('provenance');
+  if (!confirmed) missing.push('confirmation');
+  if (missing.length) {
+    const WORDS = {
+      permission: 'somebody entitled to speak for the group it concerns',
+      provenance: 'a stated source — where this came from',
+      confirmation: 'your explicit confirmation that it is evidence about the organisation',
+    };
+    return {
+      class: DEFAULT_CLASS, granted: false, missing,
+      reason: `Kept as something to read from. Evidence about the organisation needs ${
+        missing.map(m => WORDS[m]).join(', and ')}. Attaching a file is not enough on its own.`,
+    };
+  }
+  return { class: want, granted: true, missing: [], reason: '' };
+}
 
 /* The file shapes whose structure this module knows how to follow. Anything else is treated as
    plain prose, which is honest — an unknown format has no structure we can claim to read. */
@@ -247,5 +364,6 @@ function landedNote(u = {}) {
 
 module.exports = {
   TEXT_CAP, SECTION_CAP, SECTION_TEXT, CONTEXT_CAP, MIN_SECTION, ENGAGEMENT, KINDS,
+  CLASSES, DEFAULT_CLASS, CLASS_TEXT, classifyRequest, hasReadableText,
   segment, contextFor, understanding, landedNote,
 };

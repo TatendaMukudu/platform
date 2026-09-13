@@ -12,8 +12,8 @@
 
      A NODE ROOM   — whoever is on the roster right now. Take somebody off the squad and they
                      are out of the room, because the room IS the squad.
-     A FOCUS ROOM  — the people named on it. An invitation does not expire because a roster
-                     moved, and it was never the roster that put them there.
+     A FOCUS ROOM  — the people currently named on it and still addressable. Removing the contact
+                     revokes stale invited access; an old audience must not remain a privacy grant.
 
    Collapsing those would make one of them silently wrong the first time a roster changed, so
    the suite pins them apart on purpose.
@@ -150,8 +150,8 @@ const server = app.listen(0, async () => {
     orgNodes[C].n1.memberIds = ['p1', 'p3'];      // p2 is taken off the squad
     ok('FM6b …and taking somebody off the roster takes them out of THAT room, because the room is the squad',
       (await get(`/api/forum/focus/${groupFocus.id}`, p2T)).status !== 200);
-    ok('FM6c …but NOT out of the focus they were invited into by name — an invitation does not expire because a roster moved, and it was never the roster that put them there',
-      (await get(`/api/forum/focus/${fid}`, p2T)).status === 200);
+    ok('FM6c …and removing a contact revokes stale invited access to that focus room',
+      (await get(`/api/forum/focus/${fid}`, p2T)).status !== 200);
     orgNodes[C].n1.memberIds = ['p1', 'p2', 'p3'];
 
     /* ── FM7: anonymity, and the honest limit of it. The forum hides authorship from every human

@@ -17,7 +17,15 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 const C = 'mct';
 _loadAllStores({
   orgMeta:  { [C]: { orgName: 'Demo Athletic Club', orgMode: 'sports' } },
-  orgUsers: { [C]: { maya: { id: 'maya', name: 'Maya Chen', role: 'member', orgCode: C, status: 'active' } } },
+  orgUsers: { [C]: {
+    maya:  { id: 'maya',  name: 'Maya Chen', role: 'member', orgCode: C, status: 'active' },
+    /* A REAL SECOND MEMBER. Step 5 used to issue a token for `ghost`, an id present in no store,
+       and accept 403-or-404. Since a session is resolved against the account it names, that
+       request is now answered 401 — which would have made the assertion green for the wrong
+       reason before and red for the wrong reason now. Neither answers the question step 5 asks,
+       which is whether ONE MEMBER CAN READ ANOTHER'S conversation. That needs another member. */
+    ghost: { id: 'ghost', name: 'Other Member', role: 'member', orgCode: C, status: 'active' },
+  } },
 });
 _rebuildEmailIndex();
 

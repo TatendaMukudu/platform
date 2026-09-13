@@ -234,10 +234,34 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, a
   // believe. Counting it would mean a claim the person has since withdrawn still holds the
   // picture up — see supersede().
   const list = all.filter(s => isActive(s));
+  /* ── THE SHAPE OF THE EVIDENCE, RETURNED RATHER THAN LEFT TO BE GUESSED AT ──────────────────
+     `because` is prose the kernel composes for a reader, and a caller that needs to say something
+     true about the evidence had no choice but to parse it — or, as the client did, to invent a
+     sentence from the BAND alone. The badge tooltip claimed "several separate accounts point the
+     same way" for every band from `supported` upwards, which the band cannot support: a picture
+     assembled from several reports whose origin was never established reaches the same band while
+     `known.size` is zero, and the product then asserted independence it had specifically failed to
+     establish. That is the one claim in the whole confidence model that must never be made loosely,
+     since the entire origin/occasion distinction exists to stop a room agreeing with itself from
+     reading as corroboration.
+
+     So the counts the score was computed from are returned beside it. Structure, not English:
+     the words are the presentation layer's job, and now it has facts to write them from. */
+  const shapeOf = ({ origins = 0, unestablished = 0, occasions = 0, signals = 0,
+    contradictions = 0, retired = 0 }) => ({
+    independentOrigins: origins,     // established, distinct, currently active
+    unestablishedSources: unestablished, // reports we could not trace to an origin
+    occasions,                       // tellings — the same person twice in one breath is one
+    signals,                         // current records, whatever they trace to
+    contradictions,                  // signals that contradict or dissent
+    retired,                         // superseded or withdrawn, kept in the record, not counted
+  });
+
   if (!list.length) {
     return all.length
-      ? { score: 0, band: 'tentative', because: [`${all.length} signal${all.length === 1 ? '' : 's'}, all superseded or withdrawn`] }
-      : { score: 0, band: 'tentative', because: ['nothing recorded yet'] };
+      ? { score: 0, band: 'tentative', because: [`${all.length} signal${all.length === 1 ? '' : 's'}, all superseded or withdrawn`],
+          origin: shapeOf({ retired: all.length }) }
+      : { score: 0, band: 'tentative', because: ['nothing recorded yet'], origin: shapeOf({}) };
   }
 
   const because = [];
@@ -331,7 +355,14 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, a
   ) * contradictionPenalty * singleOccasionCeiling * singleOriginCeiling;
 
   const band = (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band;
-  return { score: Math.round(score * 100) / 100, band, because };
+  return {
+    score: Math.round(score * 100) / 100, band, because,
+    // The counts this score was actually computed from — see shapeOf above.
+    origin: shapeOf({
+      origins: known.size, unestablished: unknownSources.size, occasions: occasions.size,
+      signals: list.length, contradictions, retired: all.length - list.length,
+    }),
+  };
 }
 
 /* ── 3. THE INQUIRY STATE ────────────────────────────────────────────────────

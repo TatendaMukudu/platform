@@ -39,6 +39,7 @@ const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
 const packs      = require('./ai/packs');
+const language   = require('./ai/language');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
@@ -64,6 +65,7 @@ const material          = require('./ai/material');
 const chart             = require('./ai/chart');
 const shelf             = require('./ai/shelf');
 const crossEvidence     = require('./ai/cross-evidence');
+const manifest          = require('./ai/manifest');       // D: one record of what may be said, five channels that say it
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -227,7 +229,7 @@ function _persistedStores() {
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, shelfFilings, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
-    materials, materialEngage,
+    materials, materialEngage, objectAudiences,
   };
 }
 
@@ -625,6 +627,8 @@ async function _reconstruct(storeData) {
         _unitRevs.set(key, Number(revisions[key] || 0));
       }
       _persistenceReady = { ready: true, error: null };
+      // The stores ARE loaded on this path — it is the one every real instance takes.
+      _markStoresLoaded();
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -833,7 +837,41 @@ function _domainDirective(code, opts = {}) {
   let subjectRole = null, avoidGeneric = false;
   if (opts.subjectRole !== undefined) subjectRole = opts.subjectRole;
   else if (opts.userId) ({ subjectRole, avoidGeneric } = _subjectRoleContext(code, opts.userId));
-  return packs.domainDirective(domain, { subjectRole, avoidGenericForSubject: avoidGeneric, concepts: opts.concepts });
+  const vocab = packs.domainDirective(domain, { subjectRole, avoidGenericForSubject: avoidGeneric, concepts: opts.concepts });
+  /* ── AND WHICH LANGUAGE TO ANSWER IN ──────────────────────────────────────────────────────
+     The product had no notion of language anywhere: no preference, no detection, no directive.
+     A person writing in Spanish was answered in English every turn, with nothing in the system
+     having noticed that anything was ignored.
+
+     It rides on this call because this is already the one directive every AI entry point makes,
+     and because language is a property OF PROSE — which is the model's half of the founder's
+     law. Deterministic code decides WHICH language (ai/language.js, model-free, failing closed
+     to null); the model writes in it. `_languageOf` returns null for English and for anything it
+     cannot tell, and `directive` is then empty, so the ordinary path is byte-identical and costs
+     no tokens. */
+  const lang = opts.userId ? _languageOf(code, opts.userId) : null;
+  return [vocab, language.directive(lang)].filter(Boolean).join('\n\n');
+}
+
+/* WHAT LANGUAGE THIS PERSON WRITES IN, remembered rather than re-guessed each turn. A single
+   short message ("ok, thanks") tells you nothing, and re-detecting per turn would make the
+   product switch language mid-conversation on one ambiguous line — which is the exact failure
+   `language.directive` tells the model not to commit. It is recorded when they write something
+   long enough to be evidence, and it stands until they write something else that is.
+
+   Their own words only. What the product said back is not evidence of what they speak. */
+function _languageOf(code, userId) {
+  const mem = userAiProfiles[`${code}:${userId}`];
+  const rec = mem && mem.writesIn;
+  return rec && rec.code ? { code: rec.code, name: language.nameOf(rec.code) || rec.code, confident: true } : null;
+}
+
+function _noteLanguage(code, userId, text) {
+  const found = language.detect(text);
+  if (!found || !found.confident) return null;
+  const mem = _getMemory(code, userId);
+  mem.writesIn = { code: found.code, at: new Date().toISOString() };
+  return found;
 }
 
 /* Audit stamp recorded alongside generated prose so historical outputs remain
@@ -877,13 +915,57 @@ function verifyToken(tokenStr) {
   return s;
 }
 
-// Middleware — applied to endpoints that expose aggregate org data
-function requireAuth(req, res, next) {
+/* ── WHO IS ASKING, RIGHT NOW ────────────────────────────────────────────────────────────────
+   A session is a record of who signed in. It is NOT a record of who they still are.
+
+   REPRODUCED through the real routes: issue a token to an active member, set their account to
+   `inactive`, and `GET /api/contacts` still answered 200. Same for `suspended`. And worse —
+   DELETE the account outright and it still answered 200, because `requireAuth` never resolved
+   the user at all. A token was, in effect, a bearer capability that outlived the person.
+
+   `requirePermission` was already better than this: it resolved the current user and read the
+   current role, so a role DOWNGRADE was already refused correctly (driven: admin writes a metric,
+   role set to member, the same token gets 403). That half of the finding is REFUTED, and it is
+   worth saying so rather than claiming a fix for something that already worked. What neither
+   middleware did was ask whether the account was still AVAILABLE.
+
+   ONE OWNER, and this is it. Both middlewares call `_authoriseRequest`, so there is exactly one
+   place that decides "is this request from somebody who currently exists here". A second copy is
+   how the two drift, which is the defect this whole engagement keeps finding.
+
+   THE TENANT IS THE SESSION'S, NEVER THE CALLER'S. The lookup is `orgUsers[session.orgCode]`,
+   full stop — so a user id that exists in two tenants resolves to the one the token was issued
+   for and can never authenticate against the other.
+
+   PRESENCE USES THE CANONICAL RULE, `_personPresent`: present unless the record says otherwise.
+   That is an allowlist, so an unrecognised future status fails CLOSED (AGENTS.md invariant 7),
+   and an account written before the field existed still works.
+
+   THE ROLE IS RE-READ, NOT REMEMBERED. `req.iqSession` is a per-request view carrying the role
+   the store holds NOW, so the five places that read `iqSession.role` get the current answer
+   without each having to remember to look it up. The stored session is not mutated: a read path
+   that writes is a read path that can corrupt what it is reading. */
+function _authoriseRequest(req) {
   const header = (req.headers.authorization || '').replace('Bearer ', '').trim();
   const token  = header || req.query.token || req.body?.token;
   const session = verifyToken(token);
-  if (!session) return res.status(401).json({ error: 'Authentication required. Please log in again.' });
-  req.iqSession = session;
+  if (!session) return { ok: false, status: 401, error: 'Authentication required. Please log in again.' };
+
+  const user = (orgUsers[session.orgCode] || {})[session.userId];
+  if (!_personPresent(user)) {
+    /* ONE MESSAGE FOR BOTH "gone" AND "never here". Distinguishing them would tell an attacker
+       holding a stale token whether the account still exists, which is a fact they are not
+       entitled to and cannot act on anyway. */
+    return { ok: false, status: 401, error: 'This account is no longer active. Please log in again.' };
+  }
+  return { ok: true, session: { ...session, role: user.role }, user };
+}
+
+// Middleware — applied to endpoints that expose aggregate org data
+function requireAuth(req, res, next) {
+  const a = _authoriseRequest(req);
+  if (!a.ok) return res.status(a.status).json({ error: a.error });
+  req.iqSession = a.session;
   next();
 }
 
@@ -1902,7 +1984,31 @@ app.post('/api/auth/create-user', requirePermission('edit_members'), async (req,
   emailIndex[emailNorm] = { orgCode: code, userId };
   scheduleSave();
 
-  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
+  // A 200 is an acknowledgement of durable creation, not merely an in-memory
+  // mutation. A competing instance can win the orgUsers CAS and replace this
+  // provisional row during a conflict reload. Refuse the losing caller and
+  // leave their address available for an honest retry.
+  try {
+    await _flushPersistence();
+  } catch (err) {
+    if (orgUsers[code]?.[userId]) {
+      delete orgUsers[code][userId];
+      scheduleSave();
+    }
+    if (emailIndex[emailNorm]?.userId === userId) delete emailIndex[emailNorm];
+    return res.status(err.code === 'DURABLE_CONFLICT' ? 409 : 503).json({
+      error: 'Account creation could not be confirmed as durable. Please retry.',
+    });
+  }
+  // A non-failLoud save already in progress can report a CAS conflict, reload
+  // this unit, and then let the flush complete as a no-op. Check the committed
+  // identity rather than trusting a resolved flush alone.
+  const created = orgUsers[code]?.[userId];
+  if (!created || created.email !== emailNorm) {
+    if (emailIndex[emailNorm]?.userId === userId) delete emailIndex[emailNorm];
+    return res.status(409).json({ error: 'Another account write won. Please retry.' });
+  }
+  res.json({ ok: true, user: { ...created, passwordHash: undefined } });
 });
 
 /* ── Bulk create (name-only) REMOVED — use bulk-import with email instead ── */
@@ -2198,14 +2304,17 @@ function _resolveRoleDefaults(role) {
 /* ── Permission middleware factory ──────────────────────────────────────── */
 function requirePermission(perm) {
   return (req, res, next) => {
-    const header  = (req.headers.authorization || '').replace('Bearer ', '').trim();
-    const session = verifyToken(header || req.query.token);
-    if (!session) return res.status(401).json({ error: 'Authentication required.' });
+    /* THE SAME OWNER as requireAuth — see `_authoriseRequest`. This used to resolve the user
+       itself, which was very nearly right: it read the CURRENT role, so a downgrade was already
+       refused. What it did not ask was whether the account was still available, so an `inactive`
+       admin kept administrative authority for the life of their token. Routing both middlewares
+       through one function means that question is asked once, in one place, for every
+       authenticated request in the product. */
+    const a = _authoriseRequest(req);
+    if (!a.ok) return res.status(a.status).json({ error: a.error });
+    const { session, user } = a;
 
-    const user = orgUsers[session.orgCode]?.[session.userId];
-    if (!user) return res.status(401).json({ error: 'User not found.' });
-
-    // SuperAdmin bypasses all permission checks
+    // SuperAdmin bypasses all permission checks — read from the CURRENT record, not the token.
     if (user.role === 'superadmin') { req.iqSession = session; return next(); }
 
     const allowed = _effectivePermissions(session.orgCode, session.userId)[perm] === true;
@@ -3076,11 +3185,29 @@ function _addTreeNode(code, { name, parentId = null, description = '' } = {}) {
   return { node: orgNodes[code][nodeId], already: false };
 }
 
-app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+/* ── THE TREE ROUTES ASK THE TREE'S OWNER ────────────────────────────────────────────────────
+   These three were `requirePermission('manage_tree')` — an org-wide switch — while
+   `/api/groups/*` wrote the same `orgNodes` store behind a bare `_isLeader`. Two doors into one
+   structure with two different locks, and the weaker one decided.
+
+   They now ask `_canManageNode`, which STILL returns true for `manage_tree` and for a superadmin,
+   so nothing an administrator could do has been taken away. What it adds is the case the product
+   law requires and the permission could not express: a leader assigned to a department may build
+   and staff that department without being handed authority over the whole organisation. The
+   answer is per node, so it is also the answer the browser can honestly mirror. */
+app.post('/api/tree/node', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code = req.iqSession.orgCode;
   const { name, parentId, description, ifRev } = req.body;
   const parent = parentId ? orgNodes[code]?.[parentId] : null;
   if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  /* A NEW NODE IS CREATED SOMEWHERE, and where decides who may create it: inside a parent you
+     manage, or — with no parent at all — as a new top-level branch, which is an administrator's
+     act. A department head builds inside their department; they do not add one beside it. */
+  if (!_canManageNode(code, req.iqSession.userId, parentId || null)) {
+    return res.status(403).json({ error: parentId
+      ? 'You can only add a node inside a part of the organisation you lead.'
+      : 'Only an administrator can add a new top-level part of the organisation.' });
+  }
   if (parent && !_treePrecondition(res, parent, ifRev)) return;
 
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
@@ -3091,14 +3218,49 @@ app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutat
   res.json({ ok: true, node: made.node });
 });
 
-app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+app.put('/api/tree/node/:nodeId', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_canManageNode(code, req.iqSession.userId, nodeId)) {
+    return res.status(403).json({ error: 'You can only change a part of the organisation you lead.' });
+  }
+  /* REPARENTING IS NOT AN EDIT OF THIS NODE. It changes where this node hangs, which is a
+     statement about the tree ABOVE it — so it needs authority over the place it is leaving and
+     the place it is going, not only over the thing being moved. Without this a leader could
+     reparent the node they lead onto any node they also lead, or out from under their superior. */
+  const _wantParent = req.body.parentId;
+  if (_wantParent !== undefined && _wantParent !== node.parentId) {
+    if (!_canManageNode(code, req.iqSession.userId, node.parentId || null)
+        || !_canManageNode(code, req.iqSession.userId, _wantParent || null)) {
+      return res.status(403).json({
+        error: 'Moving a node needs authority over where it is now and where it is going.' });
+    }
+  }
   if (!_treePrecondition(res, node, req.body.ifRev)) return;
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const { name, description, parentId, memberIds, leaderIds } = req.body;
+
+  /* ── THE ADMINISTRATOR'S DOOR OBEYS THE SAME ANCHOR LAW AS THE OTHER ONE ─────────────────────
+     `manage_tree` is a delegable per-user permission, not a role: an organisation can hand it to
+     a department head so they can build their own structure. It therefore cannot be treated as
+     "this person is an administrator, let them do anything" — the same person could name
+     themselves the leader of the node above their own and walk up the tree one grant at a time.
+     A superadmin reassigning anybody, including themselves, is a legitimate administrative act
+     and passes; everybody else may shape the tree without changing where THEY sit in it. */
+  const _me = req.iqSession.userId;
+  if ((orgUsers[code] || {})[_me]?.role !== 'superadmin') {
+    const wasM = (node.memberIds || []).map(String).includes(String(_me));
+    const wasL = (node.leaderIds || []).map(String).includes(String(_me));
+    const willM = memberIds === undefined ? wasM : (memberIds || []).map(String).includes(String(_me));
+    const willL = leaderIds === undefined ? wasL : (leaderIds || []).map(String).includes(String(_me));
+    if (willM !== wasM || willL !== wasL) {
+      return res.status(403).json({
+        error: 'You cannot change your own placement in the organisation. Ask an administrator.' });
+    }
+  }
+
   const now = new Date().toISOString();
   if (name        !== undefined) node.name        = name.trim();
   if (description !== undefined) node.description = description.trim();
@@ -3134,11 +3296,23 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTr
   res.json({ ok: true, node });
 });
 
-app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+app.delete('/api/tree/node/:nodeId', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_canManageNode(code, req.iqSession.userId, nodeId)) {
+    return res.status(403).json({ error: 'You can only remove a part of the organisation you lead.' });
+  }
+  /* AND NOT THE NODE THAT MAKES YOU A LEADER. Deleting the node you lead removes your own anchor
+     and reparents its children upward past you — an anchor change dressed as a tidy-up, and the
+     one deletion the person doing it can never be a neutral party to. An administrator may. */
+  if (_ledNodeIds(code, req.iqSession.userId).has(nodeId)
+      && (orgUsers[code] || {})[req.iqSession.userId]?.role !== 'superadmin'
+      && !_userHasPerm(code, req.iqSession.userId, 'manage_tree')) {
+    return res.status(403).json({
+      error: 'You cannot remove the part of the organisation you lead. Ask an administrator.' });
+  }
   if (!_treePrecondition(res, node, req.body.ifRev)) return;
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const now = new Date().toISOString();
@@ -3210,12 +3384,94 @@ function _isLeader(orgCode, userId) {
 
 /* A user leads via hierarchy if any node they belong to (member or leader) has
    at least one sub-node beneath it — their tier sits above another. */
+/* BEING IN A ROOM IS NOT RUNNING IT.
+
+   REPRODUCED at head cdf2a79, and it is a complete privilege escalation with no administrator
+   anywhere in it. This function used to read:
+
+       for (const nid of getUserNodeIds(orgCode, userId))      // nodes they are IN, member OR leader
+         if ((nodes[nid]?.childNodeIds || []).length) return true;
+
+   `getUserNodeIds` returns nodes a person BELONGS to. So an ordinary member of any node that
+   happened to have a child node was reported as a leader — and `_isLeader` feeds
+   `_effectivePermissions`, so they silently received LEADER_GRANTS: view_members, view_team,
+   review_checkins, view_insights, assign_scenarios, view_reports. The whole member directory and
+   other people's check-ins, granted by the shape of the tree above them.
+
+   It did not stop there. `_isLeader` also gates `/api/groups/*`, and those routes write into
+   `orgNodes` through `_upsertGroupNode` — so the same ordinary member could CREATE org nodes and
+   EDIT ANY NODE IN THE ORGANISATION, including an unrelated subtree, setting its leaderIds to
+   themselves. Driven: a member of `alpha` made themselves the leader of `beta`.
+
+   The narrowing is the whole fix: a person leads via hierarchy when a node THEY LEAD has children.
+   That is already true by clause 1 of `_isLeader` — leading any node at all makes you a leader —
+   so this predicate is now honestly redundant and says so rather than pretending to add a case.
+   It is kept as a named function because `_isLeader` reads as a list of the ways leadership can be
+   recorded, and deleting one silently would leave a reader wondering which of the three it was. */
 function _leadsViaHierarchy(orgCode, userId) {
-  const nodes = orgNodes[orgCode] || {};
-  for (const nid of getUserNodeIds(orgCode, userId)) {
-    if ((nodes[nid]?.childNodeIds || []).length) return true;
+  return _ledNodeIds(orgCode, userId).size > 0;
+}
+
+/* WHICH NODES DOES THIS PERSON ACTUALLY LEAD. Leadership is recorded in two places by history —
+   on the node (`leaderIds`) and on the user (`leadershipNodeIds`) — and both are read here so a
+   caller never has to remember there are two. Membership is deliberately NOT consulted. */
+function _ledNodeIds(orgCode, userId) {
+  const out = new Set(((orgUsers[orgCode] || {})[userId] || {}).leadershipNodeIds || []);
+  for (const n of Object.values(orgNodes[orgCode] || {})) {
+    if (n && (n.leaderIds || []).includes(userId)) out.add(n.nodeId);
+  }
+  return out;
+}
+
+/* ── THE ONE OWNER OF "MAY THIS PERSON MANAGE THIS NODE" ─────────────────────────────────────
+   Every route that can move a person, rename a node, create a child, or change who leads
+   something asks this and nothing else. Before it existed the answer was spread across
+   `requirePermission('manage_tree')` on the tree routes, a bare `_isLeader` on the group routes,
+   and `canManage || true` in the browser — three answers to one question, and the loosest of them
+   won because it belonged to the routes nobody had audited.
+
+   THE PRODUCT LAW, in the order it is applied:
+
+     · A superadmin of THIS organisation may manage any node in it.
+     · So may anybody explicitly granted `manage_tree` — that is what the permission means.
+     · An ASSIGNED LEADER may manage the node they lead and everything BENEATH it. Downward only:
+       not their own parent, not a sibling, not an unrelated subtree.
+     · Everybody else, no. Including a member of a node that has children.
+
+   It answers about a NODE, not about an anchor. Changing where somebody is ANCHORED is a
+   different question with a different answer — see `_mayChangeAnchor` — because a leader may
+   legitimately manage their own node's membership while still being forbidden to move themselves
+   within it. Folding the two together is how "manage the subtree" quietly becomes "promote
+   yourself inside it". */
+function _canManageNode(code, actorId, nodeId) {
+  const actor = (orgUsers[code] || {})[actorId];
+  if (!_personPresent(actor)) return false;                 // fail closed on absent or unavailable
+  if (actor.role === 'superadmin') return true;
+  if (_userHasPerm(code, actorId, 'manage_tree')) return true;
+  if (!nodeId || !(orgNodes[code] || {})[nodeId]) return false;
+  for (const led of _ledNodeIds(code, actorId)) {
+    // getDescendantNodeIds includes the root itself, which is correct: a leader manages the node
+    // they lead as well as what hangs under it.
+    if (getDescendantNodeIds(code, led).includes(nodeId)) return true;
   }
   return false;
+}
+
+/* ── AND WHO MAY CHANGE WHERE SOMEBODY IS ANCHORED ───────────────────────────────────────────
+   "A person's own org-tree placement is their authoritative anchor" — so moving it is not an
+   ordinary edit, and nobody moves their own, ever. A leader running a department may add and
+   remove the people under them; they may not write themselves into a different department, and
+   they may not promote themselves to lead it. Only an authorised superior — somebody whose own
+   leadership covers the node in question — or a superadmin may do that.
+
+   `actorId === subjectId` is refused BEFORE authority is considered, deliberately. A superadmin
+   changing their own placement is a legitimate administrative act and goes through the tree
+   routes as an administrator; what this forbids is the self-service shortcut, which the product
+   law says must be a request-and-approval flow rather than a direct canonical mutation. */
+function _mayChangeAnchor(code, actorId, subjectId, nodeId) {
+  if (!actorId || !subjectId) return false;
+  if (String(actorId) === String(subjectId)) return false;   // never your own, by any route
+  return _canManageNode(code, actorId, nodeId);
 }
 
 /* ── _effectivePermissions — single source of truth for what a user can do ────
@@ -4389,14 +4645,29 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
     'Signals are weighted: results and repeated patterns count more than one-off notes.',
   ].join('\n');
 
-  let narrative = null;
+  /* ── A SUBSTITUTE THAT DOES NOT SAY IT IS ONE IS A LIE OF OMISSION ─────────────────────────
+     This caught the provider failure and fell through to a stock sentence — "Your group looks
+     steady this week" — with nothing anywhere saying that IntelliQ had not actually read
+     anything. A leader could not tell that sentence apart from a considered one, which is worse
+     than no briefing: it is a confident-sounding line that nobody wrote about them.
+
+     The product already owns this exact idea. `COMPOSER_DEGRADED` is a closed vocabulary of
+     facts about IntelliQ's own state — never a provider's name, a key or an error message — and
+     the client already renders one sentence for it in one place. This route reports through that
+     same owner rather than growing a second notion of "the model did not write this". */
+  let narrative = null, degraded = null;
   try {
     narrative = await ai.complete({ org: code, taskType: 'workspace_briefing',
       tier: 'reason', maxTokens: 220,
       system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code), _domainDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
     });
-  } catch (_) { /* fall back to no narrative */ }
+    if (!String(narrative || '').trim()) { narrative = null; degraded = _degraded('empty'); }
+  } catch (_) {
+    // The reason is deliberately coarse: the operator gets the detail from the logs, and the
+    // person reading this gets one honest sentence rather than somebody else's error text.
+    degraded = _degraded(ai.enabled && !ai.enabled() ? 'no_model' : 'error');
+  }
 
   const data = {
     ok: true,
@@ -4409,8 +4680,20 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
     briefing: narrative || (alerts.length
       ? `${alerts.length} member(s) could use your attention this week — see the list below.`
       : `Your group looks steady this week — ${activeWeek}/${members.length} active.`),
+    /* Carried in the shape the client already renders, so the one degraded sentence appears here
+       too without a second copy of it being written. Null on the ordinary path. */
+    composer: degraded,
   };
-  leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
+  /* ── A SUBSTITUTE IS NOT CACHED FOR TWO HOURS ──────────────────────────────────────────────
+     BRIEFING_TTL is two hours, and this stored whatever it had just produced. So one failed
+     provider call pinned the stock sentence — and, now, the degraded marker with it — in front of
+     a leader for the rest of the morning, long after the provider had recovered, with nothing
+     saying that asking again would work. `refresh=1` bypassed it, which is a thing an operator
+     knows and a coach does not.
+
+     A fallback is cheap to recompute and expensive to entrench, so only a real briefing is kept.
+     The next request after recovery gets the considered one. */
+  if (!degraded) leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
 });
 
@@ -5268,8 +5551,9 @@ function _beliefStateFindings(code, userId, now) {
   const focuses = (_getMemory(code, userId).focuses) || [];
   for (const f of focuses) {
     if (!f || !f.text) continue;
-    if (f.outcome && f.outcome.result && f.outcome.result !== 'unclear') {
-      const helped = f.outcome.result === 'helped' || f.outcome.result === 'improved';
+    const _oc = _focusOutcome(f);
+    if (_oc && _oc.result && _oc.result !== 'unclear') {
+      const helped = _oc.result === 'helped' || _oc.result === 'improved';
       out.push({ patternType: helped ? 'focus_landed' : 'focus_missed',
         polarity: helped ? 'progress' : 'risk', subjectId: userId,
         severity: 'low', priority: 'low', confidence: 'clear',
@@ -5775,6 +6059,7 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
   (m?.deviations || []).slice(0, 2).forEach(d => noticed.push(`${d.label} is ${d.direction} your usual lately`));
   (m?.structural || []).slice(0, 2).forEach(s => noticed.push(intel.PATTERN_LABEL[s.type] || s.type));
 
+  let _ciDegraded = null;
   let acknowledgement = isReturn
     ? "Good to have you back — thanks for checking in after a bit of quiet. I've folded this in."
     : "Got it — I've added that and folded it into your picture.";
@@ -5793,7 +6078,15 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
       const line = await ai.complete({ org: code, taskType: 'checkin_reflection', tier: 'reason', system: sys, user: `They wrote: "${text}".${mood ? ` Their mood: ${mood}/5.` : ''}\n\nRespond in their voice.`, maxTokens: 320 });
       // Self-facing (their own record, reflected back to them) — no redaction needed.
       if (line && line.trim()) acknowledgement = line.trim();
-    } catch (_) { /* keep the deterministic acknowledgement */ }
+      else _ciDegraded = _degraded('empty');
+    } catch (_) {
+      /* THE DETERMINISTIC ACKNOWLEDGEMENT IS KEPT, AND SAID TO BE ONE. This caught and fell
+         through to a stock sentence, so a person who had just told IntelliQ something difficult
+         received a warm-sounding line that nothing had actually read. Reported through
+         `COMPOSER_DEGRADED`, the vocabulary the product already owns for exactly this, so the
+         client's one degraded sentence appears here too without a second copy being written. */
+      _ciDegraded = _degraded(ai.enabled && !ai.enabled() ? 'no_model' : 'error');
+    }
   }
 
   return {
@@ -5801,6 +6094,7 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
     checkinId: _ciRec.id,
     mood, moodLabel: _ciRec.moodLabel,
     acknowledgement,
+    composer: _ciDegraded,
     noticed,
     understanding: agents.personModel.understanding(_getMemory(code, userId).model),
   };
@@ -5854,7 +6148,7 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const result = _createPersonalFocus(code, userId, {
     ...(req.body || {}), participantIds: (req.body || {}).participants,
-  });
+  }, { strictAudience: true });
   if (!result.ok) return res.status(result.status).json({ error: result.error });
   const named = result.audience.participantIds.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   const f = result.publicFocus;
@@ -5891,6 +6185,27 @@ app.get('/api/me/focus/:id/source', requireAuth, (req, res) => {
   const want = new Set(focus.source.messageIds || []);
   const all = conv.messages || [];
   const picked = all.filter(m => want.has(String(m.id || m.messageId || '')));
+
+  /* ── FOUR RECENT MESSAGES ARE NOT "THE CONVERSATION THIS CAME FROM" ────────────────────────
+     This fell back to `all.slice(-4)` whenever the pinned messages could not be found, and
+     returned them under the same note as a real answer — so a Focus whose origin had been
+     destroyed by the message cap showed four unrelated recent sentences as its provenance.
+     Driven at a95f006: pin a Focus to the first message of a 501-message thread, take eight more
+     turns, and that is exactly what came back. `exact: false` was the only signal, and no surface
+     is obliged to read it.
+
+     A message something points at is now protected from the cap (see `_compactConversation`), so
+     this should not arise again. It can still arise for a conversation already shortened on disk
+     before that existed, and for one the person edited themselves — and in that case the honest
+     answer is that the referenced part is gone, not a substitute for it. A Focus stands on its
+     own words either way; that is why `available` is separate from `exact`. */
+  if (!picked.length && want.size) {
+    return res.json({ ok: true, available: true, exact: false, focusId: focus.id,
+      conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
+      messages: [],
+      note: 'The part of the conversation this came from is no longer in your history, so there is nothing to show you here. The focus stands on its own.' });
+  }
+
   res.json({ ok: true, available: true, focusId: focus.id,
     conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
     // The referenced messages, read live from the person's own history. Nothing here was stored
@@ -5997,6 +6312,95 @@ app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
   res.json({ ok: true, visibility: result.focus.visibility,
     note: want === 'shared' ? 'Shared — leaders of your groups can see it now.' : 'Private again — only you.' });
 });
+
+/* POST /api/me/objects/:kind/:id/audience — CHOOSE WHO SEES IT, for all four kinds.
+
+   Before this, a Focus could be kept private, shared with whoever leads your groups, or opened to
+   named people — and a High, a Low and a personal Inquiry could be none of those. The one thing
+   the product most wants a member to do is volunteer what they have noticed about themselves, and
+   there was no way to say who should see it.
+
+   A FOCUS STILL GOES THROUGH ITS OWN OWNER. Its audience lives on the Focus record and
+   `_updatePersonalFocus` writes it; routing it through the store below would give one object two
+   audiences that could disagree. The other three are read models with no record to write on, so
+   the choice is held beside them, resolved by the same `_resolvePersonalAudience` and read by the
+   same `_forumAudience`.
+
+   The object must be one the caller can actually see, resolved through their own bucket on every
+   request — so this cannot be used to assert an audience over somebody else's object, or over one
+   that has since gone. */
+app.post('/api/me/objects/:kind/:id/audience', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || '');
+  const id   = String(req.params.id || '');
+  if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) {
+    return res.status(400).json({ error: 'that is not a kind of thing you can share' });
+  }
+
+  /* ── IT HAS TO BE YOURS, AND IT HAS TO STILL EXIST — ASKED BEFORE ANY KIND IS BRANCHED ON ───
+     `_allObjectsFor` is the same privacy-merged read every other surface resolves an object
+     through, so nothing here invents a second answer to "may this person see this". These two
+     refusals apply to all four kinds: the first draft asked them only after the Focus branch had
+     already delegated, so a member re-aiming their squad's Focus got "not found" — true from
+     inside `_updatePersonalFocus`, and the wrong reason. */
+  const found = (_allObjectsFor(code, userId) || [])
+    .find(o => o && o.kind === kind && String(o.id) === id);
+  if (!found) return res.status(404).json({ error: 'not found' });
+
+  const rawFound = found.raw || {};
+  if (found.whoseNodeId || rawFound.nodeId) {
+    return res.status(403).json({ error: 'This belongs to a group, so it is not yours alone to share.' });
+  }
+  /* SHARING IS ONE-WAY, AND ONLY THE OWNER DOES IT.
+     Driven while building this: once somebody shared a High with a teammate, the teammate could
+     open it — correctly — and then share it onward to a leader, because `_allObjectsFor` found it
+     for them and the object was theirs to see, 200. Being shown something is not being given it.
+     A person who tells one teammate something has not told their coach, and a product that lets
+     the second happen has made the first a lie. */
+  if (rawFound.invited === true
+      || (rawFound.ownerId != null && String(rawFound.ownerId) !== String(userId))) {
+    return res.status(403).json({
+      error: 'This was shared with you. Only the person whose it is can decide who else sees it.' });
+  }
+
+  /* A FOCUS KEEPS ITS OWN OWNER. Its audience lives on the Focus record and `_updatePersonalFocus`
+     writes it; putting it in the store below as well would give one object two audiences that
+     could disagree, which is the second-system failure this whole change exists to avoid. */
+  if (kind === 'focus') {
+    const result = _updatePersonalFocus(code, userId, id, {
+      ...(req.body || {}), participantIds: (req.body || {}).participants,
+    }, { strictAudience: true });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const named = (result.focus.participants || []).filter(p => String(p) !== String(userId));
+    return res.json({ ok: true, kind, id, visibility: result.focus.visibility,
+      participants: named, note: _audienceNote(code, result.focus.visibility, named) });
+  }
+
+  const audience = _resolvePersonalAudience(code, userId, {
+    ...(req.body || {}), participantIds: (req.body || {}).participants,
+  }, { strict: true });
+  if (!audience.ok) return res.status(audience.status).json({ error: audience.error });
+
+  const store = (objectAudiences[code] = objectAudiences[code] || {});
+  store[_audienceKey(userId, kind, id)] = { visibility: audience.visibility,
+    participantIds: audience.participantIds, at: Date.now() };
+  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: audience.visibility });
+  scheduleSave();
+  res.json({ ok: true, kind, id, visibility: audience.visibility,
+    participants: audience.participantIds,
+    note: _audienceNote(code, audience.visibility, audience.participantIds) });
+});
+
+/* ONE SENTENCE SAYING WHAT WAS JUST DECIDED, because "visibility: invited" is not an answer to
+   "who can see this now". Named people are named; a person is entitled to know exactly who. */
+function _audienceNote(code, visibility, participantIds) {
+  const named = (participantIds || []).map(id => ((orgUsers[code] || {})[id] || {}).name).filter(Boolean);
+  if (visibility === 'invited' && named.length) {
+    return `Shared with ${named.join(', ')}. Only they can see it, and you can take it back at any time.`;
+  }
+  if (visibility === 'shared') return 'Whoever leads a group you are in can see this now. Your squad cannot.';
+  return 'Private — only you can see it. You can share it later; nobody else can.';
+}
 
 /* POST /api/me/focus/outcome — close the loop: report how an approved focus went.
    Observe outcome → LEARN. Resolves the focus and teaches the Confidence Engine
@@ -7246,10 +7650,119 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    stdout, which the person holding the phone cannot read. Switches only: no org data, no
    counts, no refusal text (a grounding violation quotes what the model invented, which can
    name a person). The per-org tally lives behind auth on /api/admin/metrics. */
+/* ── BUILD IDENTITY ────────────────────────────────────────────────────────────────────────────
+   The first live-recovery pass ended by saying it could not rule out stale assets as an
+   explanation for what the founder saw on their phone, because nothing in the product could
+   answer "which build am I looking at?". This is that answer.
+
+   Four separate facts, because they fail separately and conflating them is how "it's deployed"
+   became a thing people believed rather than checked:
+
+     commit     which source this process was built from. Read from the platform's own env
+                (Render sets RENDER_GIT_COMMIT) or from git at boot; 'unknown' when neither is
+                available, which is honest and is NOT the same as claiming a match.
+     startedAt  when THIS process began. A restart moves it; a redeploy moves it. It is how you
+                tell "the service restarted" from "the service is the one I left running".
+     startId    a value minted once per process, so two answers from the same process are
+                provably the same process even if the clock is coarse.
+     assetStamp the cache stamp index.html is serving RIGHT NOW, read from disk at boot. This is
+                the server's view of which client it is handing out; the browser reports the one
+                it actually loaded, and the two being different is exactly the stale-asset case.
+
+   No secrets: a commit hash, a timestamp, a random id and a cache stamp. */
+let _FULL_COMMIT = 'unknown';
+const BUILD = (() => {
+  let commit = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT
+    || process.env.SOURCE_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || '';
+  if (!commit) {
+    try {
+      commit = require('child_process')
+        .execFileSync('git', ['rev-parse', 'HEAD'], { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString().trim();
+    } catch (_) { commit = ''; }
+  }
+  let assetStamp = '';
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+    const m = html.match(/(?:src|href)="(?:js|css)\/[A-Za-z0-9_.-]+\.(?:js|css)\?v=([A-Za-z0-9]+)"/);
+    assetStamp = (m && m[1]) || '';
+  } catch (_) { assetStamp = ''; }
+  _FULL_COMMIT = commit || 'unknown';
+  return {
+    /* PUBLIC IDENTITY IS THE SHORT HASH. The full 40-character SHA was in this payload until
+       `endpoint-smoke` caught it: a long opaque alphanumeric string is exactly the shape of a
+       leaked key, and the guard that says so is worth more than the convenience. Seven characters
+       is what a person compares against a PR head by eye anyway. The full SHA is still available,
+       behind the superadmin persistence diagnostic, to anybody who needs to be exact. */
+    commit: commit ? commit.slice(0, 7) : 'unknown',
+    commitShort: commit ? commit.slice(0, 7) : 'unknown',
+    commitFull: undefined,
+    startedAt: new Date().toISOString(),
+    startId: Math.random().toString(36).slice(2, 10),
+    assetStamp: assetStamp || 'unknown',
+  };
+})();
+
+/* READINESS IS NOT ONE FLAG. The brief is explicit: do not report the product ready before the
+   required stores are loaded. These are separate questions with separate answers, and a caller
+   that wants one must not be handed another. */
+function _readiness() {
+  const storesLoaded = !!(orgMeta && Object.keys(orgMeta).length >= 0 && _storesLoadedAt);
+  /* IS THERE A DURABLE STORE AT ALL? A different question from whether writing to it is safe,
+     and the difference is the one that gets misread: a host with no DATABASE_URL is running
+     entirely in memory, so everything works, nothing is wrong, and NOTHING SURVIVES A RESTART.
+     A host that has a database whose authoritative load failed is a different situation with a
+     different remedy, and reporting both as "not durable" tells an operator neither.
+
+     DB_OPTIONAL is the in-memory mode db.js runs the truth layer in; it is deliberately counted
+     as "no durable store configured" rather than as a database, because that is what it is. */
+  const configured = !!process.env.DATABASE_URL && process.env.DB_OPTIONAL !== '1';
+  /* AND DURABLE MEANS DURABLE. `_persistenceReady.ready` is the SAVE PATH's question — may this
+     process attempt a write — and it is deliberately true in memory-only mode, because in that
+     mode a write into memory is the correct behaviour rather than a failure. Reporting that as
+     `durableStore: true` told a reader that writes survive a restart on a host where nothing
+     does, which is the exact conflation this block exists to prevent, one level down from the
+     one the founder named. A store that is not configured is not durable however willingly this
+     process writes to it. */
+  const durable = configured && !!(_persistenceReady && _persistenceReady.ready);
+  return {
+    process: true,                                   // if this reply exists, the process is alive
+    storesLoaded,
+    storesLoadedAt: _storesLoadedAt || null,
+    /* THE FIVE LEVELS, EACH ANSWERED BY THE THING THAT KNOWS, and deliberately not collapsed:
+         process               this reply exists
+         storesLoaded          the state a request reads is in memory
+         persistenceConfigured a durable store exists to write to
+         durableStore          writing to it right now is safe
+       Level 4 (a model is reachable) and level 5 (which build is deployed) are answered in
+       /api/health's `composer` and `build` blocks, by the gateway and the build stamp
+       respectively, because a readiness probe is not the right owner for either. */
+    persistenceConfigured: configured,
+    durableStore: durable,
+    durableReason: (_persistenceReady && _persistenceReady.error)
+      || (!durable && !configured ? 'no durable store is configured — this instance is in memory only' : null),
+    persistenceMode: PERSISTENCE_MODE,
+    /* WHAT A CLIENT MAY ACT ON, and it is stores-loaded ON PURPOSE: a request can be served
+       correctly from memory, and refusing to serve until a database answers would make a
+       degraded instance look like a dead one. It is NOT a statement that anything will survive
+       a restart, which is what `durableStore` is for, and no caller may read it as one —
+       readiness-levels-smoke drives every combination to keep the two apart. */
+    ready: storesLoaded,
+  };
+}
+
 app.get('/api/health', (req, res) => {
+  /* THE ORDER IS THE ARGUMENT. Each branch is only askable once the one above it is settled:
+     a host flag that is off makes the key irrelevant, no-egress makes a configured key
+     irrelevant, and whether the provider ANSWERED is only a question once a key exists and is
+     allowed to be used. The last branch is the only one that reports something observed rather
+     than something configured — see ai/gateway.js providerFault(). */
+  const providerFault = ai.providerFault();
+  const _reach = ai.providerReachability();
   const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
     : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
     : !ai.enabled() ? 'no language-model key is configured'
+    : providerFault ? providerFault.reason
     : null;
   res.json({
     ok: true,
@@ -7263,14 +7776,48 @@ app.get('/api/health', (req, res) => {
     reasoning: ai.enabled()
       ? 'connected — replies are grounded and reasoned'
       : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
+    /* ── THE COMPOSER HAS TWO SWITCHES AND THEY CAN DISAGREE ──────────────────────────────────
+       `on` is the host flag alone, so with IQ_COMPOSER=1 and no model key it said ON while
+       `writes` said off in the same payload. A reader had to notice the contradiction and resolve
+       it themselves; the Settings panel did not, and reported the composer as active on a host
+       where every reply came from the deterministic templates.
+
+       `effective` is the answer to the question anybody is actually asking — is the model writing
+       these replies — and it is the AND of every switch that has to be true. `why` is the reason
+       when it is not, as a field rather than a sentence the client has to parse out of `writes`.
+       The client used to read `composer.why`, which DID NOT EXIST, so it always fell back to
+       "no language-model key is configured" even when the real reason was deterministic-only mode
+       or a host flag. */
     composer: {
       on: IQ_COMPOSER,
+      effective: !!IQ_COMPOSER && !composerOff,
+      why: composerOff,
       deterministicOnly: ai.deterministicOnly(),
+      providerKey: !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
+      /* Configured is not reachable, and UNTRIED is not reachable either — which is what this
+         used to say. `providerReachable: !providerFault` turned "no failure recorded" into a
+         claim, so a host with no key, where no completion is ever attempted, reported the
+         provider as reachable with no observation anywhere behind it.
+
+         Three states now, each an observation or the honest absence of one:
+           null   nothing has been asked of a provider since this process started
+           true   a completion SUCCEEDED, and `providerLastSeenAt` says when
+           false  a completion exhausted every retry and both providers, at `providerFaultAt`
+         `providerReachability` carries the same answer as a word, because a tri-state boolean is
+         a shape a reader gets wrong and a word is one they cannot. `providerFaultAt` is still a
+         timestamp and never an error body — nothing the provider said is copied into an
+         unauthenticated route. */
+      providerReachable: _reach.state === 'unknown' ? null : _reach.state === 'reachable',
+      providerReachability: _reach.state,
+      providerLastSeenAt: _reach.state === 'reachable' ? _reach.at : null,
+      providerFaultAt: providerFault ? providerFault.at : null,
       writes: composerOff
         ? `off — ${composerOff}; every reply is written by the deterministic templates`
         : 'on — the model writes the reply and the deterministic core grounds it',
     },
     time: new Date().toISOString(),
+    build: BUILD,
+    readiness: _readiness(),
   });
 });
 
@@ -7282,7 +7829,7 @@ app.get('/api/health', (req, res) => {
    transfer allowance. This one is 31 KB and builds only objects that still exist.
 
    Superadmin-gated. Re-running replaces the demo org's data and never touches another org. */
-app.post('/api/admin/seed-alma', requirePermission('manage_settings'), async (req, res) => {
+app.post('/api/admin/seed-alma', requirePlatformOperator('Replacing the demo organisation'), async (req, res) => {
   try {
     const { buildAlmaStore, ALMA_CODE } = require('./scripts/seed-alma.js');
     const { store, summary } = await buildAlmaStore();
@@ -7300,7 +7847,7 @@ app.post('/api/admin/seed-alma', requirePermission('manage_settings'), async (re
   }
 });
 
-app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async (req, res) => {
+app.post('/api/admin/llm-selftest', requirePlatformOperator('The language-model self-test'), async (req, res) => {
   const status = {
     enabled:   ai.enabled(),
     deterministicOnly: ai.deterministicOnly(),
@@ -7341,7 +7888,7 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
 /* POST /api/admin/llm-mode — flip the whole instance to deterministic-only (no-egress) or
    back, at runtime, without a redeploy. The env guarantee (IQ_DETERMINISTIC_ONLY) always
    wins — if it's set, this cannot re-enable the model. Superadmin/settings only. */
-app.post('/api/admin/llm-mode', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/admin/llm-mode', requirePlatformOperator('Deterministic-only mode for this whole instance'), (req, res) => {
   const want = !!(req.body && req.body.deterministicOnly);
   const now = ai.setDeterministicOnly(want);
   res.json({ ok: true, deterministicOnly: now, enabled: ai.enabled(),
@@ -8723,6 +9270,36 @@ function _completeFocusAction(code, focus, outcome, actorId) {
    both call these functions. Proposal-time audience resolution deliberately calls the
    same resolver again; confirmation re-resolves it so a stale membership snapshot is
    authority for nothing. */
+/* ── WHO CAN SEE THE THING YOU MADE ───────────────────────────────────────────────────────────
+   A person's own objects come in four kinds and, before this, exactly ONE of them could be
+   shared. A Focus had `private | shared | invited`, a route to widen or narrow it afterwards,
+   and a Forum once two people were in it. A High, a Low and a personal Inquiry had nothing:
+   `_forumAudience` answered "this one is just you" for every one of them and no visibility route
+   existed, so somebody who wanted their coach to see what they had noticed about themselves —
+   the single most valuable thing a member can volunteer — had no way to say so.
+
+   THIS IS ONE STORE AND THE EXISTING RESOLVER, NOT A SECOND AUDIENCE SYSTEM. A Focus keeps its
+   audience on the Focus record, where it already lives and where `_updatePersonalFocus` owns it;
+   the other three kinds are read models with no record to write on, so their choice is held here,
+   keyed by the object's own stable id. Both are resolved by `_resolvePersonalAudience` and read
+   by `_forumAudience`, so there is one definition of what an audience is and one of who may read.
+
+   A HIGH'S ID IS STABLE, which is what makes this possible and was worth checking rather than
+   assuming: ai/proactive.js mints `'pi_' + _hash(dedupeKey)`, the same value in a fresh process,
+   so a choice made today still points at the same object tomorrow. */
+const objectAudiences = {};   // code → `${userId}|${kind}:${objectId}` → { visibility, participantIds, at }
+const _audienceKey = (userId, kind, id) => `${userId}|${kind}:${id}`;
+
+/* THE ONE READER. Absent means private, which is the safe default and the one a person who has
+   never touched this gets. */
+function _objectAudience(code, userId, kind, id) {
+  const rec = (objectAudiences[code] || {})[_audienceKey(userId, kind, id)];
+  if (!rec) return { visibility: 'private', participantIds: [], at: null };
+  return { visibility: rec.visibility || 'private',
+    participantIds: Array.isArray(rec.participantIds) ? rec.participantIds.map(String) : [],
+    at: rec.at || null };
+}
+
 function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = false, expectedParticipantIds = null } = {}) {
   const contacts = new Set(_contactsFor(code, userId).map(c => String(c.id)));
   const groupId = String(input.groupId || '');
@@ -8749,6 +9326,13 @@ function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = fals
     rejected: rejected.length };
 }
 
+/* THE SAME RESOLVER, UNDER THE NAME THE OTHER THREE KINDS CALL IT BY. Nothing in it was ever
+   about focuses: it reads contacts, an optional group roster, a requested participant list and a
+   requested visibility, and answers who the audience is. The alias exists so the audience route
+   for a High does not have to call something named for a Focus, and so there is visibly one
+   function rather than two that agree today. */
+const _resolvePersonalAudience = _resolvePersonalFocusAudience;
+
 function _personalFocusSource(code, userId, input = {}) {
   const convId = String(input.sourceConversationId || input.conversationId || '').slice(0, 80);
   if (!convId) return null;
@@ -8765,6 +9349,36 @@ function _personalFocusAddress(code, userId, input = {}) {
   if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
   return _allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)
     ? { kind, id, at: Date.now() } : null;
+}
+
+/* THE ONE WRITER OF A PERSONAL FOCUS OUTCOME RECORD. Written as a named constructor rather than
+   an object literal at the assignment: `focus.outcome = { … }` is the TEAM grain's line, owned by
+   ai/team-state.js `recordFocusOutcome`, and stack-ownership-smoke counts that literal precisely
+   so the server can never start writing a team focus outcome itself. The two grains share a
+   shape; they do not share a writer, and the source should say which one this is.
+
+   The RESULT VOCABULARY IS THE PERSONAL ONE and is deliberately not converged: a person answers
+   helped / no / mixed about their own commitment, while a group records better / no_change /
+   worse / unclear about a change it tried. Those are different questions and collapsing them
+   would lose the distinction to make two enums match. */
+function _focusOutcomeRecord(result, byUserId, now = Date.now()) {
+  return { result: String(result || ''), note: '', recordedBy: byUserId || null, at: now };
+}
+
+/* THE ONE READER OF A FOCUS OUTCOME, whichever shape it is on disk in. A bare string is what
+   personal focuses were stored as before the constructor above was corrected; it carries the
+   result and nothing else, so the missing fields are reported as missing rather than invented. */
+function _focusOutcome(focus) {
+  const o = focus && focus.outcome;
+  if (!o) return null;
+  if (typeof o === 'string') {
+    return { result: o, note: '', recordedBy: null,
+      at: Date.parse(String(focus.resolvedAt || '')) || null, legacy: true };
+  }
+  if (typeof o !== 'object') return null;
+  return { result: String(o.result || ''), note: String(o.note || ''),
+    recordedBy: o.recordedBy || null,
+    at: Number.isFinite(Number(o.at)) ? Number(o.at) : (Date.parse(String(o.at || '')) || null) };
 }
 
 function _publicPersonalFocus(focus, userId) {
@@ -8790,6 +9404,12 @@ function _createPersonalFocus(code, userId, input = {}, opts = {}) {
   const existing = (mem.focuses || []).find(f => f && f.status === 'active' && f.text === text
     && (!input.kind || f.kind === input.kind));
   if (existing) {
+    // A retry with identical wording cannot report success for a different audience.
+    if (existing.visibility !== audience.visibility ||
+        JSON.stringify([...(existing.participants || [userId])].map(String).sort()) !==
+        JSON.stringify([...audience.participants].map(String).sort())) {
+      return { ok: false, status: 409, error: 'This Focus is already open for a different audience. Open it to change who can see it.' };
+    }
     if (source && !existing.source) existing.source = source;
     mem.lastUpdated = new Date().toISOString(); scheduleSave();
     return { ok: true, already: true, focus: existing, publicFocus: _publicPersonalFocus(existing, userId), audience };
@@ -9016,7 +9636,21 @@ function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
   const mem = _getMemory(code, userId);
   const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
   if (!focus) return { ok: false, status: 404, error: 'focus not found' };
-  focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString();
+  /* ONE FOCUS, ONE OUTCOME SHAPE. A group Focus records `{ result, note, recordedBy, at }` —
+     ai/team-state.js `recordFocusOutcome` is the owner — and a personal one stored the bare
+     string `'helped'`. Every reader in the product was written against the object, so the
+     divergence was silent and total. The clearest casualty is `_proactiveInsights`, which asks
+     `if (f.outcome && f.outcome.result && ...)` over THESE focuses and has therefore never once
+     fired: the person who did the rarest and most valuable thing in the product — recording how
+     their own commitment actually went — was never told it worked. Driven at 0e09556: record an
+     outcome of `helped`, then read Home and insights, and the recognition is absent.
+
+     The canonical shape is written here now. `_focusOutcome` reads either, because focuses
+     closed before this change are already on disk as strings and rewriting somebody's stored
+     record to fix a reader is a worse trade than reading honestly. */
+  focus.status = 'done';
+  focus.outcome = _focusOutcomeRecord(outcome, userId);
+  focus.resolvedAt = new Date().toISOString();
   _completeFocusAction(code, focus, outcome, userId);
   if (focus.type && outcome !== 'mixed') {
     try { _recordNoticeFeedback(code, focus.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
@@ -10454,6 +11088,22 @@ async function _governedReason(code, userId, question, { register, priorMessages
    OWN card, echoed back by their own client — the same trust level as anything they type — so it
    is hard-capped and treated as untrusted content inside the context block, never as instruction.
    The grounding cage still verifies whatever the model writes on top of it. */
+/* AN OBJECT REF, SPLIT. `kind:id` in, `{kind, id}` out, through the one validator that decides
+   what a ref may look like — so a caller cannot reach an object by inventing a spelling.
+
+   THIS EXISTS BECAUSE TWO READERS WERE PARSING THE WRONG SHAPE. `_turnAbout` below turns a bound
+   object into the HEADLINE AND BODY a prompt reads; it has never returned a kind or an id.
+   `_crossEvidenceContext` and `_forumContext` both called it and then read `a.kind`, which is
+   undefined on every call — so both returned null every time, and the composer's connections
+   bundle and the Forum-informs-this-object rule were silently not happening at all. Neither
+   failed; both looked exactly like "there was nothing to add". */
+function _splitAboutRef(v) {
+  const ref = _aboutRef(v);
+  if (!ref) return null;
+  const i = ref.indexOf(':');
+  return { kind: ref.slice(0, i), id: ref.slice(i + 1) };
+}
+
 function _turnAbout(about) {
   if (!about || typeof about !== 'object') return null;
   const h = String(about.headline || '').slice(0, 200).trim();
@@ -10475,7 +11125,52 @@ function _turnAbout(about) {
 function _historyMessage(m = {}) {
   return { id: m.id || null, role: m.role, text: m.text, at: m.at,
     reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [],
-    sources: m.sources || [], rating: m.rating || null };
+    speech: m.speech || '', sources: m.sources || [], rating: m.rating || null };
+}
+
+/* ── WHAT IS SPOKEN — THE VOICE CHANNEL'S ONE OWNER ─────────────────────────────────────────
+   Reading a reply aloud used to be assembled in the browser out of whatever the action row
+   happened to be holding. That is a second author for the same answer, on the one channel
+   nothing verified, and it is the channel where drift costs most: a spoken sentence carries more
+   confidence than a written one, and the qualification is the first thing an assembler drops.
+
+   So the spoken rendering is composed HERE, once, beside the prose it belongs to, and travels
+   with the reply. The browser reads it out and composes nothing.
+
+   THE ORDER IS THE POINT. The answer, then what it cannot show, then what it rests on — because
+   a listener cannot skim back, and a caveat that arrives after the listener has stopped
+   listening was not said. Nothing is invented: with no sources the count is not claimed, and
+   every limitation is one the manifest already carries. */
+function _speechFor({ text = '', sourceCount = 0, limitations = [] } = {}) {
+  const body = String(text || '').trim();
+  if (!body) return '';
+  const parts = [body];
+  /* EVERY LIMITATION, NOT THE FIRST THREE. This clipped at three, silently, and an independent
+     gate was right to ask what happens to the fourth.
+
+     Two things are wrong with a silent clip here, and the second is the one that bites. The
+     obvious one: a listener cannot see the caveats sitting under the answer, so the spoken
+     rendering is the only place they exist — dropping one tells the listener less than the reader
+     was told, which is the exact inversion of why this function exists.
+
+     The one that would have arrived as an unexplained refusal: ai/manifest.js L-MF5's sibling law
+     requires EVERY limitation on the manifest to survive into the voice channel and pushes
+     `voice_dropped_limitation` otherwise. So a fourth limitation would not have been quietly
+     dropped on the composed path — it would have REFUSED the whole turn, and the reader would
+     have got a degraded answer with nothing anywhere saying why. The clip and the gate were two
+     rules about one thing, disagreeing.
+
+     Today's producers top out at three (ai/reasoning-register.js contributes at most three), so
+     this has never fired in front of anybody. That is a fact about the current callers, not a
+     property of the function, and it is exactly the kind of margin that disappears the next time
+     somebody adds a caveat. */
+  for (const l of (Array.isArray(limitations) ? limitations : [])) {
+    const s = String(l || '').trim();
+    if (s) parts.push(/[.!?]$/.test(s) ? s : `${s}.`);
+  }
+  const n = Number(sourceCount) || 0;
+  if (n > 0) parts.push(`This rests on ${n} source${n === 1 ? '' : 's'}, shown under the reply.`);
+  return parts.join(' ');
 }
 
 const SOURCE_CAP = 6;
@@ -10553,11 +11248,14 @@ function _attentionContext(code, userId) {
   } catch (_) { return null; }
 }
 
-function _crossEvidenceContext(code, userId, about) {
+function _crossEvidenceContext(code, userId, aboutRef) {
   try {
-    const a = _turnAbout(about);
-    if (!a || !a.kind || !a.id) return null;
-    const authorised = _allObjectsFor(code, userId);
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
+    /* The SAME authorised set, with each object's own evidence joined back on — see
+       `_objectsWithEvidenceFor`. It adds no object; it only stops a group projection from
+       reporting "nothing has happened" when what it means is "I cannot see what happened". */
+    const authorised = _objectsWithEvidenceFor(code, userId);
     const self = authorised.find(o => o.kind === a.kind && String(o.id) === String(a.id));
     if (!self) return null;
     const target = crossEvidence.refOf(self);
@@ -10569,13 +11267,107 @@ function _crossEvidenceContext(code, userId, about) {
     });
     const loop = self.kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
     if (!related.length && !loop) return null;
+    let groupPostWithheld = false;
+    if (loop && loop.addresses && self.raw && self.raw.nodeId) {
+      const nodeId = self.raw.nodeId;
+      const addressed = byRef.get(loop.addresses);
+      if (addressed && addressed.kind === 'inquiry' && addressed.whoseNodeId === nodeId) {
+        const canonical = Object.values((inquiryStates[code] || {})[`group:${nodeId}`] || {})
+          .find(i => i && String(i.inquiryId) === String(addressed.id));
+        const active = ((canonical && canonical.signals) || [])
+          .filter(x => x && x.kind !== 'interpretation' && diagnose.isActive(x));
+        const atRaw = self.raw.outcome && self.raw.outcome.at;
+        const since = Number(atRaw) || Date.parse(String(atRaw || ''));
+        const post = Number.isFinite(since) && since > 0 ? active.filter(x => Number(x.at) > since) : [];
+        const n = _nodeMembers(code, nodeId).length;
+        const allPeople = new Set(active.map(x => x.contributedBy).filter(Boolean)).size;
+        const postPeople = new Set(post.map(x => x.contributedBy).filter(Boolean)).size;
+        groupPostWithheld = !teamState.cohortFloor(allPeople, n).ok
+          || !teamState.cohortFloor(postPeople, n).ok;
+      }
+    }
+    const safeOpen = loop ? loop.open.filter(x => !groupPostWithheld
+      || x !== 'nothing has been recorded on it since the outcome') : [];
+    if (groupPostWithheld) safeOpen.push('post-outcome evidence cannot yet be described at this group level');
     return { related, loop: loop ? { addresses: loop.addresses, outcome: loop.outcome,
-      observedSince: loop.observedSince ? loop.observedSince.records : null,
-      sharedOrigins: loop.sharedOrigins.length, open: loop.open } : null };
+      observedSince: !groupPostWithheld && loop.observedSince ? loop.observedSince.records : null,
+      sharedOrigins: loop.sharedOrigins.length, open: safeOpen } : null };
   } catch (_) { return null; }
 }
 
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
+/* ── THE FORUM FOR THE THING THEY ARE LOOKING AT, AND NOTHING ELSE ────────────────────────────
+   FOUNDER DECISION, September 2026: Forum content may inform private conversation FOR THAT SAME
+   OBJECT ONLY. Private conversation never enters a Forum without a separate explicit
+   share-and-confirm, which is a different act with its own route and its own preview.
+
+   THE DIRECTION IS THE DESIGN. This is a READ of a room the person can already open by tapping
+   the icon at the top of the same screen, so it discloses nothing they could not already see; it
+   saves them going to look. Nothing is written, nothing is shared, and no message leaves the room
+   it was said in.
+
+   SAME OBJECT IS STRUCTURAL, NOT A PROMISE. The room is resolved from `about` -- the object whose
+   thread this turn is in -- through _forumAudience, the same owner the icon asks. There is no
+   parameter for a different object, so a turn about focus A cannot be handed focus B's room even
+   by a caller that wanted to. And access is re-checked here rather than inherited from the fact
+   that a thread exists: a person removed from the room this morning gets nothing this afternoon.
+
+   BOUNDED. The last few messages, clipped. A model handed a whole room will summarise the room,
+   and a summary of a room is the thing that starts sounding like a finding.
+
+   NOT EVIDENCE, AND THE BUNDLE SAYS SO. ai/composer.js prints the rule in the same block as the
+   data, because a model handed six agreeing messages will otherwise write "the group agrees". */
+function _forumContext(code, userId, aboutRef) {
+  try {
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
+    const object = _allObjectsFor(code, userId).find(o => o.kind === a.kind && String(o.id) === String(a.id));
+    if (!object) return null;                       // not theirs to read: no room, no context
+    const aud = _forumAudience(code, userId, object);
+    if (!aud.available) return null;
+    // Membership of the room, re-checked now. Availability says a room exists; this says they
+    // are in it. A leader who may read the group's state is in the node room by _mayReadGroup.
+    const inRoom = aud.forumKind === 'group'
+      ? _mayReadGroup(code, aud.key, userId)
+      : aud.members.includes(userId);
+    if (!inRoom) return null;
+    /* THE KEY FORMATS ARE THE ONES THE WRITERS ACTUALLY USE, not a third spelling invented here.
+       A node room is keyed by the inquiry's own id (_forumThread), and a group High or Low IS a
+       projection of that inquiry, so its object id is the same id. A focus room is keyed
+       `focus:<objectId>` (_forumRoom). Guessing a composite key would have read nothing and
+       returned "no forum" for every room that exists, which is the quietest possible failure. */
+    /* KEYED ON THE OBJECT'S KIND, NOT ON THE AUDIENCE'S. This branch used to read
+       `aud.forumKind === 'group'`, which is a fact about WHO IS IN THE ROOM rather than about
+       WHERE THE ROOM IS WRITTEN — and those two come apart on the commonest Focus in the
+       product. A squad's focus carries a nodeId, so _forumAudience resolves its room as a node
+       room and reports forumKind 'group'; but its thread is written by _forumRoom at
+       `focus:<id>`, because that is the writer a focus room has. So the read looked at
+       `tf_...`, found nothing, and returned "no forum" for a room that existed and that the
+       person could open by tapping the icon on the same screen. The founder's rule — Forum
+       content may inform private conversation FOR THAT SAME OBJECT — was silently not
+       happening for every group Focus. Reproduced by posting into the room and reading the
+       context back, not argued from the code. */
+    const key = a.kind === 'focus' ? `focus:${a.id}` : String(a.id);
+    const thread = (forumThreads[code] || {})[key];
+    if (!thread) return null;
+    const visible = forum.visibleThread(thread, { viewerId: userId });
+    const messages = (visible.messages || [])
+      .filter(m => m && m.status !== 'removed' && m.text)      // a withdrawal is not speech
+      .slice(-6)
+      .map(m => ({ text: String(m.text).slice(0, 400) }));     // text only — never an author
+    if (!messages.length) return null;
+    return { people: aud.readable, messages, sameObject: `${a.kind}:${a.id}` };
+  } catch (_) { return null; }
+}
+
+/* EVERY FIGURE A PIECE OF APPROVED TEXT ACTUALLY CONTAINS, so a claim may restate its own
+   numbers. A belief that says "two independent origins" must be allowed to be repeated; what the
+   manifest refuses is a figure that appears in NO approved claim. Digits only here, because this
+   reads material the kernel wrote rather than prose a model wrote. */
+function _figuresIn(text) {
+  return [...new Set((String(text || '').match(/\b\d{1,4}\b/g) || []).map(Number))];
+}
+
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, aboutRef = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
   // which is indistinguishable from a composer that ran and wrote something dull. Each exit
@@ -10702,7 +11494,11 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          things this person could already open, and nothing else. Refs and labels only: the
          statements stay where they live, and the model is told plainly that a connection is not
          corroboration so it cannot narrate two linked records as two confirmations. */
-      connections: _crossEvidenceContext(code, userId, about),
+      connections: _crossEvidenceContext(code, userId, aboutRef),
+      /* WHAT THIS OBJECT'S PEOPLE HAVE BEEN SAYING. One way, same object only, never evidence —
+         see _forumContext. The bundle carries the rule beside the data rather than trusting a
+         prompt to remember it. */
+      forum: _forumContext(code, userId, aboutRef),
       /* WHAT DESERVES ATTENTION, decided deterministically before the model sees it.
 
          The model is handed reason CODES and labels for objects this person could already open,
@@ -10726,6 +11522,93 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+
+    /* ── THE OUTPUT MANIFEST (L-MF1) ────────────────────────────────────────────────────────
+       ONE RECORD OF WHAT MAY BE SAID, built from the SAME authorised material the model was
+       handed, and checked by every channel that says it.
+
+       The cage (`verifyGrounding`) stays, and runs SECOND: it is the older, looser check against
+       the context blob, and it catches things a manifest cannot — a quoted title, or a name that
+       appears nowhere in the bundle at all. The manifest runs first because its refusals are the
+       more precise ones, so a reply that fails both is logged with the reason that will actually
+       help. Order affects only which violation is recorded; a reply has to satisfy BOTH, and
+       either one refusing degrades the turn. What the cage could NOT do is the founder's
+       requirement, that
+       the verifier "reject unsupported organisation-specific numbers, dates, names, results and
+       claims" without relying only on keyword checks. Asking "is this number anywhere in four
+       thousand words of context" is a keyword check, and almost every small number is somewhere
+       in a bundle that contains timestamps and ids.
+
+       So the manifest lists the particulars each claim is ALLOWED to state, which is a far smaller
+       and far more exact set. Both run. Two gates with different failure modes catch more than
+       either, and neither is load-bearing alone. */
+    /* THE CITATION CHANNEL IS BUILT FIRST, because the answer is allowed to say how many sources
+       it rests on and that figure has to be an APPROVED figure like any other. Building the list
+       after the manifest is how "this rests on five sources" became a number nobody had checked. */
+    const _sources = _sourceList([
+      ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
+      ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
+      ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
+    ], written);
+    /* WHAT THIS ANSWER CANNOT SHOW. One account is a starting point, not a finding, and the
+       listener is the one who most needs telling — see L-MF5. Stated on the manifest so every
+       channel is measured against it rather than each deciding whether to mention it. */
+    const _limits = (evidence.length + beliefs.length === 1)
+      ? ['This rests on a single account so far, so it is a starting point rather than a finding.']
+      : [];
+    const _mf = manifest.manifest({
+      subject: `member:${userId}`,
+      at: now,
+      privacyScope: 'you alone unless you share it',
+      limitations: _limits,
+      claims: [
+        // What the kernel already believes, with the counts it is entitled to state.
+        ...beliefs.slice(0, 8).map((b, i) => manifest.claim({
+          id: `belief_${i}`, text: String(b.text || ''), stance: 'inferred',
+          basis: [b.ref].filter(Boolean),
+          numbers: _figuresIn(String(b.text || '')),
+        })),
+        // What the person actually told us. Recorded, and the strongest stance there is.
+        ...evidence.slice(0, 12).map((e, i) => manifest.claim({
+          id: `record_${i}`, text: String(e.text || ''), stance: 'recorded',
+          basis: [e.ref].filter(Boolean),
+          numbers: _figuresIn(String(e.text || '')),
+          names: [String(e.source || '')].filter(Boolean),
+        })),
+        ...assignedWork.slice(0, 8).map((w, i) => manifest.claim({
+          id: `work_${i}`, text: String(w.title || ''), stance: 'recorded',
+          numbers: _figuresIn(String(w.title || '')),
+        })),
+        /* THE READER THEMSELVES, and the count of what this rests on. Without these two the
+           manifest would refuse an honest reply that says the person's own name or states how
+           many records it read — both of which are true, approved, and the point. */
+        manifest.claim({ id: 'reader', text: String(u.name || ''), stance: 'recorded',
+          names: [String(u.name || '')].filter(Boolean),
+          numbers: [beliefs.length, evidence.length, assignedWork.length, _sources.length].filter(n => n > 0) }),
+      ],
+    });
+
+    /* ── EVERY DOOR THIS ANSWER LEAVES BY, CHECKED IN ONE PLACE (L-MF8) ─────────────────────
+       The prose, the sources under it, and the words the speaker will read. One manifest, one
+       call, and a refusal in any channel degrades the whole turn — because a caller handed "the
+       prose was fine" ships the prose, and the person then hears a different answer than they
+       read.
+
+       WHAT IS SPOKEN IS BUILT HERE, ON THE SERVER, and travels with the reply. It used to be
+       assembled in the browser from whatever the row happened to hold, which is a second author
+       for the same answer and the one channel nothing verified. */
+    const _speech = _speechFor({ text: written, sourceCount: _sources.length, limitations: _limits });
+    const _approved = manifest.approve(_mf, {
+      prose: { value: written, claims: manifest.claimsIn(written, _mf) },
+      voice: { value: _speech, claims: manifest.claimsIn(_speech, _mf) },
+      citations: { value: _sources.filter(s => s && s.url) },
+    }, { roster });
+    if (!_approved.ok) {
+      console.log(`[composer] manifest refused — ${_approved.violations.map(v => `${v.kind}:${v.value ?? v.claim ?? ''}`).join('; ')}`);
+      _metric(code, 'composer_refused');
+      return _degraded('unverified');
+    }
+
     const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
     if (!check.ok) {
       // The violations are the interesting part: they say WHAT the model invented, which is the
@@ -10749,11 +11632,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // showing them back to that same reader discloses nothing they were not just told. It is a
     // display of the basis, not a second read.
     return { answer: written, grounded: beliefs.length + evidence.length > 0,
-      sources: _sourceList([
-        ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
-        ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
-        ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
-      ], written) };
+      sources: _sources, speech: _speech, limitations: _limits };
   } catch (e) {
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
@@ -11040,7 +11919,14 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
          The evidence stays exactly where it is, private to them; what is recorded is a private
          suggestion they may later act on. Membership noticed something; membership published
          nothing. */
-      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || concept); }
+      /* THE LABEL IS THE WORDS A PERSON READS ON THE CARD, so it goes through the one owner that
+         turns a canonical key into language. Found by driving the real path in a browser rather
+         than seeding a candidate: the intake contract never asks a model for a `label`, so this
+         was ALWAYS `props[0].label || concept` — the raw concept key — and the member's own way
+         into the group loop offered them "football.press_shape" to contribute. The seeded
+         fixture that used to stand in for this carried a human sentence, which is exactly how a
+         browser check can be green about a screen nobody could use. */
+      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || present.humanTopic({ canonicalConcept: concept })); }
       catch (e) { console.warn('[group] candidate detection skipped:', e && e.message); }
       // An unknown naming a live concept goes only there. One that names nothing, or names a
       // concept that just folded away, goes to the primary — never to everybody.
@@ -12096,7 +12982,10 @@ app.post('/api/org-context/preview', requireAuth, (req, res) => {
     const b = req.body || {};
     let proposals = [];
     if (typeof b.text === 'string' && b.text.trim()) {
-      const ex = orgContext.extract(b.text, { now: Date.now() });
+      /* THE ORGANISATION'S OWN WORDS REACH THE EXTRACTOR. Without the vocabulary it fell back
+         to a hard-coded set in which every occasion was a football fixture or, failing that,
+         "Default" — a machine word in the one sentence a person reads before confirming. */
+      const ex = orgContext.extract(b.text, { now: Date.now(), vocab: _resolvedDomain(code).vocab });
       if (ex.blocked) return res.json({ ok: false, blocked: ex.blocked, message: 'That describes private or sensitive information — it cannot become an operating rule.', proposals: [], preview: null });
       proposals = ex.proposals; var warnings = ex.warnings;
     } else if (Array.isArray(b.records)) {
@@ -13340,6 +14229,61 @@ const ASSISTANT_CAP = 60;
 const assistantConversations = {};  // wsKey → [ { id, title, createdAt, updatedAt, messages:[{role,text,at,reasoning,register,provenance}] } ]
 const CONV_CAP = 200;               // max conversations kept per user (generous; effectively "permanent")
 const CONV_MSG_CAP = 400;           // max messages kept per conversation
+
+/* ── A LONG CONVERSATION IS COMPRESSED, NOT TRUNCATED ─────────────────────────────────────────
+   This cap used to be applied with `messages.splice(0, n)` — the oldest messages destroyed, in
+   place, with nothing recorded. Two things were wrong with that, and the second is the serious
+   one.
+
+   FIRST, THE COMMENT ABOVE CLAIMS THE OPPOSITE. "PRIVATE, PERMANENT chat history — kept until
+   the user deletes it." It was not permanent; message 1 of a long thread was deleted by message
+   401, by the product, silently.
+
+   SECOND, AND THIS IS THE DEFECT: A FOCUS POINTS AT ITS MESSAGES. `_personalFocusSource` pins the
+   exact message ids a Focus came out of, and GET /api/me/focus/:id/source resolves them live so
+   that editing or deleting the conversation changes what the Focus shows. Driven at a95f006: pin
+   a Focus to the first message of a 501-message thread, take eight more turns, and the pinned
+   message is gone — and the route then falls back to `all.slice(-4)` and serves FOUR UNRELATED
+   RECENT MESSAGES under the note "Sharing the focus does not share this conversation", as though
+   they were the conversation it came from. The evidence link behind a commitment quietly became
+   four arbitrary sentences.
+
+   THE RULE: A MESSAGE SOMETHING POINTS AT IS NOT SPARE CAPACITY. Eviction takes the oldest
+   UNPINNED messages and stops there; what was dropped is counted and dated on the conversation,
+   so a thread can say it has been shortened instead of just being shorter. No model is involved
+   and none is needed — deterministic code decides what is kept, which is the half of the law that
+   must never depend on a provider being reachable. */
+function _pinnedMessageIds(code, userId, conversationId) {
+  const out = new Set();
+  for (const f of (_getMemory(code, userId).focuses || [])) {
+    if (!f || !f.source || String(f.source.conversationId) !== String(conversationId)) continue;
+    for (const id of (f.source.messageIds || [])) out.add(String(id));
+  }
+  return out;
+}
+
+function _compactConversation(conv, pinned) {
+  const msgs = conv.messages || [];
+  if (msgs.length <= CONV_MSG_CAP) return conv;
+  const keep = [];
+  let dropped = 0, droppedThrough = null;
+  // Oldest first: drop until we are within the cap, but never something that is pointed at.
+  for (let i = 0; i < msgs.length; i++) {
+    const overBy = (msgs.length - dropped) - CONV_MSG_CAP;
+    const m = msgs[i];
+    if (overBy > 0 && !pinned.has(String(m.id || m.messageId || ''))) {
+      dropped++; droppedThrough = m.at || droppedThrough;
+      continue;
+    }
+    keep.push(m);
+  }
+  conv.messages = keep;
+  if (dropped) {
+    conv.compacted = { dropped: (conv.compacted ? conv.compacted.dropped : 0) + dropped,
+      through: droppedThrough || (conv.compacted || {}).through || null, at: new Date().toISOString() };
+  }
+  return conv;
+}
 function _assistantConvs(key) { return assistantConversations[key] || (assistantConversations[key] = []); }
 function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); return s.length > 60 ? s.slice(0, 57) + '…' : (s || 'New conversation'); }
 /* ── THE LIBRARY — one organised home for what a person keeps ─────────────────
@@ -13394,6 +14338,45 @@ function _metric(code, event, n = 1) { try { metrics.inc(_metricsStore, code, ev
 function _isPlatformAdmin(req) {
   const key = process.env.IQ_PLATFORM_KEY;
   return !!key && (req.headers['x-platform-key'] === key || req.query.platformKey === key);
+}
+
+/* ── THE HOST IS NOT A TENANT, AND A TENANT'S SUPERADMIN IS NOT THE HOST ─────────────────────
+   REPRODUCED, and it is the worst thing this engagement has found. Three routes guarded by
+   `requirePermission('manage_settings')` — a permission every tenant SUPERADMIN holds by role —
+   do things that belong to the whole instance:
+
+     POST /api/admin/seed-alma      purges and replaces a FIXED organisation, whoever asks
+     POST /api/admin/llm-mode       flips deterministic-only for the entire host
+     POST /api/admin/llm-selftest   reports host provider state and spends the host's budget
+
+   Driven: a superadmin of an unrelated tenant, holding no platform key, called seed-alma and
+   REPLACED the pilot organisation — its profile overwritten, one person replaced by
+   thirty-one, six weeks of real data purged — then flipped the host's language-model mode. Two
+   different tenants on one instance is the ordinary case, and either could do this to the other.
+
+   The confusion is between a role that is the top of an ORGANISATION and a role that is the top
+   of a MACHINE. They are not the same authority and one must never imply the other.
+
+   THIS IS NOT A NEW MECHANISM. `_isPlatformAdmin` and `IQ_PLATFORM_KEY` already exist and already
+   guard the most destructive route in the product (`DELETE /api/admin/org/:code`). The defect was
+   that three routes of the same kind did not use it. A second platform-role flag would be a
+   second answer to one question, which is how the two drift.
+
+   IT FAILS CLOSED. With no `IQ_PLATFORM_KEY` configured there is no platform operator on this
+   host, so these routes are unavailable to everybody rather than available to everybody —
+   AGENTS.md invariant 7. `what` names the capability in the refusal so an operator reading a 403
+   knows which key they are missing rather than which permission they thought they had. */
+function requirePlatformOperator(what) {
+  return (req, res, next) => {
+    if (!_isPlatformAdmin(req)) {
+      return res.status(403).json({
+        error: 'platform key required',
+        note: `${what} belongs to whoever runs this instance, not to an organisation's administrators. `
+            + 'It needs the platform key.',
+      });
+    }
+    next();
+  };
 }
 const _errorBuffer = {};
 function _captureError(err, meta = {}) {
@@ -14062,12 +15045,29 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
   return {
     surface: String(opts.surface || (object ? object.kind : 'home')).slice(0, 40),
     object,
+    /* THE RESOLVED REF, in the one spelling every other reader uses. The composer's `about` is a
+       HEADLINE AND BODY for the prompt, which is a different thing from the object's identity —
+       and two readers downstream were parsing the prompt shape as if it were the ref, so both
+       quietly returned nothing. Resolved once, here, where the binding is decided. */
+    objectRef: ref || null,
     folders: _libFolders(code).filter(f => f.ownerId === userId).map(f => ({ id: f.id, name: f.name })),
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
       .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
     contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
-    forumAvailable: !!(object && ['inquiry', 'high', 'low', 'focus'].includes(object.kind) &&
-      (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
+    /* THE SAME OWNER THE SCREEN USES. This was a second, differently-worded copy of the rule —
+       it accepted a group subjectRef and accepted participants on any kind, where the thread route
+       did neither — so one object could have a Forum in conversation and none on its own screen. */
+    forumAvailable: _forumAudience(code, userId, object).available,
+    /* THE ROOM ITSELF, so a share-to-forum confirmation can NAME who will see it rather than
+       describe them. A preview that says "your group" is not a preview; it is a reassurance. The
+       count and the room's name come from the same owner that decides the Forum exists at all. */
+    forumRoom: (() => {
+      const a = _forumAudience(code, userId, object);
+      if (!a.available) return null;
+      const node = a.forumKind === 'group' ? (orgNodes[code] || {})[a.key] : null;
+      return { kind: a.forumKind, key: a.key, readable: a.readable,
+        signature: _forumAudienceSignature(a), name: node ? (node.name || 'this group') : 'the people on this' };
+    })(),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
     /* THE ONE PIECE OF EVIDENCE THIS TURN IS ABOUT, resolved by the server from the reader's own
@@ -14119,6 +15119,7 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
       create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
+      share_to_forum: 'Put this to the forum',
       /* A LABEL IS WHAT SOMEBODY READS BEFORE THEY PRESS CONFIRM. Without an entry here the map
          falls through to the action's own name and the card reads `declare_focus_relation`, which
          is an identifier in front of a person and tells them nothing about what they are agreeing
@@ -14130,8 +15131,10 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
     payload: { ...c.arguments, argumentSources: c.argumentSources || {},
       context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
       objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
+      audienceSignature: c.type === 'share_to_forum' && context.forumRoom ? context.forumRoom.signature : null,
       resolvedParticipantIds },
-    visibility: (c.type === 'discuss_with_group' || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
+    visibility: (c.type === 'discuss_with_group' || c.type === 'share_to_forum'
+      || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
     why: c.reason || 'You asked IntelliQ to do this.',
     effect: _composerActionEffect(c, context),
     requiredApproval: c.requiresConfirmation, policyResult: { effect: c.requiresConfirmation ? 'require_approval' : 'allow', reason: 'server validation runs on execution' },
@@ -14160,7 +15163,14 @@ function _composerActionEffect(candidate, context) {
     text: a.text || null, textSource: sources.text || null,
     account: a.because || null,
     target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
-    audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
+    /* A SHARE'S AUDIENCE IS THE OBJECT'S ROOM, resolved by the server, never an argument the model
+       supplied. The model does not choose who sees something; the object does, and the person
+       reads it here before confirming. */
+    audience: candidate.type === 'share_to_forum'
+      ? (context.forumRoom
+        ? { id: context.forumRoom.key, name: context.forumRoom.name, readable: context.forumRoom.readable }
+        : null)
+      : (group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null)),
     material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
     /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
        `supports` is asking somebody to agree to a judgement without telling them it is not yet
@@ -14172,7 +15182,13 @@ function _composerActionEffect(candidate, context) {
        priority mark: it is not a level, and it is not visible to anybody else. */
     priority: candidate.type === 'prioritise_object' ? 'on'
       : candidate.type === 'unprioritise_object' ? 'off' : null,
-    disclosure: candidate.type === 'discuss_with_group'
+    disclosure: candidate.type === 'share_to_forum'
+      /* THE SENTENCE SOMEBODY READS BEFORE THEY DISCLOSE SOMETHING. It says the three things a
+         person actually needs: exactly what crosses, exactly what does not, and that speech in a
+         forum is speech rather than evidence — because somebody who believes they are "submitting
+         evidence" is agreeing to something different from what will happen. */
+      ? 'Only these words are posted, to the people named above. The rest of this conversation stays private. What you post is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.'
+      : candidate.type === 'discuss_with_group'
       ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
       : (candidate.type === 'prioritise_object' || candidate.type === 'unprioritise_object')
         ? 'This is yours alone. It changes what comes up first for you and nothing about who can see this or what anybody else thinks of it.'
@@ -14510,6 +15526,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (String(text || '').trim() && !(cls.command && cls.command.payload)) {
     const attempt = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
+      // The object this turn is bound to, as a REF. `about` above is the headline/body the prompt
+      // reads; this is the identity every authorised lookup needs.
+      aboutRef: actionContext.objectRef,
     });
     if (attempt && attempt.answer) composedReply = attempt;
     else if (attempt && attempt.degraded) composerDegraded = attempt.degraded;
@@ -14532,6 +15551,17 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     parts.push(actionReading.needsClarification);
   }
   let responseText = parts.join(' ');
+  /* ── THE DETERMINISTIC COPY IS ENGLISH, AND SAYS SO ────────────────────────────────────────
+     Everything assembled above is written in this file. It is not model-written, so there is
+     nothing to instruct and it will stay English — which is a limit, not a bug. What WOULD be a
+     bug is a person writing in Spanish receiving an English paragraph with no explanation, which
+     reads as a product that is broken rather than one that is bounded. `language.fallbackNote`
+     is empty for English and for a language we could not tell, so this adds nothing on the
+     ordinary path. The model-written path is unaffected: it receives the language directive and
+     answers in their language. */
+  const _writesIn = _languageOf(code, userId);
+  const _langNote = language.fallbackNote(_writesIn);
+  if (_langNote && responseText) responseText = `${responseText} ${_langNote}`;
   const priorAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant' && m.text);
   if (priorAssistant && responseText.trim() === String(priorAssistant.text).trim()) {
     responseText = actionReading.unavailable
@@ -14554,8 +15584,23 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the raw material the model already reasoned over. Surfacing it underneath produced a
   // non-sequitur ("You marked 1 thing private") sitting under an unrelated answer, and in the
   // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
+  /* THE SOURCES, ONCE. They are the citation channel AND the figure the spoken disclosure states,
+     so building them twice is building two answers to "what does this rest on". */
+  const _respSources = composedReply ? (composedReply.sources || []) : _sourceList([
+    ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
+    ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
+    ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
+  ], responseText);
   const response = {
     responseText, mode, lens: lens || null,
+    /* THE SPOKEN RENDERING, composed on the server for BOTH paths. The composed path's went
+       through the manifest gate above; the deterministic path's text was written by the kernel
+       rather than by a model, so there is no second author to disagree with — but it gets the
+       same limitations and the same source disclosure, because a listener's entitlement to those
+       does not depend on which engine wrote the sentence. */
+    speech: composedReply && composedReply.speech
+      ? composedReply.speech
+      : _speechFor({ text: responseText, sourceCount: (_respSources || []).length, limitations: context.limitations }),
     /* WHETHER THIS IS INTELLIQ'S NORMAL VOICE. Structured, so the client renders one quiet
        sentence of its own rather than the server smuggling an apology into `responseText` and
        every assertion in the suite that reads that field going with it. `reason` is the closed
@@ -14585,11 +15630,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     // question-answering path already produced. Both paths cite or neither does: a reply whose
     // provenance depends on which engine happened to write it teaches people that the chips
     // are decoration, and the composed path is the one that most needs to be checkable.
-    sources: composedReply ? (composedReply.sources || []) : _sourceList([
-      ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
-      ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
-      ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
-    ], responseText),
+    sources: _respSources,
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
     // Ambiguity: which open question is the user answering (never guessed).
@@ -14623,8 +15664,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the reason you reopen a thread is to check something.
   _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso, id: 'm_' + generateId(),
     reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [],
+    /* The approved spoken rendering rides with the message for the same reason the sources do:
+       a person reopens a thread to check something, and read-aloud that works only while the
+       bubble is still on screen is read-aloud that is missing whenever it is wanted. It is not a
+       second record of the answer — it is the same approved answer in the form the other channel
+       needs, stored rather than recomposed by a browser. */
+    speech: response.speech || '',
     sources: response.sources || [] });
-  if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
+  _compactConversation(_conv, _pinnedMessageIds(code, userId, _conv.id));
   _conv.updatedAt = _nowIso;
   scheduleSave();
   // THE EARS, last and unawaited. Understanding the turn must never delay answering it — this
@@ -14648,6 +15695,12 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
+  /* WHAT LANGUAGE THEY ARE WRITING IN, noted BEFORE the turn is built rather than after it —
+     otherwise the first message in a new language is always answered in the old one, and a person
+     who switches has to say it twice before the product notices. Their own words only, and only
+     when there are enough of them to be evidence; `_noteLanguage` returns null otherwise and
+     nothing is recorded. */
+  try { _noteLanguage(code, userId, text); } catch (_) {}
   // The active MyWorkspace lens is a BOUNDED context hint (emphasis only, same truth path).
   // An optional workItemId focuses authorised assigned-work context (from clicking a work card).
   // An optional subjectMemberId requests LEADER-SUPPORT context — validated server-side, never
@@ -15619,7 +16672,17 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   });
   _auditFindingEmission(code, userId, [state.high, state.low].filter(Boolean), [], 'group state');
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
-  res.json({ ok: true, ...state });
+  /* WHAT THIS READER MAY DO, ANSWERED BY THE SAME FUNCTION THAT WILL ENFORCE IT. A screen has to
+     know whether to draw a leader-only control, and the alternatives were both worse: infer it in
+     the browser from a roster the client happens to have loaded (wrong the moment somebody opens
+     the group from a screen that never loaded one, and a second definition of leadership either
+     way), or draw the control for everybody and let the route 403 (showing a person a button that
+     cannot work is its own small lie).
+
+     It is a COURTESY, NOT A GATE, and the distinction is the whole safety argument: `_leadsNode`
+     on the write routes is the gate, it is the same call, and a member who forges the request
+     still gets 403 from it. Nothing here grants anything. */
+  res.json({ ok: true, ...state, viewer: { leads: _leadsNode(code, nodeId, userId) } });
 });
 
 /* GET /api/objects — the one four-bucket read, parameterised by grain rather than role.
@@ -15630,7 +16693,15 @@ function _objectBucket(code, userId, scope = 'self') {
     if (!raw) return;
     const id = String(raw.inquiryId || raw.focusId || raw.id || raw.dedupeKey || '');
     if (!id) return;
+    /* WHOSE COMMITMENT, WHICH ONLY THIS LAYER KNOWS. A group Focus arrives here already carrying
+       the node's name; a personal one does not, and the difference is what makes the card say
+       "You said you would work on this" rather than a hedge about either. */
+    const _groupName = kind === 'focus' ? String(raw.group || extra.group || '') : '';
+    const _mine = kind === 'focus' && !_groupName
+      ? (raw.ownerId ? String(raw.ownerId) === String(userId) : !raw.invited)
+      : true;
     const explained = raw.explained || voice.explainObject({
+      ...(kind === 'focus' ? { groupName: _groupName || null, mine: _mine } : {}),
       // An INQUIRY carries its name in `topic`, not in any of the fields below, so every
       // inquiry fell through to the literal fallback and every card on the bucket page read
       // "Current understanding." present.humanTopic also strips the canonical key.
@@ -15644,8 +16715,14 @@ function _objectBucket(code, userId, scope = 'self') {
     const priority = raw.priority || raw.severity || (raw.confidence || {}).band || 'low';
     // The human reading, so every surface renders from ONE shape instead of each inventing
     // its own from the raw object — which is how two different inquiry cards came to exist.
-    const card = present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
-      stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
+    /* AND THE CARD ITSELF IS PICKED BY KIND. `inquiryCard` was used for all four, so a Focus —
+       a commitment somebody made, in their own words — was rendered with a confidence band, a
+       standing of "Early thinking" and a status of "Looking into this". The shapes are identical
+       by design, so nothing downstream changes; only the reading does. */
+    const card = kind === 'focus'
+      ? present.focusCard(raw, { mine: _mine, groupName: _groupName || null, now: Date.now() })
+      : present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
+          stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
     out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, id })),
       parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, present: card,
       about: `${kind}:${id}`, scope, raw });
@@ -15681,16 +16758,62 @@ function _objectBucket(code, userId, scope = 'self') {
 
     // (a) Mine — the ones I set for myself.
     const memory = userAiProfiles[`${code}:${userId}`] || {};
-    for (const focus of memory.focuses || []) addFocus(focus);
+    for (const focus of memory.focuses || []) addFocus(focus, { ownerId: userId });
 
     // (b) Ones somebody invited me into by name.
     for (const [key, mem] of Object.entries(userAiProfiles)) {
       if (!key.startsWith(`${code}:`) || key === `${code}:${userId}`) continue;
+      const ownerId = key.slice(code.length + 1);
+      const stillAddressable = _contactsFor(code, ownerId).some(c => c.id === userId);
+      if (!stillAddressable) continue;
       for (const f of (mem && mem.focuses) || []) {
         if (Array.isArray(f.participants) && f.participants.includes(userId)) {
-          addFocus(f, { invited: true, participants: f.participants });
+          // An invited person may see the Focus, never the source conversation reference.
+          const { source, ...readable } = f;
+          addFocus(readable, { invited: true, ownerId, participants: f.participants });
         }
       }
+    }
+
+    /* ── AND THE HIGHS, LOWS AND INQUIRIES SOMEBODY SHARED WITH YOU BY NAME ────────────────────
+       The Focus already had this, in branch (b). The other three kinds had no audience at all, so
+       there was nothing to deliver; now that a person can choose one, the choice has to actually
+       reach the people named or it is a setting rather than a share.
+
+       The owner's own objects are resolved through THEIR bucket, not rebuilt here, so an invited
+       reader sees exactly the object its owner sees and there is no second projection to drift.
+       Eligibility is re-derived on every read — the same rule `_forumAudience` applies — so a
+       share withdrawn, or a person who is no longer a reachable contact, stops arriving on the
+       very next request rather than after a sweep. */
+    for (const [key, rec] of Object.entries(objectAudiences[code] || {})) {
+      const sep = key.indexOf('|');
+      if (sep < 0) continue;
+      const ownerId = key.slice(0, sep);
+      if (ownerId === String(userId)) continue;                       // your own are already here
+      if (!rec) continue;
+      if (!_personPresent((orgUsers[code] || {})[ownerId])) continue;
+      /* TWO WAYS TO BE IN THE AUDIENCE, and they are the same two a Focus has always had.
+         `invited` names people; `shared` means whoever leads a group the owner is in, which is
+         exactly what it already means on a Focus (see `_memberGoalsFor`). Anything else — and
+         `private`, which is most of them — reaches nobody. */
+      const namedHere = rec.visibility === 'invited'
+        && (rec.participantIds || []).map(String).includes(String(userId));
+      const leadsThem = rec.visibility === 'shared'
+        && Object.values(orgNodes[code] || {}).some(n =>
+          (n.memberIds || []).map(String).includes(String(ownerId))
+          && (n.leaderIds || []).map(String).includes(String(userId)));
+      if (!namedHere && !leadsThem) continue;
+      // A named person must still be somebody the owner could address; a leader is reached by
+      // leading them, which the roster above already establishes.
+      if (namedHere && !_contactsFor(code, ownerId).some(c => String(c.id) === String(userId))) continue;
+      const [kind, ...rest] = key.slice(sep + 1).split(':');
+      const objectId = rest.join(':');
+      if (!['inquiry', 'high', 'low'].includes(kind)) continue;
+      const theirs = (_objectBucket(code, ownerId, 'self') || [])
+        .find(o => o && o.kind === kind && String(o.id) === objectId);
+      if (!theirs) continue;
+      add(kind, { ...(theirs.raw || {}), id: objectId, explained: theirs.explained,
+        invited: true, ownerId, participants: [ownerId, ...(rec.participantIds || [])] });
     }
 
     // (c) The squad's. A group focus belongs to everyone in the group, leaders included.
@@ -15712,7 +16835,34 @@ function _objectBucket(code, userId, scope = 'self') {
       focuses: _teamFocuses(code, nodeId), now: Date.now(),
     });
     add('high', state.high); add('low', state.low); add('inquiry', state.question);
-    for (const focus of state.focuses || []) add('focus', focus);
+    /* `state.focuses` DOES NOT EXIST, and never did. ai/team-state.js buildTeamState returns the
+       active `focus` and the closed `history`; there is no plural field, so `state.focuses || []`
+       was an empty array on every call and this loop never ran once. The consequence was silent
+       and total: a group's Focus had no thread, which means no conversation, no attached material,
+       no chart, no forum icon and no A -> B loop — every one of those surfaces resolves its object
+       through this bucket, and for a group Focus the object was never in it.
+
+       Nothing failed, because `|| []` is a perfectly valid instruction to iterate nothing. Same
+       shape as the undefined CSS token and the `hidden` container: a fallback that makes a typo
+       into a quiet, valid, wrong answer.
+
+       BOTH are added. A closed focus with its outcome recorded is exactly what somebody wants to
+       open and talk about — "we tried that, here is what happened" — and dropping it the moment
+       it stops being current would lose the half of the loop that has anything to say. */
+    /* EVERY FOCUS THIS GROUP HAS, from the canonical list rather than from the projection's slots.
+
+       `state.focuses` never existed — buildTeamState returns the ACTIVE focus and the closed
+       `history`, so `state.focuses || []` iterated nothing on every call and a group Focus was
+       never in the object bucket at all: no thread, no material, no chart, no forum, no A -> B
+       loop, because every one of those surfaces resolves its object through here.
+
+       Reading `state.focus` and `state.history` instead fixed the common case and left a subtler
+       hole, found by reading-scope-smoke: `history` is `status !== 'active' || outcome`, so a
+       SECOND active focus with no outcome yet is in neither slot and stays unreachable. The
+       projection's slots answer "what is the group working on" — one thing, deliberately — and
+       that is a different question from "what objects does this group have". Asking the canonical
+       list removes the dependence on which slot a projection happened to put something in. */
+    for (const f of _teamFocuses(code, nodeId) || []) add('focus', f);
   } else return null;
 
   return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
@@ -15743,6 +16893,46 @@ function _allObjectsFor(code, userId) {
     }
   }
   return all;
+}
+
+/* ── THE SAME AUTHORISED OBJECTS, EACH CARRYING THE EVIDENCE ITS OWN RECORD HOLDS ────────────
+   A GROUP object is a PROJECTION. `ai/team-state.js` builds the High, the Low and the lead
+   Inquiry out of a node's inquiries and returns a surface — a headline, a band, a question, an
+   unknown — and deliberately not the signals underneath, because the surface exists to be shown
+   to a squad and a signal carries who said it. `_objectBucket` files that projection, so a group
+   object's `raw` has no `signals` at all.
+
+   WHAT THAT COST, found by driving a real group Focus end to end: `loop()` counts what has
+   arrived on the thing a Focus addressed SINCE its outcome, and it counts that over the
+   addressed object's signals. For every group Focus in the product that count was structurally
+   zero — not "nothing has happened", which is a fact, but "this reader cannot see anything that
+   happens", which is a different statement wearing the same words. The turn then told the model
+   "nothing has been recorded on that thing since the outcome" while two accounts sat in the
+   record, and a model handed that writes a confident sentence about a standstill.
+
+   SO THE EVIDENCE IS JOINED BACK AT READ TIME, from the canonical store, for objects this reader
+   has ALREADY been cleared to see — `_allObjectsFor` did the authorising and this adds nothing to
+   that set, not one object. Nothing is written and nothing is cached: a membership change is
+   reflected on the next read, exactly as everywhere else.
+
+   ONE OWNER, because the alternative is the failure this codebase keeps finding: a second caller
+   needing the same join, writing its own, and the two drifting. Callers that want the surface as
+   a squad sees it keep calling `_allObjectsFor` and are unaffected. */
+function _objectsWithEvidenceFor(code, userId) {
+  return _allObjectsFor(code, userId).map(o => {
+    const raw = (o && o.raw) || {};
+    const nodeId = o.whoseNodeId || raw.nodeId || null;
+    if (o.kind !== 'inquiry' || !nodeId) return o;
+    const bySubject = (inquiryStates[code] || {})[`group:${nodeId}`] || {};
+    const canonical = Object.values(bySubject).find(i => i && String(i.inquiryId) === String(o.id));
+    if (!canonical || !Array.isArray(canonical.signals)) return o;
+    const active = canonical.signals.filter(x => x && x.kind !== 'interpretation' && diagnose.isActive(x));
+    const contributors = new Set(active.map(x => x.contributedBy).filter(Boolean)).size;
+    if (!teamState.cohortFloor(contributors, _nodeMembers(code, nodeId).length).ok) {
+      return { ...o, raw: { ...raw, signals: [] } };
+    }
+    return { ...o, raw: { ...raw, signals: active } };
+  });
 }
 
 app.get('/api/objects', requireAuth, (req, res) => {
@@ -15778,7 +16968,17 @@ app.get('/api/objects', requireAuth, (req, res) => {
      object carries. */
   const all = scope === 'all' ? _allObjectsFor(code, userId) : _objectBucket(code, userId, scope);
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
-  const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
+  /* WHETHER EACH ONE HAS A ROOM, answered by the one owner, before `raw` is stripped.
+
+     The card used to decide this for itself: `item.shared === true || (item.participants || []).length > 1`.
+     Neither field survives this projection — `shared` is set by the thread route and `participants`
+     lives on `raw` — so the indicator was a fourth availability rule that could never be true, and
+     a person scanning their list could not tell which of these threads had anybody in them. Asked
+     here, on every read, with nothing cached: a roster change takes the icon off the card on the
+     very next request, exactly as it does on the object's own screen. */
+  const objects = all.filter(item => item.kind === kind)
+    .map(item => ({ ...item, forumAvailable: _forumAudience(code, userId, item).available }))
+    .map(({ raw, ...item }) => item);
   // ONE RANKING over both, so the top of the list is the top of the list.
   objects.sort((a, b) => (b.score || 0) - (a.score || 0));
   res.json({ ok: true, kind, scope, objects });
@@ -15786,6 +16986,38 @@ app.get('/api/objects', requireAuth, (req, res) => {
 
 /* Every object opens as a thread. The opening is recomposed from the current object on every
    read and is never appended to assistantConversations (L-OC1). */
+/* WHAT A BELIEF IS STANDING ON, in one sentence. Moved here out of the browser: the same counts
+   now have to be SPOKEN as well as shown, and a figure computed in two places is two figures that
+   will eventually disagree. The client renders this; it no longer composes it. */
+function _provenanceLine(d = {}) {
+  const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
+  if (!n) return 'Nothing recorded under this yet.';
+  const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
+  if (o > 1) bits.push(`from ${o} separate occasions`);
+  else if (o === 1) bits.push('all from one telling');
+  if (c) bits.push(`${c} since corrected`);
+  if (d.contested) bits.push('and accounts disagree');
+  return bits.join(', ') + '.';
+}
+
+/* THE OPENING CARD, COMPOSED ONCE. It is the object's own explanation and it is the `card`
+   channel of the object's answer — so it is built here, beside the manifest it will be checked
+   against, rather than assembled in the browser from four fields of a payload. */
+function _openingFor(obj) {
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const text = [sum.thinking || (obj && obj.explained && obj.explained.claim) || '', sum.openQuestion || '']
+    .filter(Boolean).join(' ');
+  const sources = [];
+  const n = Number(det.evidenceCount) || 0;
+  if (n) sources.push({ kind: 'record', label: `${n} thing${n === 1 ? '' : 's'} you told me`, detail: _provenanceLine(det) });
+  for (const b of (det.because || []).slice(0, 3)) sources.push({ kind: 'belief', label: 'Why I think this', detail: b });
+  for (const a of (det.alternatives || []).slice(0, 2)) {
+    if (a && a.statement) sources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement });
+  }
+  return { text, sources };
+}
+
 app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || '');
@@ -15806,31 +17038,53 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   // focus. A group object always qualifies (the node is the people); a personal focus qualifies
   // once somebody else has been invited into it. A thread that is just you and IntelliQ has
   // nobody to talk to and gets no forum.
+  /* ONE OWNER. This route and the composer context used to compute availability separately, with
+     rules that had already drifted apart — and neither counted PEOPLE, so a one-member node got a
+     Forum with nobody in it. Both now ask _forumAudience, which resolves the CURRENT readable set
+     on every read. Nothing is cached here, which is what makes a roster change revoke the room on
+     the very next request rather than after a sweep. */
   const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
-  //
-  // WHAT IS ACTUALLY WIRED: the forum route is `/api/group/:nodeId/forum/:inquiryId`, so a forum
-  // is REACHABLE only for a group thread. A personal focus with people invited satisfies the
-  // founder's rule but has no route behind it, and rendering the control there would give a
-  // button that 404s. So `forumAvailable` says where it works, `shared` says where the rule says
-  // it should — and the gap between them is the server work still to do, stated rather than
-  // papered over with a button that fails.
-  // THE GAP IS CLOSED. `forumAvailable` used to be true only for a node room, and this comment
-  // used to record a focus with invitees as work still to do. /api/forum/:kind/:objectId is now
-  // that work, so the rule and what is reachable finally say the same thing — which is the only
-  // acceptable end state for a flag whose whole purpose was to admit they differed.
-  const _invited = kind === 'focus'
-    && Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
-  const _forum = !!_nodeId || _invited;
+  const _aud = _forumAudience(code, userId, _nodeId ? { ...object, nodeId: _nodeId } : object);
+  const _forum = _aud.available;
   /* WHETHER THIS READER HAS MARKED IT. Read from their OWN memory, so it is their mark and can be
      nobody else's -- the control has to be able to say "take this off" rather than offering to add
      a mark that is already there, and a screen that cannot tell is a screen that lies about state.
      It is a fact about the reader, not about the object, and it travels no further than them. */
   const _mine = Array.isArray(_getMemory(code, userId).prioritised)
     ? _getMemory(code, userId).prioritised.map(String) : [];
+  /* ── THE OPENING IS AN ANSWER, AND IT LEAVES BY TWO DOORS ───────────────────────────────
+     The card a reader sees and the words a listener hears, checked against ONE manifest built
+     from this object's own signals. Degraded per channel rather than all-or-nothing, because the
+     two failures are not the same failure: a card that cannot be shown has to be replaced by the
+     reason, while a reading that cannot be spoken leaves a perfectly good card on the screen and
+     only owes the person an explanation for the missing control. */
+  const _open = _openingFor(object);
+  const _omf = _objectManifest(code, userId, object, { sourceCount: _open.sources.length });
+  const _oRoster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+  const _oSpeech = _speechFor({ text: _open.text, sourceCount: _open.sources.length, limitations: _omf.limitations });
+  const _oApproved = manifest.approve(_omf, {
+    card: { value: _open.text, claims: manifest.claimsIn(_open.text, _omf) },
+    voice: { value: _oSpeech, claims: manifest.claimsIn(_oSpeech, _omf) },
+  }, { roster: _oRoster });
+  const _voiceOnly = _oApproved.violations.filter(v =>
+    v.channel === 'voice' || String(v.kind).startsWith('voice_')
+    || (v.kind === 'channels_disagree' && (v.a === 'voice' || v.b === 'voice')));
+  const _cardRefused = _oApproved.violations.length > _voiceOnly.length;
+
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
+    /* Composed on the server, rendered by the client. `speech` empty means there is nothing
+       approved to read aloud, and `speechNote` says why rather than leaving a dead control. */
+    openingText: _cardRefused ? _oApproved.note : _open.text,
+    openingSources: _cardRefused ? [] : _open.sources,
+    openingSpeech: _oApproved.ok ? _oSpeech : '',
+    openingNote: _oApproved.ok ? '' : _oApproved.note,
     prioritised: _mine.includes(`${kind}:${object.id}`),
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
-    forumKind: _nodeId ? 'group' : (_invited ? 'focus' : null),
+    forumKind: _aud.forumKind,
+    /* HOW MANY PEOPLE, AND WHY NOT. A screen that is told only "no" has to invent a reason, and
+       "fewer than two people can read this" is a fact worth being able to say rather than an
+       absence a reader has to interpret. The count is of the room, never a list of who is in it. */
+    forumReadable: _aud.readable, forumWhy: _aud.available ? null : _aud.reason,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
@@ -15965,7 +17219,36 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     .find(x => x && x.kind === kind && String(x.id) === String(req.params.id));
   if (!object) return res.status(404).json({ error: 'not found' });
 
-  const topic = (object.raw && object.raw.topic) || {};
+  /* WHAT THIS IS ABOUT, IN VOCABULARY THE SYSTEM OWNS.
+
+     An Inquiry, a High and a Low carry a canonical concept. A FOCUS does not: ai/team-state.js
+     normalizeFocus keeps its text, its status and its origin, and deliberately drops any topic —
+     so a focus reaching here has nothing searchable except the sentence a person typed, and that
+     sentence must never become a query (L-WS1). The honest answer for a focus somebody simply had
+     an idea for is therefore "there is nothing here to search on that is not something you wrote",
+     and that is what the refusal below says.
+
+     BUT A FOCUS STARTED OUT OF AN INQUIRY HAS ONE, and it is the inquiry's. `origin.inquiryId` is
+     a field the record already carries, survives normalisation, and is verified against this
+     group's own inquiries when the focus is created — so borrowing that inquiry's CONCEPT is
+     reading owned vocabulary off a link that already exists, not manufacturing a topic. The
+     person's words are still nowhere near the query.
+
+     RESOLVED WITHIN THE READER'S OWN SCOPE. The lookup is against the same subject the object
+     belongs to, so it cannot reach an inquiry from another group or another tenant even if an id
+     collided — which is exactly the shape group-loop-smoke's same-id fixture exists to catch. */
+  let topic = (object.raw && object.raw.topic) || {};
+  if (!topic.canonicalConcept) {
+    const originId = String(((object.raw || {}).origin || {}).inquiryId || '');
+    if (originId) {
+      const nodeId = String(req.query.scope || '').startsWith('group:')
+        ? String(req.query.scope).slice(6) : ((object.raw || {}).nodeId || null);
+      const subjectRef = nodeId ? `group:${nodeId}` : `member:${userId}`;
+      const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+      const origin = Object.values(bySubject).find(i => i && i.inquiryId === originId);
+      if (origin && origin.topic && origin.topic.canonicalConcept) topic = origin.topic;
+    }
+  }
   const built = websearch.deriveQuery({
     canonicalConcept: topic.canonicalConcept || '',
     domain: topic.domain || (orgMeta[code] || {}).orgMode || '',
@@ -15998,8 +17281,30 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     const answer = websearch.answerFrom(content);
     if (!answer.ok) return res.json({ ok: false, available: true, query: built.query, reason: answer.reason });
     _audit(code, { actor: userId, action: 'web_reading', subjectIds: [userId], basis: built.query });
+    /* HOW THIS STANDS TO THE THING THEY ARE LOOKING AT, said by the server rather than left to a
+       reader to assume. Three clauses, and each is there because the assumption it blocks is the
+       natural one to make about a paragraph sitting under a belief:
+
+         WHAT IT IS ABOUT   the TOPIC, in the reader's own words -- not the claim, not the person.
+                            Somebody who does not know what was searched cannot judge whether the
+                            answer is relevant, and will assume it was searched about them.
+         WHAT IT IS NOT     it is about the subject in general, not about this record, not about
+                            anybody here. Nothing outside IntelliQ has seen this record.
+         WHAT IT DOES NOT DO  it changes no confidence and counts as no account. External reading
+                            arriving next to a band that then moved would read as corroboration
+                            from the outside world, which is the one thing it can never be.
+
+       No causal language, and none possible: this is composed from the topic label and fixed
+       clauses, so there is no path by which a model's phrasing becomes a claim about cause. */
+    const _topicLabel = present.humanTopic(topic) || 'this topic';
     return res.json({ ok: true, available: true, query: built.query, queryNote: built.note,
-      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note });
+      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note,
+      relation: {
+        about: _topicLabel,
+        line: `General reading about ${_topicLabel}. Nothing about this record, or about anybody here, `
+          + `was sent outside IntelliQ, and nothing that came back counts as an account or changes `
+          + `how sure IntelliQ is about anything.`,
+      } });
   } catch (e) {
     return res.json({ ok: false, available: true, query: built.query,
       reason: 'the search did not come back just now' });
@@ -16028,6 +17333,136 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
 
    The epistemic boundary is UNCHANGED and unchangeable here: this path touches forumThreads and
    nothing else. Ten people agreeing in a focus room moves no confidence anywhere. */
+/* ── THE ONE OWNER OF "DOES THIS OBJECT HAVE A FORUM" ──────────────────────────────────────
+   FOUNDER DECISION, September 2026: the creator explicitly chooses the audience, and any High,
+   Low, Inquiry or Focus with TWO OR MORE CURRENT READABLE MEMBERS has an object Forum.
+
+   THE DEFECT THIS REPLACES. `forumAvailable` was computed in two places with two different
+   rules, and they had already drifted:
+
+     the thread route     !!nodeId || (kind === 'focus' && participants.length > 1)
+     the composer context object.nodeId || subjectRef.startsWith('group:') || participants.length > 1
+
+   The second accepted a group subjectRef and accepted participants on ANY kind; the first did
+   neither. So the same object could have a Forum in conversation and no Forum on its own screen.
+   Two descriptions of one rule always drift — this file has found that four times now — and the
+   fix is one description, not two corrected ones.
+
+   AND NEITHER IMPLEMENTED THE RULE. Both read "is there a node" rather than "are there two
+   people". A node with one member on its roster — a squad mid-build, a group somebody was
+   removed from — showed a Forum with nobody in it to talk to. The rule counts PEOPLE.
+
+   CURRENT, NOT REMEMBERED. The set is resolved on every read from the roster and the
+   participant list as they stand right now. Nothing is cached and no list is stored, which is
+   what makes an audience change revoke access on the very next read rather than after a sweep.
+   The same property is why a removed participant loses the room immediately.
+
+   Returns the COUNT as well as the flag, because "fewer than two people" is a fact worth being
+   able to say on screen, and a caller that only gets a boolean has to invent a reason. */
+/* IS THIS SOMEBODY YOU COULD ACTUALLY TALK TO? One predicate, because the product already had
+   several: eleven readers ask `status !== 'removed'` or `status === 'active'`, and
+   `_forumAudience` asked only whether the account OBJECT existed. That last one fails OPEN — it
+   counts a person the rest of the product treats as gone, and a Forum offered on a room of one
+   living person and one departed one is exactly the surface AGENTS.md invariant 7 forbids.
+
+   THE RULE IS "NOT MARKED OTHERWISE", not "marked active", and the difference matters on real
+   data: an account written before this field existed carries no `status` at all, and refusing
+   those would empty every room in an older organisation. A status that is present and says
+   anything other than active is taken at its word.
+
+   An account with `passwordSet: false` — somebody invited who has not yet activated — is
+   deliberately COUNTED. They are on the roster, their leader can see them there, and a room that
+   appears the moment they choose a password would make the icon flicker on an event nobody in the
+   room can observe. */
+function _personPresent(u) {
+  return !!u && (u.status == null || u.status === '' || u.status === 'active');
+}
+
+function _forumAudience(code, userId, object) {
+  const kind = String((object && object.kind) || '');
+  const none = (reason) => ({ available: false, readable: 0, reason, key: null, forumKind: null, members: [] });
+  if (!['inquiry', 'high', 'low', 'focus'].includes(kind)) {
+    return none('only a High, a Low, an Inquiry or a Focus can have a discussion');
+  }
+  const raw = (object && object.raw) || {};
+
+  /* A NODE ROOM — whoever is on the roster right now, members and leaders alike. A leader of the
+     node reads the group's own state (see _mayReadGroup) and so belongs in the count; leaving
+     them out would make a coach and one player read as one person. */
+  const subjectRef = String(raw.subjectRef || '');
+  /* WHERE THE NODE COMES FROM, in the order the object is most likely to carry it. `scope` is
+     here because of a real disagreement: a group High or Low is a PROJECTION built by
+     ai/team-state.js, and that projection carries neither a nodeId nor a group subjectRef — so
+     the objects list reported `forumAvailable: false` for a High whose own screen reported true,
+     which is the same surface-disagreement this owner was created to end. The thread route was
+     already injecting the node from its scope; every bucket item carries `scope`, so the owner
+     reads it and no caller has to remember to inject anything. */
+  const scope = String((object && object.scope) || '');
+  const nodeId = (object && object.nodeId) || raw.nodeId
+    || (subjectRef.startsWith('group:') ? subjectRef.slice(6) : null)
+    || (scope.startsWith('group:') ? scope.slice(6) : null)
+    || (object && object.whoseNodeId) || null;
+  if (nodeId && (orgNodes[code] || {})[nodeId]) {
+    const people = [...new Set([..._nodeMembers(code, nodeId), ..._nodeLeaders(code, nodeId)])]
+      // A person whose account is gone is not somebody you can talk to. Counting them would put
+      // a Forum on an object whose room is one living person and one departed one. This used to
+      // ask only whether the account OBJECT existed, which counted an account the rest of the
+      // product treats as gone — see _personPresent.
+      .filter(id => _personPresent((orgUsers[code] || {})[id]));
+    if (people.length < 2) {
+      return { available: false, readable: people.length, key: null, forumKind: null, members: people,
+        reason: 'there is nobody else in this group yet' };
+    }
+    return { available: true, readable: people.length, key: nodeId, forumKind: 'group', members: people };
+  }
+
+  /* A personal Focus invitation is only readable while owner and invitee remain eligible
+     contacts. Re-derive that set for room counts, icons, and writes as well as object reads. */
+  const ownerId = String(raw.ownerId || '');
+  const eligible = ownerId ? new Set([ownerId, ..._contactsFor(code, ownerId).map(c => String(c.id))]) : null;
+  const invited = Array.isArray(raw.participants)
+    ? [...new Set(raw.participants.map(String))].filter(id =>
+      _personPresent((orgUsers[code] || {})[id]) && (!eligible || eligible.has(id))) : [];
+  if (kind === 'focus' && invited.length >= 2) {
+    return { available: true, readable: invited.length, key: String(object.id), forumKind: 'focus', members: invited };
+  }
+  if (kind === 'focus' && invited.length) {
+    return { available: false, readable: invited.length, key: null, forumKind: null, members: invited,
+      reason: 'this one is just you — there is nobody to discuss it with' };
+  }
+
+  /* A HIGH, A LOW OR A PERSONAL INQUIRY THE PERSON CHOSE TO SHARE. These three are read models
+     with no record to write an audience on, so the choice is held in `objectAudiences` and read
+     here — the same question, the same owner, one more place the answer can come from rather than
+     a second definition of what a room is. Everything above still applies: a departed account is
+     nobody to talk to, and a room of one is not a room.
+
+     Resolved fresh on every read, like every other branch of this function, so taking a share
+     back closes the room on the next request rather than after a sweep. */
+  const ownerOfPersonal = String(raw.ownerId || (object && object.ownerId) || userId);
+  const chosen = _objectAudience(code, ownerOfPersonal, kind, String(object && object.id));
+  if (chosen.visibility === 'invited' && chosen.participantIds.length) {
+    const eligibleNow = new Set([ownerOfPersonal, ..._contactsFor(code, ownerOfPersonal).map(c => String(c.id))]);
+    const room = [...new Set([ownerOfPersonal, ...chosen.participantIds])]
+      .filter(id => _personPresent((orgUsers[code] || {})[id]) && eligibleNow.has(id));
+    if (room.length >= 2) {
+      return { available: true, readable: room.length, key: String(object.id), forumKind: kind, members: room };
+    }
+    return { available: false, readable: room.length, key: null, forumKind: null, members: room,
+      reason: 'the people you shared this with are no longer reachable' };
+  }
+
+  return none('this one is just you — there is nobody to discuss it with');
+}
+
+function _forumAudienceSignature(a) {
+  if (!a || !a.available) return null;
+  // Only the precise recipient set approved at staging may receive these words.
+  return require('crypto').createHash('sha256')
+    .update(JSON.stringify([a.forumKind, a.key, [...new Set(a.members)].sort()]))
+    .digest('hex');
+}
+
 function _forumRoom(code, userId, kind, objectId) {
   if (kind !== 'focus') {
     // Group inquiries have their own route above, whose room is the node. Saying so is better
@@ -16038,12 +17473,15 @@ function _forumRoom(code, userId, kind, objectId) {
     .find(o => o && o.kind === 'focus' && String(o.id) === String(objectId));
   if (!obj) return { ok: false, status: 404, error: 'not found' };
   const raw = obj.raw || {};
-  const members = Array.isArray(raw.participants) ? raw.participants.filter(Boolean) : [];
-  // A focus with nobody else on it is you and IntelliQ, which is a conversation and already has
-  // one. The founder's rule is 2+ PEOPLE, and one person is not two.
-  if (members.length < 2) {
-    return { ok: false, status: 400, error: 'this one is just you — there is nobody to discuss it with' };
+  /* WHO IS IN THE ROOM IS ASKED OF THE ONE OWNER, so the room a person can open and the icon
+     that offers it can never disagree. This branch used to count `raw.participants` itself —
+     a third copy of the rule alongside the thread route and the composer context, and the copy
+     that would have kept counting a departed account as somebody you can talk to. */
+  const aud = _forumAudience(code, userId, obj);
+  if (!aud.available) {
+    return { ok: false, status: 400, error: aud.reason || 'this one is just you — there is nobody to discuss it with' };
   }
+  const members = aud.members;
   if (!members.includes(userId)) return { ok: false, status: 403, error: 'not part of this' };
   return { ok: true, key: `focus:${objectId}`, members, subjectRef: raw.nodeId ? `group:${raw.nodeId}` : `member:${userId}` };
 }
@@ -16750,25 +18188,72 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
   if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
   const key = _wsKey(code, userId);
-  const conv = _resolveConversation(key, b.conversationId, b.title || 'Attached material', Date.now(), b.about || null);
+  const checksum = _materialChecksum(text);
+  /* ── A RETRY AFTER AN ANSWER THAT NEVER ARRIVED ─────────────────────────────────────────────
+     The founder's device class is a phone on a stadium connection, and the failure that matters
+     there is not a refused request — it is one the server ACCEPTED and whose reply never came
+     back. The client's ceiling fires, the person presses Try again, and the second request is
+     byte-identical to the first with no conversationId, because the client never learned one.
+
+     The MATERIAL was already safe: deduplicated below by checksum, owner and private visibility.
+     The CONVERSATION was not. Each attempt with no id made a new thread, so one upload on a bad
+     connection left two or three in somebody's list, each holding the same document, and the
+     person had no way to tell which was the real one.
+
+     RECONCILED FROM STATE THE SERVER ALREADY HOLDS, not from a new key the client would have to
+     mint and remember: the checksum that identifies the document also identifies the thread the
+     earlier attempt created for it. Same bytes, same owner, no conversation named -> the same
+     conversation. It is scoped to this owner's own private copy, exactly as the material
+     deduplication is, so equal bytes belonging to somebody else are not a way into their thread.
+
+     A conversationId the client DOES send always wins: a person attaching a document inside a
+     thread they are already in is not retrying anything. */
   const about = _aboutRef(b.about);
-  let ref = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
+  if (b.about && !about) return res.status(400).json({ error: 'invalid attachment context' });
   if (about) {
     const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
-    if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
+    if (!_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) {
+      return res.status(404).json({ error: 'object not found' });
+    }
   }
-  const checksum = _materialChecksum(text);
-  // Composer uploads are private external reading. Deduplication may reuse only
-  // this owner's private copy; equal bytes owned by somebody else are not access.
-  let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+  const existing = Object.values(_materials(code))
+    .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+  const conversations = _assistantConvs(key);
+  if (b.conversationId) {
+    const named = conversations.find(c => c.id === String(b.conversationId));
+    if (!named) return res.status(404).json({ error: 'conversation not found' });
+    if ((named.about || null) !== (about || null)) {
+      return res.status(409).json({ error: 'attachment_context_mismatch' });
+    }
+  }
+  let priorConvId = null;
+  if (!b.conversationId && existing) {
+    const refs = _materialRefs(existing).filter(r => r && r.kind === 'conversation');
+    const prior = refs.map(r => conversations.find(c => c.id === String(r.id)))
+      .find(c => c && (c.about || null) === (about || null));
+    if (prior) priorConvId = prior.id;
+  }
+  const conv = _resolveConversation(key, b.conversationId || priorConvId,
+    b.title || 'Attached material', Date.now(), about);
+  const conversationRef = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
+  let ref = conversationRef;
+  if (about) {
+    const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
+    ref = { kind, id, at: Date.now(), by: userId };
+  }
+  // An object-bound upload keeps BOTH the object and its exact conversation association.
+  // Equal bytes in another object reuse the private material, never the prior thread.
+  let row = existing;
   if (row) {
     if (!_materialOn(row, ref.kind, ref.id)) row.refs = _materialRefs(row).concat([ref]);
+    if (!_materialOn(row, 'conversation', conv.id)) row.refs = _materialRefs(row).concat([conversationRef]);
   } else {
     const id = 'mat_' + generateId();
     row = { materialId: id, byId: userId, orgCode: code,
       title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
       kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text', sections: material.segment(text, { kind: String(b.kind || 'text') }),
-      refs: [ref], checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
+      refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
+      checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
     _materials(code)[id] = row;
   }
   scheduleSave();
@@ -16834,7 +18319,15 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const kind = String(at.kind || '');
   if (!['focus', 'inquiry', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'attach it to a focus, inquiry, high or low' });
   const text = String(b.text || '');
-  if (!text.trim()) return res.status(400).json({ error: 'nothing readable came out of that file' });
+  /* `text.trim()` IS NOT ENOUGH, and finding out why cost an attachment list with a
+     control-character heading in it. trim() strips WHITESPACE; a NUL is not whitespace. So a
+     corrupt binary — a .pptx that failed to parse, an image renamed to .txt — arrives as control
+     characters, survives that check intact, and becomes a real material with unreadable parts.
+     `hasReadableText` asks the question that was actually meant: is there a character in here
+     somebody could read? */
+  if (!material.hasReadableText(text)) {
+    return res.status(400).json({ error: 'nothing readable came out of that file' });
+  }
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: `that file is larger than IntelliQ will hold (${material.TEXT_CAP} characters of text)` });
 
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === String(at.id));
@@ -16865,6 +18358,28 @@ app.post('/api/materials', requireAuth, (req, res) => {
       note: `This is already in your library, so it is the same one — not a second copy. What people have already said about it stays with it.` });
   }
 
+  /* L-MT6 — WHAT KIND OF THING THIS IS, DECIDED BY THE SERVER FROM WHAT IS TRUE.
+
+     The client SAYS what it is asking for; it never decides. `mayAttest` is the same
+     leads-this-node question `_mayAttach` already answered above — somebody entitled to speak for
+     the group the material is attached to — so a person cannot make a claim about an organisation
+     by uploading a file to it. Provenance and confirmation are the person's own deliberate acts
+     and are read from the request, because there is nowhere else they could come from; what stops
+     them being enough on their own is that permission is not.
+
+     A failed request DOWNGRADES to external context and says which of the three was missing.
+     Refusing would lose the file; accepting silently would let an assertion become a fact. */
+  const _mayAttest = _mayAttach(code, userId, obj)
+    && (obj.raw && (obj.raw.nodeId || String(obj.raw.subjectRef || '').startsWith('group:'))
+      ? _leadsNode(code, (obj.raw.nodeId || String(obj.raw.subjectRef).slice(6)), userId)
+      : false);
+  const _cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest: _mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+
   const id = 'mat_' + generateId();
   _materials(code)[id] = {
     materialId: id, byId: userId, orgCode: code,
@@ -16873,6 +18388,11 @@ app.post('/api/materials', requireAuth, (req, res) => {
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
     checksum,
+    /* WHAT IT IS, AND WHERE IT CAME FROM, recorded together. `classification` is what was
+       actually granted, never what was asked for; `source` is the stated provenance and is empty
+       unless somebody stated one. */
+    classification: _cls.class,
+    source: _cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '',
     visibility: 'object', provenance: 'internal',
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
@@ -16883,6 +18403,25 @@ app.post('/api/materials', requireAuth, (req, res) => {
   _audit(code, { actor: userId, action: 'material_attached', subjectIds: [], basis: `${kind}:${at.id} (${sections.length} parts)` });
   scheduleSave();
   res.json({ ok: true, materialId: id, parts: sections.length,
+    /* WHAT WAS RECORDED, AND — WHEN IT IS NOT WHAT WAS ASKED FOR — WHY. A downgrade a person is
+       not told about is a product that quietly disagrees with them. */
+    classification: _cls.class,
+    classificationLabel: (material.CLASS_TEXT[_cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[_cls.class] || {}).means || '',
+    classificationGranted: _cls.granted,
+    classificationReason: _cls.reason || null,
+    /* HOW MUCH WAS ACTUALLY READ. The founder's "read it and work from it" is only trustworthy if
+       a person can see what came out — a 40-slide deck that yielded four sections means something
+       went wrong with the file, and silence about that is how somebody comes to believe IntelliQ
+       has read a document it has four paragraphs of. */
+    extracted: {
+      characters: text.length,
+      sections: sections.length,
+      cap: material.TEXT_CAP,
+      truncated: text.length >= material.TEXT_CAP,
+      sectionCap: material.SECTION_CAP,
+      sectionsCapped: sections.length >= material.SECTION_CAP,
+    },
     sections: sections.map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
     note: `Attached, in ${sections.length} ${sections.length === 1 ? 'part' : 'parts'}. IntelliQ will answer from it, and you will see which parts landed.` });
 });
@@ -16902,6 +18441,60 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
 });
 
 /* GET /api/materials/:id — read it. The parts, in the author's order, in their words. */
+/* POST /api/materials/:id/classification — say deliberately what this material IS.
+
+   SEPARATE FROM ATTACHING IT, which is the whole point. A person who has just uploaded a deck
+   should not have to answer an ontology question before it is saved, and a consequential
+   classification must never be a side effect of an upload. So the file lands as something to
+   read from, and this is the deliberate second act.
+
+   ONLY ITS AUTHOR. Somebody else's material is not yours to reclassify: turning another person's
+   attachment into evidence about the organisation would be putting words in their mouth, which is
+   the same law the contribution boundary keeps for speech.
+
+   AND THE SERVER RE-CHECKS EVERYTHING. Permission is re-derived now, not inherited from whatever
+   was true when the file was attached — a leader who has since been taken off the node cannot
+   confirm a claim about it. A request that fails is DOWNGRADED with its reason, never refused,
+   because refusing would strand the material and silence would let an assertion become a fact. */
+app.post('/api/materials/:id/classification', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String(req.params.id || '');
+  const m = _materials(code)[id];
+  if (!m) return res.status(404).json({ error: 'not found' });
+  const seen = _materialFor(code, userId, id);
+  if (!seen.ok) return res.status(404).json({ error: 'not found' });
+  if (String(m.byId) !== String(userId)) {
+    return res.status(403).json({ error: 'only the person who attached this can say what it is' });
+  }
+
+  const b = req.body || {};
+  // The object it hangs on, resolved through the reader's own authorised set, so permission is
+  // asked about a thing they can actually open.
+  const first = _materialRefs(m)[0] || m.attachTo || {};
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === first.kind && String(o.id) === String(first.id));
+  const nodeId = obj && obj.raw
+    ? (obj.raw.nodeId || (String(obj.raw.subjectRef || '').startsWith('group:') ? String(obj.raw.subjectRef).slice(6) : null))
+    : null;
+  const mayAttest = !!(obj && nodeId && _leadsNode(code, nodeId, userId));
+
+  const cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+  m.classification = cls.class;
+  m.source = cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '';
+  scheduleSave();
+  res.json({ ok: true, materialId: id,
+    classification: cls.class,
+    classificationLabel: (material.CLASS_TEXT[cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[cls.class] || {}).means || '',
+    classificationGranted: cls.granted,
+    classificationReason: cls.reason || null,
+    note: cls.granted ? 'Recorded.' : 'Kept as something to read from.' });
+});
+
 app.get('/api/materials/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const r = _materialFor(code, userId, req.params.id);
@@ -17168,11 +18761,31 @@ function _firmingChart(inq, { title }) {
     });
   }
   if (!occasions.length) return null;
-  return chart.buildFirming({
+  const spec = chart.buildFirming({
     title: title || 'How this firmed up',
     occasions,
     threshold: teamState.MIN_ORIGINS,
   });
+  // Keep the independent replay beside the built chart until the response boundary. The
+  // builder's own points must never become their own evidence in the manifest.
+  return { spec, recordOccasions: occasions };
+}
+
+function _firmingMatchesRecord(spec, occasions) {
+  if (!spec || spec.kind !== 'firming' || !Array.isArray(spec.series)) return false;
+  if (spec.series.some(s => !s || !['origins', 'band'].includes(s.key))) return false;
+  const origins = spec.series.filter(s => s.key === 'origins');
+  const bands = spec.series.filter(s => s.key === 'band');
+  if (origins.length !== 1 || bands.length > 1) return false;
+  const sameRefs = (a, b) => Array.isArray(a) && a.length === b.length && a.every((ref, i) => ref === b[i]);
+  const samePoints = (actual, expected) => Array.isArray(actual) && actual.length === expected.length
+    && actual.every((p, i) => p && p.at === expected[i].at
+      && p.value === expected[i].value && sameRefs(p.refs, expected[i].refs));
+  const expectedOrigins = occasions.map(o => ({ at: o.at, value: o.refs.length, refs: o.refs }));
+  const expectedBands = occasions.map(o => ({ at: o.at, value: chart.BAND_STEPS.indexOf(o.band), refs: o.refs }))
+    .filter(o => o.value >= 0);
+  return samePoints(origins[0].points, expectedOrigins)
+    && (expectedBands.length ? bands.length === 1 && samePoints(bands[0].points, expectedBands) : bands.length === 0);
 }
 
 /* WHAT HAPPENED, IN ORDER. For a focus: set, material attached, reviewed, closed. Dates only. */
@@ -17401,6 +19014,111 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
     note: 'These are connections the records already carry. A connection says two things are related; it does not make either of them more certain.' });
 });
 
+/* ── ONE MANIFEST PER OBJECT (L-MF1) ─────────────────────────────────────────────────────────
+   A thread's opening card, the picture under it and the chips beside it are three channels of ONE
+   answer about ONE object, and each used to decide for itself what it was entitled to say. The
+   card is composed by ai/voice.js, the picture by ai/chart.js, the chips by the client — three
+   authors, no shared record of what the object actually supports.
+
+   This is that record. Built from the object's OWN signals, so it is the record talking rather
+   than a restatement of whatever the card happened to compose.
+
+   THE MOVEMENT CLAIM IS THE ONE THAT MATTERS. A picture drawn as a line says the thing changed
+   over time. `governChart` already refuses a line whose POINTS do not span two moments — but a
+   chart built from the wrong points can satisfy that and still be a line through a record that
+   never moved. So the movement is claimed here, from the signals, and L-MF7 refuses a trend that
+   cannot name it. Two different questions: does the picture agree with itself, and does it agree
+   with the record. */
+/* EVERY DATED FACT THIS OBJECT'S RECORD ACTUALLY HOLDS. Read from the record — signals, when the
+   object was set, reviewed and closed, when material was attached and when somebody engaged with
+   it — and NOT from the chart builders, which is the whole point: a picture is checked against
+   the record rather than against the code that drew it. A timestamp on a chart that is not a
+   moment in the record is an invented moment however plausible the value beside it looks. */
+function _recordMoments(code, userId, obj) {
+  const raw = (obj && obj.raw) || {};
+  const out = new Set();
+  const add = (v) => {
+    const t = Number.isFinite(v) ? Number(v) : (Date.parse(v || '') || NaN);
+    if (Number.isFinite(t) && t > 0) out.add(t);
+  };
+  for (const s of (raw.signals || [])) add(s && s.at);
+  add(raw.createdAt); add(raw.reviewAt); add(raw.updatedAt); add(raw.at);
+  add(raw.outcome && raw.outcome.at);
+  for (const m of Object.values(_materials(code))) {
+    if (!_materialOn(m, obj.kind, obj.id) || !_materialFor(code, userId, m.materialId).ok) continue;
+    add(m.createdAt);
+    for (const e of _engageOf(code, m.materialId)) add(e && e.at);
+  }
+  return [...out];
+}
+
+function _objectManifest(code, userId, obj, { chartSpec = null, sourceCount = 0, now = Date.now() } = {}) {
+  const raw = (obj && obj.raw) || {};
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const sigs = ((raw.signals || []).filter(s => s && s.ref));
+  const origins = new Set(sigs.map(s => diagnose.originIdentity(s) || String(s.ref)).filter(Boolean));
+  const times = _recordMoments(code, userId, obj);
+  const refs = sigs.map(s => String(s.ref));
+
+  const claims = [];
+  /* THE CARD'S OWN SENTENCE, and the counts it is entitled to state: how many accounts, how many
+     separate origins. Those two are the figures a belief card legitimately says and everything
+     else about this organisation it does not. */
+  const headline = String(sum.thinking || (obj.explained && obj.explained.claim) || '');
+  if (headline) {
+    claims.push(manifest.claim({
+      id: 'card', text: headline, stance: 'inferred', basis: refs, at: times[times.length - 1] || null,
+      numbers: [..._figuresIn(headline), origins.size, sigs.length, Number(det.evidenceCount) || 0].filter(n => n > 0),
+    }));
+  }
+  const ask = String(sum.openQuestion || '');
+  if (ask) claims.push(manifest.claim({ id: 'ask', text: ask, stance: 'advice', numbers: _figuresIn(ask) }));
+  /* THE FIGURES THIS ANSWER IS ENTITLED TO STATE ABOUT ITSELF: how many accounts, how many
+     separate origins, how many sources are shown beneath it. Deliberately carries NO text — it
+     approves numbers and states nothing, so it can never be counted as a claim a channel rests
+     on and can never make two channels look like they disagree. */
+  claims.push(manifest.claim({ id: 'counts', text: '', stance: 'recorded', basis: refs,
+    numbers: [origins.size, sigs.length, Number(det.evidenceCount) || 0, Number(sourceCount) || 0].filter(n => n > 0) }));
+  for (const [i, s] of sigs.slice(0, 12).entries()) {
+    claims.push(manifest.claim({ id: `signal_${i}`, text: String(s.text || s.summary || ''), stance: 'recorded',
+      basis: [String(s.ref)], at: Number.isFinite(s.at) ? s.at : null,
+      numbers: _figuresIn(String(s.text || s.summary || '')) }));
+  }
+  /* DID ANYTHING MOVE? Two distinct moments on the record is the whole of it, and it is a claim
+     about the RECORD rather than about the world — hence `inferred`, and hence carrying the
+     uncertainty until the origins clear the floor the rest of the kernel uses. */
+  const _sorted = [...times].sort((a, b) => a - b);
+  if (_sorted.length >= 2) {
+    claims.push(manifest.claim({
+      id: 'movement', stance: 'inferred', basis: refs, at: _sorted[_sorted.length - 1],
+      text: `This record holds ${_sorted.length} separate dated occasions, so there is a before and an after to compare.`,
+      numbers: [_sorted.length, origins.size].filter(n => n > 0),
+      carriesUncertainty: origins.size === 1,
+    }));
+  }
+
+  const limitations = [];
+  if (origins.size === 1) limitations.push('Everything here traces back to a single origin, so repetition is not adding certainty.');
+
+  return manifest.manifest({
+    subject: obj && obj.about ? String(obj.about) : '',
+    at: now, privacyScope: obj && obj.whose ? String(obj.whose) : '', limitations,
+    claims,
+    graph: chartSpec ? {
+      // THE MOMENTS THE RECORD HOLDS, so a plotted timestamp can be checked against the record
+      // rather than against the builder that produced it.
+      moments: times,
+      series: (chartSpec.series || []).map(s => ({
+        key: s && s.key, unit: s && s.unit, shape: s && s.shape,
+        // Only a trend needs a claim behind it; a state or a category asserts no change.
+        claim: (s && s.shape) === 'trend' ? 'movement' : '',
+        points: (s && s.points) || [],
+      })),
+    } : null,
+  });
+}
+
 app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || ''), id = String(req.params.id || '');
@@ -17419,6 +19137,25 @@ app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   if (!governed.ok) {
     return res.json({ ok: true, chart: null, note: chart.refusalNote(governed.violations),
       violations: governed.violations.map(v => v.kind) });
+  }
+  /* ── AND THEN THE SAME QUESTION EVERY OTHER CHANNEL ANSWERS (L-MF4, L-MF7) ─────────────────
+     governChart asks whether the picture agrees with itself. This asks whether it agrees with the
+     ANSWER — the same manifest the object's card is checked against — which is the question that
+     catches a line drawn through a record that never moved, and a value that changed between the
+     governance step and the response. A refused picture returns its reason and no chart, exactly
+     as a governance refusal does: a half-drawn chart is worse than none, because a reader takes
+     what is drawn for the whole. */
+  const _mf = _objectManifest(code, userId, obj, { chartSpec: built.spec });
+  const _ok = manifest.approve(_mf, { graph: { value: governed.chart } });
+  if (!_ok.ok) {
+    console.log(`[chart] manifest refused — ${_ok.violations.map(v => v.kind).join('; ')}`);
+    return res.json({ ok: true, chart: null, note: _ok.note,
+      violations: _ok.violations.map(v => v.kind) });
+  }
+  if (built.recordOccasions && !_firmingMatchesRecord(governed.chart, built.recordOccasions)) {
+    return res.json({ ok: true, chart: null,
+      note: chart.refusalNote([{ kind: 'graph_point_not_in_record' }]),
+      violations: ['graph_point_not_in_record'] });
   }
   res.json({ ok: true, chart: governed.chart });
 });
@@ -17439,8 +19176,8 @@ function _chartFor(code, userId, obj, want = '') {
     }
   }
   if ((!want || want === 'firming') && raw.signals) {
-    const spec = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
-    if (spec) return { spec, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
+    const firming = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
+    if (firming) return { ...firming, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
   }
   if ((!want || want === 'timeline') && obj.kind === 'focus') {
     const spec = _timelineChart(code, userId, obj);
@@ -17803,6 +19540,7 @@ app.get('/api/admin/persistence', requireAuth, async (req, res) => {
 
   const body = {
     ok: true,
+    build: { ...BUILD, commitFull: _FULL_COMMIT },
     mode: PERSISTENCE_MODE,
     debounceMs: SAVE_DEBOUNCE_MS,
     saves: {
@@ -17918,9 +19656,29 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
   if (prop.capability === 'composer_action') {
     const p = prop.payload || {};
-    // A proposal id authorises the frozen server-side payload the person saw. The
-    // browser may never turn confirmation into a second, hidden proposal.
-    if (Object.keys(overrides).length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
+    /* A proposal id authorises the frozen server-side payload the person saw. The browser may
+       never turn confirmation into a second, hidden proposal.
+
+       ONE EXCEPTION, AND IT IS NAMED RATHER THAN GENERAL. `share_to_forum` is the action whose
+       payload IS the thing the person is meant to edit: ai/composer-actions.js states it as the
+       contract — "the text is the PERSON'S, carried in `text` and editable on the card, because a
+       share whose wording the person did not see is a share they did not make" — and the handler
+       below reads `overrides.text` and says the same in its own comment.
+
+       BOTH OF THOSE WERE DEAD. This guard rejected every override before either could run, so the
+       card's edit box could not post and confirming an edited share answered
+       `proposal_payload_changed`. A capability described in two comments and exercised by nothing
+       is exactly the class this engagement keeps finding; it was found here by pressing the
+       button rather than by reading the handler, which is the only way it could have been found.
+
+       The exception is one FIELD on one ACTION, allow-listed by name in both directions: any
+       other key, on any action, still refuses. So the narrow thing a person is meant to change is
+       the only thing they can change, and a browser still cannot rewrite the room, the object or
+       the audience. What is posted is speech, by its author, into a room they are already in, and
+       the handler re-checks membership and re-reads the room from the server regardless. */
+    const _editable = prop.actionType === 'share_to_forum' ? ['text'] : [];
+    const _changed = Object.keys(overrides).filter(k => !_editable.includes(k));
+    if (_changed.length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
     const ref = p.context || null;
     const live = ref && (ref.kind === 'conversation'
       ? ((assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === ref.id) ? { kind: 'conversation', id: ref.id, raw: null } : null)
@@ -18087,6 +19845,75 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       prop.confirmed = { at: new Date().toISOString(), object: ref }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum', forum: { room: nodeId ? 'group' : 'focus', nodeId, objectId: ref.id },
         note: 'Discussion opened. Nothing said there counts as evidence unless its author deliberately contributes it.' });
+    }
+
+    /* ── PRIVATE -> FORUM, THE ONLY PATH ────────────────────────────────────────────────────
+       FOUNDER DECISION: private conversation never enters a Forum without a separate explicit
+       Share to Forum action, an audience preview, and a confirmation. This is that action, at the
+       point where the person has read the audience and pressed confirm.
+
+       Everything that could be taken from somewhere else is taken from the server instead:
+
+         THE ROOM is the room of the object the turn is bound to (`live`), resolved through
+         _forumAudience -- the same owner that decides the icon appears. The proposal cannot name
+         a different one, because nothing here reads a room from the payload.
+         MEMBERSHIP is re-checked NOW, not inherited from the proposal being staged. A person
+         removed from the squad between staging and confirming is refused here.
+         THE WORDS are the person's, and their EDIT WINS. `overrides.text` is what they were
+         looking at on the card; a share whose wording they did not see is a share they did not
+         make.
+
+       AND IT IS SPEECH. It goes through forum.newMessage into forumThreads, the same path a typed
+       message takes, and touches nothing else -- no signal, no origin, no contribution, no
+       confidence. Making it count is a separate deliberate act by its author through the existing
+       contribution boundary, and the reply says so. */
+    if (prop.actionType === 'share_to_forum') {
+      if (prop.visibility === 'only_me' || p.visibility === 'only_me') {
+        return res.status(409).json({ error: 'share_withdrawn', note: 'Make a fresh public proposal if you want to share.' });
+      }
+      if (!live || live.kind === 'conversation') {
+        return res.status(400).json({ error: 'open the thing you want to put to the forum first' });
+      }
+      const aud = _forumAudience(code, userId, live);
+      if (!aud.available) {
+        return res.status(403).json({ error: aud.reason || 'this object has no forum' });
+      }
+      if (!p.audienceSignature || p.audienceSignature !== _forumAudienceSignature(aud)) {
+        return res.status(409).json({ error: 'forum_audience_changed', note: 'The people who can read this room changed. Preview and confirm a fresh share.' });
+      }
+      const inRoom = aud.forumKind === 'group'
+        ? _mayReadGroup(code, aud.key, userId) : aud.members.includes(userId);
+      if (!inRoom) return res.status(403).json({ error: 'not part of this' });
+
+      const editedText = Object.prototype.hasOwnProperty.call(overrides, 'text') ? overrides.text : p.text;
+      const body = String(editedText == null ? '' : editedText).trim().slice(0, 4000);
+      if (!body) return res.status(400).json({ error: 'nothing_to_share' });
+
+      const key = ref.kind === 'focus' ? `focus:${ref.id}` : String(ref.id);
+      const threads = (forumThreads[code] = forumThreads[code] || {});
+      if (!threads[key]) {
+        threads[key] = forum.newThread({ inquiryId: key,
+          nodeId: aud.forumKind === 'group' ? aud.key : '',
+          subjectRef: aud.forumKind === 'group' ? `group:${aud.key}` : `member:${userId}` });
+      }
+      const msg = forum.newMessage({ id: 'fm_' + generateId(), authorId: userId, text: body, replyTo: null });
+      threads[key].messages.push(msg);
+      if (threads[key].messages.length > forum.THREAD_CAP) {
+        threads[key].messages.splice(0, threads[key].messages.length - forum.THREAD_CAP);
+      }
+      prop.confirmed = { at: new Date().toISOString(), object: ref, shared: true };
+      /* NOT AUDITED, DELIBERATELY. My first version called _audit with action 'forum_post', which
+         is not in ai/audit.js's allow-list — so record() refused it and the call was a silent
+         no-op that READ like a record being kept. Widening the vocabulary would have been worse:
+         that trail is "who accessed whose personal data", the basis for a subject access request,
+         and a person choosing to say something in a room they are already in is not an access of
+         anybody's data. The post is recorded where a post belongs — in the thread, with its
+         author held by the kernel — and the proposal carries its own confirmation stamp above. */
+      scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'posted_to_forum',
+        messageId: msg.messageId, epistemicEffect: 'none',
+        forum: { room: ref.kind === 'focus' ? 'focus' : 'group', nodeId: ref.kind === 'focus' ? null : aud.key, objectId: ref.id },
+        note: 'Posted to the forum for this. It is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.' });
     }
 
     if (['inspect_inquiry', 'show_evidence', 'request_research', 'navigate_to_object'].includes(prop.actionType)) {
@@ -18289,7 +20116,14 @@ app.post('/api/assistant/turn/:turnId/correct', requireAuth, (req, res) => {
   const applied = [];
   if (prop) {
     if (/just a note|not a plan/i.test(correction)) { prop.payload.purpose = 'note'; prop.label = 'Keep this — private to you'; applied.push('purpose→note'); }
-    if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) { prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me'); }
+    if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) {
+      if (prop.actionType === 'share_to_forum') {
+        turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id);
+        applied.push('withdrew public share');
+      } else {
+        prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me');
+      }
+    }
     if (/belongs to work|this is work/i.test(correction)) { prop.payload.scope = 'personal_shared'; applied.push('scope→work (visibility unchanged — still needs explicit confirm to share)'); }
     if (/do not remind|don'?t remind|no reminder/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.actionType !== 'checkin_proposal'); applied.push('dropped check-in proposal'); }
     // Correcting a current-state check-in updates the PROPOSED RECORD (never the original message).
@@ -18777,13 +20611,41 @@ function groupId() { return 'grp_' + generateId(); }
 /* ── Create group ─────────────────────────────────────────────────────────── */
 app.post('/api/groups/create', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
-  const { name, description, memberIds, leadIds } = req.body;
+  const me = req.iqSession.userId;
+  const { name, description, memberIds, leadIds, parentId } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
-  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Only a leader can create groups.' });
+  /* ── THIS ROUTE WRITES THE ORG TREE, so it answers to the tree's owner ───────────────────────
+     `_upsertGroupNode` puts what this creates into `orgNodes`. It is not a lighter-weight sibling
+     of the tree routes; it is a second door into the same structure, and it was guarded by a bare
+     `_isLeader` — "does this person lead ANYTHING" — while the front door required `manage_tree`.
+
+     A NEW NODE IS CREATED SOMEWHERE, and where decides who may create it. Under a parent: the
+     creator must manage that parent, which is downward authority doing exactly what the law
+     allows. With no parent at all it is a new top-level branch of the organisation, which is an
+     administrator's act — a department head may build inside their department without being able
+     to add a department beside it. */
+  if (parentId) {
+    if (!(orgNodes[code] || {})[parentId]) return res.status(404).json({ error: 'no such parent node' });
+    if (!_canManageNode(code, me, parentId)) {
+      return res.status(403).json({ error: 'You can only create a group inside a part of the organisation you lead.' });
+    }
+  } else if (!_canManageNode(code, me, null)) {
+    return res.status(403).json({ error: 'Only an administrator can add a new top-level part of the organisation.' });
   }
-  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString() };
+  /* AND YOU MAY NOT WRITE YOURSELF A PROMOTION ON THE WAY IN. Creating a node you will lead is
+     ordinary when you already hold the authority that let you create it; naming yourself the
+     leader of something you could not otherwise have touched is self-promotion with extra steps. */
+  const wantLeads = Array.isArray(leadIds) ? leadIds.map(String) : [];
+  if (wantLeads.includes(String(me)) && !(parentId ? _canManageNode(code, me, parentId) : false)
+      && !_canManageNode(code, me, null)) {
+    return res.status(403).json({ error: 'You cannot make yourself the leader of a new group.' });
+  }
+  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString(), ...(parentId ? { parentId } : {}) };
   _upsertGroupNode(code, group);
+  if (parentId && (orgNodes[code] || {})[parentId]) {
+    const p = orgNodes[code][parentId];
+    p.childNodeIds = [...new Set([...(p.childNodeIds || []), group.id])];
+  }
   scheduleSave();
   res.json({ ok: true, group });
 });
@@ -18802,13 +20664,39 @@ app.get('/api/groups', requireAuth, (req, res) => {
 /* ── Update group ────────────────────────────────────────────────────────── */
 app.put('/api/groups/:groupId', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
+  const me   = req.iqSession.userId;
   const { name, description, memberIds, leadIds } = req.body;
-  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Only a leader can edit groups.' });
-  }
   const groups = _groups(code);   // scoped to the caller's own org — never another's
   const g      = groups.find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
+
+  /* ── AUTHORITY IS ABOUT THIS NODE, NOT ABOUT LEADING SOMETHING SOMEWHERE ─────────────────────
+     This asked `_isLeader(code, userId)` — "does this person lead ANYTHING in the organisation" —
+     and then let them rewrite whichever node they had named. So any leader could edit any node:
+     sideways, upward, into an unrelated subtree. Combined with `_leadsViaHierarchy` treating a
+     member of a node-with-children as a leader, an ordinary member could do it. Driven at head
+     cdf2a79: a member of `alpha` set `beta`'s leaders to themselves.
+
+     One question, one owner, asked about the node actually being changed. */
+  if (!_canManageNode(code, me, g.id)) {
+    return res.status(403).json({ error: 'You can only change a part of the organisation you lead.' });
+  }
+
+  /* ── AND NOT YOUR OWN PLACEMENT, WHICHEVER DIRECTION IT MOVES ────────────────────────────────
+     A leader running a department may add and remove the people under them. They may not write
+     themselves into it, out of it, or up to lead it — that is an anchor change, and an anchor is
+     changed by an authorised superior or an administrator, never by its owner. The comparison is
+     against what the node holds NOW, so a request that simply leaves the actor where they already
+     are is not treated as a move. */
+  const wasMember = (g.memberIds || []).map(String).includes(String(me));
+  const wasLead   = (g.leadIds   || []).map(String).includes(String(me));
+  const willMember = memberIds === undefined ? wasMember : (memberIds || []).map(String).includes(String(me));
+  const willLead   = leadIds   === undefined ? wasLead   : (leadIds   || []).map(String).includes(String(me));
+  if ((willMember !== wasMember || willLead !== wasLead) && !_mayChangeAnchor(code, me, me, g.id)) {
+    return res.status(403).json({
+      error: 'You cannot change your own placement. Ask somebody who leads this part of the organisation.' });
+  }
+
   if (name        !== undefined) g.name        = name;
   if (description !== undefined) g.description = description;
   if (memberIds   !== undefined) g.memberIds   = memberIds;
@@ -20569,10 +22457,34 @@ RULES:
    Additive merge — never overwrites orgName, orgMode, or createdAt.          */
 app.put('/api/org/profile', requireAuth, (req, res) => {
   const { orgCode, orgMode, orgDescription, orgSummary, orgEnvironment, orgSuccessDefinition, orgTraits } = req.body;
-  const code = (orgCode || req.iqSession?.orgCode || '').toLowerCase().trim();
-  if (!code) return res.status(400).json({ error: 'orgCode required' });
+  /* ── THE TENANT IS THE SESSION'S. THE BODY DOES NOT GET A VOTE. ──────────────────────────────
+     REPRODUCED: a superadmin of A sent `{ orgCode: 'B', orgSummary: 'PWNED FROM A' }` and B's
+     profile was rewritten, 200, with A left untouched.
 
-  // Only superadmin for this org may update the profile
+     Two mistakes compounded, and the second is the dangerous one:
+
+       `orgCode || req.iqSession.orgCode`   let the CALLER choose the target organisation
+       `orgUsers[code]?.[session.userId]`   then asked whether the caller's user id exists, with
+                                            the role superadmin, INSIDE THE TARGET THEY CHOSE
+
+     So the authorisation question was "are you a superadmin over there", answered by an id
+     collision. Two organisations that both have a `root`, an `admin` or an `owner` — which is to
+     say most of them — are one lookup away from each other. This is AGENTS.md invariant 4 exactly:
+     relevance is not authorisation, and the thing being confused here is not even relevance, it
+     is a string that happens to match.
+
+     The route directly below this one has said the right thing for months: "identity from the
+     session, never the body". So does the target. A body orgCode is accepted only when it AGREES
+     — rejected rather than ignored, because a client sending a different one is either confused
+     or probing, and silently writing somewhere other than where it asked is its own defect. */
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  if (!code) return res.status(401).json({ error: 'Authentication required. Please log in again.' });
+  const asked = String(orgCode == null ? '' : orgCode).toLowerCase().trim();
+  if (asked && asked !== code) {
+    return res.status(403).json({ error: 'You can only change the organisation you are signed in to.' });
+  }
+
+  // Only a superadmin OF THE SESSION'S OWN ORGANISATION may update the profile.
   const user = orgUsers[code]?.[req.iqSession.userId];
   if (!user || user.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
 
@@ -22545,7 +24457,27 @@ const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
 
 /* Populate all in-memory store objects from a loaded data blob.
    Uses Object.assign so the existing const references stay valid. */
+/* When the required stores actually became available. `readiness.ready` is this and nothing else:
+   the brief's rule is that the product must not report itself ready before they are loaded, and a
+   timestamp is the only form of that claim which cannot be true by default. */
+let _storesLoadedAt = null;
+
+/* ONE PLACE THAT SAYS THE STORES ARE LOADED, because there is more than one way to load them and
+   only one of them was saying so.
+
+   FOUND BY RUNNING THE REAL SERVER AGAINST A REAL DATABASE, which no suite in this repository had
+   ever done: every test runs DB_OPTIONAL=1, and the in-memory path goes through _loadAllStores,
+   which set this. The AUTHORITATIVE SPLIT PATH does not — it calls _applyUnits — so on every real
+   deployment that has ever saved once, `readiness.storesLoaded` was false and `readiness.ready`
+   was FALSE FOREVER, on a completely healthy instance serving every request correctly.
+
+   Nothing failed. The product worked and reported itself not ready, which is the readiness level
+   lying in the safe direction — and a readiness probe nobody can believe is a readiness probe
+   nobody reads. */
+function _markStoresLoaded() { _storesLoadedAt = new Date().toISOString(); }
+
 function _loadAllStores(data) {
+  _markStoresLoaded();
   Object.assign(orgMeta,          data.orgMeta          || {});
   Object.assign(orgUsers,         data.orgUsers         || {});
   Object.assign(inviteTokens,     data.inviteTokens     || {});
@@ -22629,7 +24561,20 @@ function _loadAllStores(data) {
   for (const [token, s] of Object.entries(_savedSessions)) {
     if (s.expiresAt > _now) activeSessions[token] = s;
   }
-  console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from Postgres`);
+  /* ── SAY WHERE IT ACTUALLY CAME FROM ───────────────────────────────────────────────────────
+     This read "Restored 0 active session(s) from Postgres" on every boot, including boots with
+     no Postgres at all — `db.js` builds its pool only when DATABASE_URL is set, and without one
+     the pool is null. So the most prominent line in the startup log asserted a source that did
+     not exist, and "0 sessions" looked like an empty database rather than no database. Working
+     out which of the two you were looking at meant reading db.js.
+
+     A count is not a source. Both are said, and the source is the one the process can actually
+     observe rather than the one it hopes for. */
+  const _sessionSource = process.env.DATABASE_URL ? 'Postgres'
+    : (process.env.DB_OPTIONAL === '1' || process.env.NODE_ENV === 'test')
+      ? 'memory (no DATABASE_URL — nothing here survives a restart)'
+      : 'no configured store';
+  console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from ${_sessionSource}`);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -22669,10 +24614,20 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
+  // The two forum owners, exported so a suite can drive them against object shapes the bucket
+  // produces for kinds that are derived rather than stored (a group High is a projection, not a
+  // record), and so the one-way context can be asserted as BEHAVIOUR rather than as source shape.
+  _forumAudience, _forumContext, _speechFor,
   _inNode, _leadsNode, forumThreads, _forumThread,
+  // exported for the truth layer: the ONE owner of org-tree authority, plus the two it is built
+  // from, so a suite can assert the law directly and mutate the production function rather than
+  // a copy of its rules.
+  _canManageNode, _mayChangeAnchor, _ledNodeIds, _isLeader, userPermissions,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
-  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _chartFor, _materialContext,
+  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
+  // exported for the truth layer: who a person chose to let see each of their own objects
+  objectAudiences, _objectAudience, _resolvePersonalAudience,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library

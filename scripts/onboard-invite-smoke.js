@@ -251,8 +251,19 @@ const server = app.listen(0, async () => {
       !S._isLeader(A, 'granted') && (await invite({ role: 'member' }, grantTok)).status === 200);
     ok('OI-F2 …and may add a member directly, through the same permission',
       (await addUser({ firstName: 'By', lastName: 'Granted', email: 'bygranted@onba.test', role: 'member' }, grantTok)).status === 200);
+    /* THIS ASSERTION USED TO REQUIRE `_isLeader(A, 'sitter') === true`.
+       It was written when the detector really did answer yes for somebody who merely sat in a node
+       with a child, and the point being made was that the DOORS refused them anyway. But stating
+       the premise as an assertion made this suite a guard on the defect: fixing `_isLeader` at its
+       owner turned OI-F3 red, and the only way to keep it green would have been to put the
+       escalation back. PROTOCOL lie #6 — a test that asserts the bug as correct.
+
+       The law it was reaching for survives, and is now true at both layers rather than one: a
+       position in the tree confers nothing, so the detector says no AND the doors say no. The
+       separation the suite exists to prove is untouched — OI-F1 still shows the person holding
+       `edit_members` is admitted while leading nothing at all, which is the other half. */
     ok('OI-F3 a tree position alone does NOT confer it, however leaderish the tree looks',
-      S._isLeader(A, 'sitter') === true
+      S._isLeader(A, 'sitter') === false
       && (await invite({ role: 'member' }, sitTok)).status === 403
       && (await addUser({ firstName: 'By', lastName: 'Sitter', email: 'bysitter@onba.test', role: 'member' }, sitTok)).status === 403);
     ok('OI-F4 …and nothing was created by those refusals',

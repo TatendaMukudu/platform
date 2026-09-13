@@ -45,7 +45,20 @@ ok('docs/INDEX.md exists', !!index);
       present = true;
       execFileSync('git', ['merge-base', '--is-ancestor', m[1], 'HEAD'], { cwd: ROOT, stdio: 'ignore' });
       ancestor = true;
-      age = Number(execFileSync('git', ['rev-list', '--count', `${m[1]}..HEAD`], { cwd: ROOT }).toString().trim());
+      /* --no-merges, and the reason is a red CI on a green local run. GitHub's `pull_request`
+         event does not test this branch: it tests a SYNTHETIC MERGE of this branch into the base.
+         That merge commit is an extra commit, so this count read one higher on the machine that
+         gates the merge than on the machine anybody checks it from — and the threshold was
+         crossed in exactly that gap: 20 locally, 21 in CI, green then red with no change between
+         them. A staleness measure that disagrees with itself by a constant depending on where it
+         runs is a coin flip at its own boundary.
+
+         Excluding merge commits removes the harness's artefact and NOT the work: a real merge of
+         the base branch still contributes every commit it brings, each counted individually,
+         because those are commits the index has genuinely not seen. Only the merge commit itself
+         — which is the CI's own construction, authored by nobody, changing nothing — stops
+         counting. */
+      age = Number(execFileSync('git', ['rev-list', '--count', '--no-merges', `${m[1]}..HEAD`], { cwd: ROOT }).toString().trim());
     } catch (_) {}
     const why = present ? '' : (shallow
       ? ' — it is not in this clone, which is SHALLOW: the checkout needs full history (fetch-depth: 0), the index is not necessarily wrong'

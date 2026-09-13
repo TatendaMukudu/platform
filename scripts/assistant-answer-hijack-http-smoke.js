@@ -25,7 +25,14 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 const C = 'hjk';
 _loadAllStores({
   orgMeta:  { [C]: { orgName: 'Demo Athletic Club', orgMode: 'sports' } },
-  orgUsers: { [C]: { maya: { id: 'maya', name: 'Maya Chen', role: 'member', orgCode: C, status: 'active' } } },
+  orgUsers: { [C]: {
+    maya:  { id: 'maya',  name: 'Maya Chen', role: 'member', orgCode: C, status: 'active' },
+    /* A REAL SECOND MEMBER. The theft assertion below issued a token for `ghost`, an id in no
+       store, so the request is now answered 401 by the session owner — before it ever reaches the
+       ownership rule the assertion is about. "Somebody else cannot delete your assessment" has to
+       be proved by somebody else, not by a person who does not exist. */
+    ghost: { id: 'ghost', name: 'Other Member', role: 'member', orgCode: C, status: 'active' },
+  } },
 });
 _rebuildEmailIndex();
 

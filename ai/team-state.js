@@ -511,7 +511,16 @@ function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
 function newFocus({ focusId, nodeId, text, by, now = Date.now(), reviewAt = null, inquiry = null } = {}) {
   return {
     focusId: _s(focusId, 64), nodeId: _s(nodeId, 64), text: _s(text, 300), status: 'active',
-    createdAt: now, reviewAt: Number.isFinite(Number(reviewAt)) ? Number(reviewAt) : null,
+    /* `Number(null)` is 0 and 0 is finite, so EVERY Focus set without a review date was stored
+       with `reviewAt: 0` — a review due on 1 January 1970. It stayed invisible because
+       `normalizeFocus` reads it through `_num(x) || null`, which turns 0 back into null on the
+       wire, and the two surfaces that read it (`Number(f.reviewAt) || 0`, `if (raw.reviewAt)`)
+       both treat 0 as absent. The stored record and its own wire shape disagreed, and the first
+       surface to ask "is this overdue" rather than "does it have a date" said yes for all of
+       them. Absence is checked before the number is. */
+    createdAt: now,
+    reviewAt: reviewAt == null || reviewAt === '' || !Number.isFinite(Number(reviewAt))
+      ? null : Number(reviewAt),
     origin: { by: _s(by, 64) || null, at: now, from: inquiry ? 'inquiry' : 'leader',
       inquiryId: inquiry ? _s(inquiry.inquiryId, 64) : null }, outcome: null,
   };

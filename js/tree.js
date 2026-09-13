@@ -57,6 +57,29 @@ const OrgTree = {
     return result;
   },
 
+  /* ── WHAT THIS BROWSER SHOULD OFFER, PER NODE ─────────────────────────────
+     A mirror of the server's `_canManageNode`, and only a mirror: the server
+     decides, and refuses a forged request whatever this returns. What it fixes
+     is the other failure — a screen that offers an action the product will not
+     perform, so the person learns the tool is unreliable rather than that they
+     lack the authority.
+
+     The law, same order as the server: an administrator or anybody holding
+     `manage_tree` manages the whole tree; an assigned leader manages the node
+     they lead and everything beneath it, downward only; nobody else manages
+     anything. Membership is not consulted, because sitting in a department
+     that happens to contain a team has never been authority over it. */
+  _mayManage(nodeId) {
+    if (Auth.canDo('manage_tree')) return true;
+    const me = Auth.currentUser?.id;
+    if (!me || !nodeId) return false;
+    for (const n of Object.values(this._nodes || {})) {
+      if (!(n.leaderIds || []).includes(me)) continue;
+      if (n.nodeId === nodeId || this._getDescendantIds(n.nodeId).has(nodeId)) return true;
+    }
+    return false;
+  },
+
   _subtreeMemberCount(nodeId) {
     // Total unique member+leader count across node + all descendants
     const ids = new Set();
@@ -116,7 +139,13 @@ const OrgTree = {
     const leaderCount = (node.leaderIds || []).length;
     const descIds     = this._getDescendantIds(node.nodeId);
     const subtotal    = this._subtreeMemberCount(node.nodeId);
+    /* `canManage` is org-wide authority — adding a SIBLING or MOVING this node changes the tree
+       above it, so it stays where it was. `mayManage` is authority over THIS node, which is what
+       the row itself, its children and its people answer to. The two were one flag, and the row
+       was rendered with `canManage || true` — so every person in the organisation was shown
+       "Assign People" on every node and got a 403 for it. */
     const canManage   = Auth.canDo('manage_tree');
+    const mayManage   = this._mayManage(node.nodeId);
 
     // Leader pills
     const leaderPills = (node.leaderIds || []).slice(0, 3).map(uid => {
@@ -168,13 +197,13 @@ const OrgTree = {
               ${(leaderPills || memberPills) ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">${leaderPills}${memberPills}${overflow}</div>` : ''}
             </div>
           </div>
-          ${canManage || true ? `
+          ${mayManage ? `
             <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.55rem;padding-top:0.45rem;border-top:1px solid var(--border)">
+              <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAddNode('${node.nodeId}')">+ Child</button>
               ${canManage ? `
-                <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAddNode('${node.nodeId}')">+ Child</button>
                 <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAddSibling('${node.nodeId}')">+ Sibling</button>
-                <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openManageNode('${node.nodeId}')">⋯ Manage</button>
-                <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openMoveNode('${node.nodeId}')">↕ Move</button>` : ''}
+                <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openMoveNode('${node.nodeId}')">Move</button>` : ''}
+              <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openManageNode('${node.nodeId}')">Manage</button>
               <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAssignPeople('${node.nodeId}')">Assign People</button>
             </div>` : ''}
         </div>
@@ -389,8 +418,13 @@ const OrgTree = {
   openAssignPeople(nodeId) {
     const node    = this._nodes[nodeId];
     if (!node) { if (typeof showToast === 'function') showToast('Tree still loading — refresh and try again.', 'warning'); return; }
+    /* THE SUPER-ADMIN CAN BE PUT IN A NODE, because they are usually in one. In a small
+       organisation the super-admin is the founder and often coaches a team; filtering them out
+       of this list meant the one structure the product is built on could never record where they
+       actually sat, so their own squad's roster was wrong by exactly one person — them. The
+       server has always accepted them in `memberIds` and `leaderIds`; only this list refused to
+       offer them. */
     const members = (AppState?.members || [])
-      .filter(m => m.role !== 'superadmin')
       .sort((a, b) => a.name.localeCompare(b.name));
     const currentMembers = new Set(node.memberIds  || []);
     const currentLeaders = new Set(node.leaderIds  || []);

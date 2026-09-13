@@ -141,6 +141,38 @@ function explainObject(obj = {}) {
 
   // THE CLAIM. Stated as something I think, never as a fact — the epistemic ladder in grammar.
   const headline = _sentence(label);
+
+  /* EXCEPT WHEN IT IS NOT A CLAIM AT ALL. A focus is a commitment somebody made, in their own
+     words; it is true because they said it, and there is nothing here for IntelliQ to be
+     confident or unconfident about. Running one through the ladder produced, from a member
+     typing "Work on my first touch":
+
+         "My read is that Work on my first touch. Not sure yet."
+
+     — the product hedging about whether a person meant what they had just typed. The epistemic
+     grammar is right for everything the system BELIEVES and wrong for the one kind of object it
+     is merely HOLDING, so the ladder is skipped rather than softened. `obj.mine` and
+     `obj.groupName` say whose it is; neither is required, and with neither it still reads as a
+     commitment rather than a guess. */
+  if (kind === 'focus') {
+    const who = obj.groupName ? String(obj.groupName) : (obj.mine === false ? 'They' : 'You');
+    const verb = obj.groupName ? 'is working on' : (obj.mine === false ? 'are working on' : 'said you would work on');
+    const body = String(claim || label || '').trim();
+    return {
+      kind, headline,
+      claim: body ? `${who} ${verb} this: ${_sentence(body)}` : `${who} ${verb} this.`,
+      // A commitment has no confidence band. Saying so explicitly is what stops a surface
+      // rendering "not sure yet" beside something a person decided.
+      confidence: null,
+      provenance: null,
+      whyIThinkThat: null,
+      stillUnknown: [],
+      wouldChangeMyMind: [],
+      contested: null,
+      setAside: parkedBecause ? _sentence(String(parkedBecause)) : null,
+    };
+  }
+
   const claimLine = claim
     ? `${_pick(['I think', 'My read is', 'What I make of it'], seed + 'c')} ${_sentence(String(claim).replace(/^I think\s+/i, ''))} ${_cap(sure)}.`
         .replace('What I make of it ', 'What I make of it: ').replace('My read is ', 'My read is that ')

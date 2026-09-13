@@ -60,11 +60,9 @@ function iqRingHTML(score, color='#4f8ef7', size=120){
     </div>`;
 }
 
-/* ── GRADE BADGE ─────────────────────────────────────────── */
-function gradeBadgeHTML(grade){
-  if (!grade) return '';
-  return `<span class="grade-badge grade-${grade}">● ${grade}-Grade</span>`;
-}
+/* GRADE BADGE REMOVED, September 2026. It rendered "A-Grade" as a verdict -- on an organisation
+   from a tier that did not exist, and on a PERSON beside their name. Product law 1: directional,
+   never graded. No letter grades as verdicts. */
 
 
 /* ── PROGRESS BAR ────────────────────────────────────────── */

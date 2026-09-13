@@ -81,6 +81,78 @@ function humanTopic(topic = {}) {
 }
 
 function humanBand(band) { return BAND_TEXT[String(band || '').trim()] || BAND_TEXT.tentative; }
+
+/* ── WHAT THE BAND RESTS ON, SAID OUT LOUD ─────────────────────────────────────────────────────
+   The badge carried a tooltip written from the BAND ALONE — a seven-entry lookup in the browser,
+   whose text for anything at `supported` and above was "several separate accounts point the same
+   way". A band cannot support that sentence, and an independent review was right to call it out:
+
+     · several reports whose ORIGIN was never established reach the same band, and the whole
+       origin/occasion distinction in ai/diagnose.js exists precisely because we cannot then rule
+       out that a room is repeating one telling. Asserting independence there is asserting the one
+       thing the model specifically failed to establish.
+     · a picture resting on ONE origin retold by many is capped at 0.55 rather than refused, so it
+       can sit in a band whose tooltip said "several separate accounts".
+     · a contested picture — real disagreement, the most informative state the system has — was
+       described as everything pointing the same way.
+
+   So the sentence is composed HERE, from the counts ai/diagnose.js computed the score from, and
+   nowhere else. Every clause below is true of `origin` or it is not printed. The band is not
+   consulted: this says what the evidence IS, and the band already says how much it is worth.
+
+   No number reaches the reader. "Several separate accounts" is a fact about the record; "four
+   origins across six occasions" is the kernel's vocabulary said out loud, and the presentation
+   layer exists to stop exactly that. */
+function confidenceWhy(confidence = {}) {
+  const c = confidence && typeof confidence === 'object' ? confidence : {};
+  const o = (c.origin && typeof c.origin === 'object') ? c.origin : null;
+  const n = (v) => (Number.isFinite(v) ? v : 0);
+
+  // NO SHAPE, NO CLAIM. An older record, or a caller that did not come through deriveConfidence,
+  // leaves this unanswerable — and the honest answer to an unanswerable question is to say so,
+  // not to fall back on a sentence about accounts we cannot count.
+  if (!o) return 'How sure IntelliQ is about this, from what has been recorded.';
+
+  const origins = n(o.independentOrigins);
+  const unestablished = n(o.unestablishedSources);
+  const signals = n(o.signals);
+  const occasions = n(o.occasions);
+  const retired = n(o.retired);
+  const contradictions = n(o.contradictions);
+
+  let base;
+  if (!signals && retired) {
+    base = 'everything recorded about this has since been corrected or withdrawn';
+  } else if (!signals) {
+    base = 'nothing has been recorded about this yet';
+  } else if (origins >= 2) {
+    /* The ONLY shape that earns the independence claim: two or more established, distinct origins.
+       "Point the same way" is a claim about AGREEMENT and is dropped when any of them dissents —
+       a contested picture is separate accounts that DISAGREE, and appending "and some of it is
+       contradicted" to "they point the same way" is one sentence saying both. */
+    base = contradictions ? 'separate accounts, and they do not all agree'
+      : 'separate accounts point the same way';
+  } else if (origins === 1 && (signals > 1 || unestablished)) {
+    // The case the old text got most wrong, and the one the origin model was written for.
+    base = 'several tellings, but they all trace back to one account';
+  } else if (origins === 1) {
+    base = 'this rests on one account';
+  } else if (unestablished > 1) {
+    base = 'more than one person has said this, but where it came from has not been established';
+  } else {
+    base = 'this rests on very little so far';
+  }
+
+  const clauses = [];
+  // Said once is a different weakness from said by one person, and both can be true.
+  if (signals > 1 && occasions === 1) clauses.push('all said on one occasion');
+  else if (signals === 1) clauses.push('said once');
+  // Already said in the base clause for the multi-origin case; adding it twice reads as two facts.
+  if (contradictions && origins < 2) clauses.push('and some of it is contradicted');
+  else if (retired && signals) clauses.push('with some of it since corrected');
+
+  return `How sure IntelliQ is: ${[base, ...clauses].join(', ')}.`;
+}
 function humanStatus(status) { return STATUS_TEXT[String(status || '').trim()] || STATUS_TEXT.exploring; }
 
 /* THE CARD. Progressive disclosure is a data shape here, not a CSS trick: `summary` is what a
@@ -105,6 +177,11 @@ function inquiryCard(inquiry = {}) {
       // band must not have to parse English back into an enum.
       standing: humanBand(conf.band),
       band: String(conf.band || 'tentative'),
+      /* The badge's explanation, composed from the counts the score was computed from — see
+         confidenceWhy. It rides on `summary` because the badge is on the first screen and its
+         tooltip has to travel with it; a surface that had to reach into `detail` for the words
+         beside a summary field is a surface that will eventually invent its own. */
+      standingWhy: confidenceWhy(conf),
       status: humanStatus(i.status),
       // What we currently think, in the kernel's own words — never re-worded here.
       thinking: i.hypothesis ? String(i.hypothesis) : null,
@@ -117,6 +194,9 @@ function inquiryCard(inquiry = {}) {
     detail: {
       // Why it thinks that — the computed reasons, not prose about them.
       because: Array.isArray(conf.because) ? conf.because.filter(Boolean).map(String) : [],
+      /* The evidence shape itself, so a caller can reason about it rather than parse English out
+         of `because`. Read from the kernel's own answer; never recomputed here. */
+      origin: (conf.origin && typeof conf.origin === 'object') ? { ...conf.origin } : null,
       stillUnknown: unknowns.map(String),
       alternatives: alts.map(a => (typeof a === 'string'
         ? { statement: a, standing: null }
@@ -137,4 +217,112 @@ function inquiryCard(inquiry = {}) {
   };
 }
 
-module.exports = { BAND_TEXT, STATUS_TEXT, looksLikeKey, humanTopic, humanBand, humanStatus, inquiryCard };
+/* ── A FOCUS IS NOT AN INQUIRY ────────────────────────────────────────────────────────────────
+   Every object on the bucket read was run through `inquiryCard`, whatever kind it was. For an
+   inquiry, a high and a low that is right: each is something IntelliQ believes from evidence,
+   and a confidence band is the honest thing to say about it. A FOCUS IS NOT A BELIEF. It is a
+   commitment a person or a group made, in their own words, and it is true because they said it.
+
+   Driven through the real route: a member typed "Work on my first touch" into POST /api/me/focus
+   and the card came back reading
+
+       standing:  "Early thinking"
+       status:    "Looking into this"
+       band:      "tentative"
+       claim:     "My read is that Work on my first touch. Not sure yet."
+
+   The product was hedging about whether somebody meant what they had just typed. The founder's
+   law is that deterministic code decides and the prose reports that decision; here deterministic
+   code decided a commitment was a tentative hypothesis, which is not a wording problem.
+
+   THE SHAPE IS IDENTICAL on purpose — same `summary` and `detail` keys, same field names — so
+   every surface that renders a card keeps working and nobody is tempted to write a second card
+   renderer for this one kind. Only the CONTENT changes, to say what a commitment actually has:
+   who set it, whether it is still open, when it is due a look, and how it turned out. */
+const FOCUS_STANDING = Object.freeze({
+  active:    'Being worked on',
+  done:      'Closed',
+  abandoned: 'Dropped',
+});
+const FOCUS_OUTCOME_TEXT = Object.freeze({
+  helped:  'It helped',
+  no:      'It did not help',
+  mixed:   'Mixed',
+  unclear: 'Too tangled up in other things to tell',
+});
+
+function focusCard(focus = {}, opts = {}) {
+  const f = focus && typeof focus === 'object' ? focus : {};
+  const status = ['active', 'done', 'abandoned'].includes(f.status) ? f.status : 'active';
+  /* EITHER SHAPE. A group Focus records `{ result, note, recordedBy, at }`; a personal one was
+     stored as the bare string `'helped'` until the server's constructor was corrected, and those
+     records are already on disk. Reading both here is what keeps one card honest about two
+     histories, without rewriting somebody's stored record to suit a reader. */
+  const outcome = typeof f.outcome === 'string' && f.outcome
+    ? { result: f.outcome, note: '', recordedBy: null, at: null }
+    : (f.outcome && typeof f.outcome === 'object' ? f.outcome : null);
+  const text = String(f.text || (f.topic && f.topic.label) || '').trim();
+  /* WHOSE COMMITMENT IT IS. The caller knows; this only renders it. "You" and a group's name are
+     the only two answers, because a Focus set for somebody else is not a thing the product has. */
+  const mine = opts.mine !== false && !opts.groupName;
+  const who = opts.groupName ? String(opts.groupName) : 'You';
+
+  /* `Number(null)` is 0 and 0 is finite, so a Focus with no review date read as one due in 1970
+     and every card said "Due a look". Absence is checked before the number is. */
+  const reviewAt = f.reviewAt == null || f.reviewAt === '' || !Number.isFinite(Number(f.reviewAt))
+    ? null : Number(f.reviewAt);
+  const overdue = reviewAt != null && Number.isFinite(Number(opts.now)) && Number(opts.now) > reviewAt;
+
+  return {
+    inquiryId: null,                          // a Focus is not an inquiry and never claims to be
+    focusId: String(f.focusId || f.id || ''),
+    canonicalConcept: '',
+
+    summary: {
+      title: text || 'A focus',
+      /* `standing` is the state of the commitment, not a confidence band. `band` is carried
+         because callers style by it, and a commitment's band is not tentative — it is `stated`,
+         a value no confidence scale produces, so a surface can never mistake one for the other. */
+      standing: FOCUS_STANDING[status],
+      band: 'stated',
+      standingWhy: mine ? 'You set this, so it is what you decided to work on — not something IntelliQ inferred.'
+                        : `${who} set this. It is a commitment, not a conclusion drawn from evidence.`,
+      status: outcome ? FOCUS_OUTCOME_TEXT[outcome.result] || FOCUS_OUTCOME_TEXT.unclear
+            : overdue ? 'Due a look'
+            : status === 'active' ? 'Open' : FOCUS_STANDING[status],
+      // The person's own words, unchanged. Never re-worded, never summarised.
+      thinking: text || null,
+      /* The prompt belongs to whoever can answer it. Asking a squad member "what would tell you
+         this was working" about their coach's commitment is asking the wrong person. */
+      openQuestion: mine && status === 'active' && !outcome && !f.target
+        ? 'What would tell you this was working?' : null,
+      moreUnknowns: 0,
+    },
+
+    detail: {
+      because: [],
+      origin: f.origin && typeof f.origin === 'object' ? { ...f.origin } : null,
+      stillUnknown: [],
+      alternatives: [],
+      falsifiers: [],
+      evidenceCount: 0,
+      independentOrigins: 0,
+      contributors: Array.isArray(f.participants) ? f.participants.length : 0,
+      corrected: 0,
+      contested: false,
+      // What a commitment has that a hypothesis does not.
+      target: f.target ? String(f.target) : null,
+      reviewAt,
+      overdue,
+      outcome: outcome ? {
+        result: outcome.result || 'unclear',
+        reading: FOCUS_OUTCOME_TEXT[outcome.result] || FOCUS_OUTCOME_TEXT.unclear,
+        note: String(outcome.note || ''),
+        at: Number.isFinite(Number(outcome.at)) ? Number(outcome.at) : null,
+      } : null,
+    },
+  };
+}
+
+module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard };
