@@ -277,13 +277,51 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
       args.because = current.trim().slice(0, 600); sources.because = 'user_stated';
     }
 
+    /* ── THE OUTCOME VOCABULARY IS THE BOUND FOCUS'S, NOT ONE OF THEM ──────────────────────
+       This knew only the PERSONAL words. A personal focus asks whether it helped YOU; a GROUP
+       focus asks what happened to the group, and `ai/team-state.js OUTCOME_RESULTS` is
+       better / no_change / worse / unclear. The two were deliberately kept apart when the group
+       vocabulary was introduced, and this owner was never told the second one existed.
+
+       Driven at the kernel: a coach saying "it got better" about a team focus grounded nothing
+       and was asked "did it help, not help, or was it mixed?" — the personal words, about a focus
+       whose own screen offers the other four. So the product asked somebody to answer in a
+       vocabulary it does not offer them, and the canonical group route would have refused the
+       answer if they had given it.
+
+       It REFUSED rather than mis-recording, which is the safe direction and is why this is a
+       seam rather than a wound. The repair is to read which vocabulary the bound focus actually
+       uses — a group focus carries a nodeId, which is the same thing every other reader keys on —
+       and to require the person's own literal word either way. Nothing is inferred, no word is
+       accepted that the person did not write, and the two vocabularies stay separate. */
     if (action.type === 'record_focus_outcome' && raw.outcome) {
       const outcome = String(raw.outcome);
-      const explicit = outcome === 'helped' ? /\bhelped\b/i.test(current)
-        : outcome === 'mixed' ? /\bmixed\b/i.test(current)
-        : /\b(did not|didn['’]t|has not|hasn['’]t) help\b|\bno (?:change|difference|improvement)\b/i.test(current);
+      const _bound = (context && context.object) || {};
+      const _isGroupFocus = _bound.kind === 'focus'
+        && !!(_bound.nodeId || (_bound.raw && _bound.raw.nodeId));
+      /* One literal test per word, in each vocabulary. A group focus never accepts "helped" and
+         a personal one never accepts "no_change", because a word from the other grain is a word
+         the canonical owner for THIS focus would reject. */
+      const GROUP_WORDS = {
+        better:    /\bgot better\b|\bwas better\b|\bimproved\b|\bbetter\b/i,
+        no_change: /\bnothing changed\b|\bno change\b|\bthe same\b|\bunchanged\b/i,
+        worse:     /\bgot worse\b|\bwas worse\b|\bworse\b/i,
+        unclear:   /\btoo tangled\b|\bcan['’]?t tell\b|\bcannot tell\b|\bhard to tell\b|\bunclear\b/i,
+      };
+      const SELF_WORDS = {
+        helped: /\bhelped\b/i,
+        mixed:  /\bmixed\b/i,
+        no:     /\b(did not|didn['’]t|has not|hasn['’]t) help\b|\bno (?:change|difference|improvement)\b/i,
+      };
+      const words = _isGroupFocus ? GROUP_WORDS : SELF_WORDS;
+      const test = words[outcome];
+      const explicit = !!test && test.test(current);
       if (explicit) { args.outcome = outcome; sources.outcome = 'user_stated'; }
-      else needsClarification = needsClarification || 'What happened with this focus: did it help, not help, or was it mixed?';
+      /* AND THE QUESTION OFFERS THE WORDS THAT FOCUS'S OWN SCREEN OFFERS. Asking a coach "did it
+         help, not help, or was it mixed?" about a team focus invites an answer the route refuses. */
+      else needsClarification = needsClarification || (_isGroupFocus
+        ? 'What happened for the group after this focus: did it get better, did nothing change, did it get worse, or is it too tangled to tell?'
+        : 'What happened with this focus: did it help, not help, or was it mixed?');
     }
 
     /* ── THE DECLARED FOCUS RELATION ────────────────────────────────────────────────────────

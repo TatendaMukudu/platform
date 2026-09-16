@@ -16962,17 +16962,38 @@ app.post('/api/group/:nodeId/focus', requireAuth, (req, res) => {
    What actually happened. `unclear` is a first-class answer and the surface says so: a focus
    that ran alongside six other changes has an honest result of "we cannot separate it", and
    recording that is worth more than a guess that later gets counted as evidence. */
-app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const nodeId = String(req.params.nodeId);
+/* ── THE ONE PLACE A GROUP FOCUS'S OUTCOME IS WRITTEN ─────────────────────────────────────────
+   Extracted from the route below so the confirmation dispatcher can reach the SAME writer rather
+   than growing its own. Two callers, one owner: the alternative is the failure this codebase
+   keeps finding — a second caller needing the same write, composing its own, and the two drifting
+   until one of them records a word the other refuses.
+
+   Every gate stays exactly where it was and applies to both callers: leadership of the node, the
+   closed group vocabulary allowlisted rather than coerced, the canonical `teamState` writer, the
+   action completion, the audit line and the save. */
+function _recordGroupFocusOutcome(code, userId, nodeId, focusId, body = {}) {
   const subject = _groupSubjectRef(code, nodeId);
-  if (!subject.ok) return res.status(404).json({ error: subject.error });
-  if (!_leadsNode(code, nodeId, userId)) return res.status(403).json({ error: 'only a leader of this group may close its focus' });
+  if (!subject.ok) return { ok: false, status: 404, error: subject.error };
+  if (!_leadsNode(code, nodeId, userId)) {
+    return { ok: false, status: 403, error: 'only a leader of this group may close its focus' };
+  }
+  const focus = _teamFocuses(code, nodeId).find(f => f.focusId === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'focus not found' };
+  if (!teamState.OUTCOME_RESULTS.includes(body.result)) {
+    return { ok: false, status: 400, error: 'unknown outcome', expected: teamState.OUTCOME_RESULTS,
+      note: 'Say how it went in the group\'s own words. "Too tangled to tell" is a real answer and is one of them.' };
+  }
+  teamState.recordFocusOutcome(focus, {
+    result: body.result, note: body.note, by: userId, now: Date.now(),
+    status: teamState.FOCUS_STATUSES.includes(body.status) ? body.status : 'done',
+  });
+  _completeFocusAction(code, focus, body.result, userId);
+  _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: focus.outcome.result });
+  scheduleSave();
+  return { ok: true, focus };
+}
 
-  const focus = _teamFocuses(code, nodeId).find(f => f.focusId === String(req.params.focusId));
-  if (!focus) return res.status(404).json({ error: 'focus not found' });
-
-  const body = req.body || {};
+app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) => {
   /* ── AN UNKNOWN RESULT IS A REFUSAL, NOT A QUIET "UNCLEAR" ─────────────────────────────────
      `recordFocusOutcome` coerces an unrecognised result to `unclear`, and that coercion is right
      where it sits: a focus that ran alongside six other changes honestly cannot be separated, and
@@ -16984,22 +17005,17 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
      "It helped" the product recorded **unclear** and the group learned nothing from the one signal
      the whole loop exists to earn. Nothing failed; the value was simply replaced on the way past.
 
-     So the route allowlists (AGENTS.md §2.7, fail closed) and says what it expected. A client bug
-     of this shape can now never be silent again. */
-  if (!teamState.OUTCOME_RESULTS.includes(body.result)) {
-    return res.status(400).json({ error: 'unknown outcome',
-      expected: teamState.OUTCOME_RESULTS,
-      note: 'Say how it went in the group\'s own words. "Too tangled to tell" is a real answer and is one of them.' });
+     Every gate — the node, leadership of it, the focus, the allowlist — now lives in
+     `_recordGroupFocusOutcome`, which this route and the composer's confirmation dispatcher both
+     call. THE GATES ARE NOT REPEATED HERE. Checking leadership in two places would be two rules
+     with one name, and the second copy is the one that goes stale. */
+  const { orgCode: code, userId } = req.iqSession;
+  const done = _recordGroupFocusOutcome(code, userId, req.params.nodeId, req.params.focusId, req.body || {});
+  if (!done.ok) {
+    const { ok, status, ...rest } = done;
+    return res.status(status).json(rest);
   }
-  teamState.recordFocusOutcome(focus, {
-    result: body.result, note: body.note, by: userId, now: Date.now(),
-    status: teamState.FOCUS_STATUSES.includes(body.status) ? body.status : 'done',
-  });
-  _completeFocusAction(code, focus, (req.body || {}).result, userId);
-  const result = focus.outcome.result;
-  _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: result });
-  scheduleSave();
-  res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
+  res.json({ ok: true, focus: teamState.normalizeFocus(done.focus) });
 });
 
 /* ── "CAN MY COACH SEE WHAT I JUST SAID?" ────────────────────────────────────
@@ -20506,10 +20522,28 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
     if (prop.actionType === 'record_focus_outcome') {
       const outcome = String(p.outcome || '');
-      const result = _recordPersonalFocusOutcome(code, userId, ref.id, outcome);
-      if (!result.ok) return res.status(result.status).json({ error: result.error });
-      prop.confirmed = { at: new Date().toISOString(), focusId: result.focus.id, outcome }; scheduleSave();
-      return res.json({ ok: true, confirmed: prop.actionType, outcome, focusId: result.focus.id, note: 'Outcome recorded.' });
+      /* ── A GROUP FOCUS'S OUTCOME GOES TO THE GROUP'S OWNER ─────────────────────────────────
+         Every confirmed outcome was being sent to `_recordPersonalFocusOutcome`, which allowlists
+         helped / no / mixed. A team focus records better / no_change / worse / unclear — the two
+         vocabularies were separated deliberately and this dispatcher knew only one of them, so a
+         coach confirming an outcome on their squad's focus got a 400 from the personal writer
+         about a word the group's own screen had offered them.
+
+         No second writer is created. `_recordGroupFocusOutcome` is the route's own body,
+         extracted so both callers reach it — same leadership gate, same allowlist, same canonical
+         `teamState` writer, same audit line. A group focus is identified the way every other
+         reader identifies one: it carries the node it belongs to. */
+      const _nodeOfFocus = live && (live.whoseNodeId || (live.raw && live.raw.nodeId)) || null;
+      const result = _nodeOfFocus
+        ? _recordGroupFocusOutcome(code, userId, _nodeOfFocus, ref.id, { result: outcome })
+        : _recordPersonalFocusOutcome(code, userId, ref.id, outcome);
+      if (!result.ok) {
+        const { ok, status, ...rest } = result;
+        return res.status(status || 400).json(rest.error ? rest : { error: 'outcome refused' });
+      }
+      const _fid = (result.focus && (result.focus.id || result.focus.focusId)) || ref.id;
+      prop.confirmed = { at: new Date().toISOString(), focusId: _fid, outcome }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome, focusId: _fid, note: 'Outcome recorded.' });
     }
 
     if (prop.actionType === 'attach_material') {
