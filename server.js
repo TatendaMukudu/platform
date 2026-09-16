@@ -12942,6 +12942,23 @@ app.get('/api/intelligence/packet', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   try {
     const packet = _intelligencePacket(code, userId);
+    /* ── COUNTED, NEVER SHOWN ─────────────────────────────────────────────────────────────────
+       An item refused because its own text predicts, diagnoses or promises that an option will
+       work disappears from this reader's packet, and until now it disappeared from everywhere:
+       no log, no metric, nothing. A guard that fires invisibly is a guard nobody can tell is
+       working, and a producer that started emitting promises would never be discovered.
+
+       IT IS NOT REPORTED TO THE READER, and that is a decision rather than an omission.
+       `ai/team-state.js` names a WITHHELD topic because that refusal is a privacy one and a
+       leader can act on it — they can go and ask more people. This one is not actionable by any
+       reader: nobody can make a producer phrase something better, so the only thing an
+       acknowledgement conveys is that SOMETHING exists about somebody. On a short queue in a
+       small squad that is an inference channel that buys the reader nothing, and the rule is that
+       privacy beats explanatory UX.
+
+       So the metric carries a COUNT and nothing else — no id, no text, no subject, no scope —
+       and the response is unchanged. */
+    if (packet.refusedForLanguage) _metric(code, 'packet_item_refused_language', packet.refusedForLanguage);
     res.json({ ok: true, lead: packet.lead, queue: packet.queue, sections: packet.sections, upwardQuestions: packet.upwardQuestions, role: packet.role, empty: packet.empty, safe: packet.safe });
   } catch (e) {
     console.warn('[intelligence/packet] failed:', e && e.message);

@@ -475,7 +475,17 @@ it is **not** a parking space.
 **Suites added in these passes:** `metric-lifecycle-smoke`, `import-conflict-smoke`,
 `onboard-invite-smoke` (extended), `pilot-crackdown-smoke` (extended). Browser-only, outside
 `npm test` because they need a binary: `live-recovery-repro`, `onboard-browser-check`,
-`stack-browser-check`, `priority-surface-browser-check`, `library-browser-check`.
+`stack-browser-check`, `priority-surface-browser-check`, `library-browser-check`,
+`group-loop-browser-check`, **`pilot-coach-browser-check`**.
+
+`pilot-coach-browser-check` is the September 26 Alma walkthrough, driven at 390px with models
+off. It exists because of one rule: *the previous outcome bug survived because tests called the
+route correctly while the UI sent the wrong value.* Every consequential action in it is performed
+by clicking the rendered control, and each is checked at four places — what the screen offered,
+what the browser emitted, what the canonical store holds, and what the screen says next. It also
+asserts the negative half of the ten-second test: no canonical key, no object id, no architecture
+vocabulary, no raw band, no causal claim. Restoring the outcome-vocabulary bug, the canonical-key
+leak or the hypothesis-standing rule each turns it red.
 
 **Still not verified by anybody:** live Neon, restart durability, deployed build identity, and real
 iPhone/Safari behaviour. Every report in `docs/reviews/` that touches these says so; do not read a

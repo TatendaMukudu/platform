@@ -96,6 +96,27 @@ ok('packet output is deterministic', JSON.stringify(packet.buildPacket({ actor: 
   const forced = packet.buildPacket({ actor, nodes: scope, feed: { items: [honest] } });
   ok('packet.safe is true when everything in it describes only',
     forced.safe === true);
+  /* ── A GUARD THAT FIRES INVISIBLY IS A GUARD NOBODY CAN TELL IS WORKING ────────────────────
+     The refusal above is right and the silence after it was not: the item vanished with no log,
+     no metric and no trace, so a producer that started emitting promises would never have been
+     discovered. It is now counted.
+
+     AND IT IS STILL NOT TOLD TO THE READER. team-state names a withheld TOPIC because that
+     refusal is a privacy one a leader can act on — they can go and ask more people. This one is
+     not actionable by anybody: no reader can make a producer phrase something better, so the only
+     thing an acknowledgement conveys is that SOMETHING exists about somebody, which on a short
+     queue in a small squad is an inference channel that buys them nothing. Privacy beats
+     explanatory UX, so the count travels to the operator and the reader is told nothing. */
+  ok('a refused item is COUNTED, so a producer emitting promises is discoverable rather than silent',
+    built.refusedForLanguage === 1);
+  ok('…and the count is a number with no id, text, subject or scope attached to it',
+    typeof built.refusedForLanguage === 'number');
+  ok('…and nothing about it reaches the reader, because no reader can act on it and saying so says somebody exists',
+    !/refused|withheld|not available|hidden|blocked/i.test(JSON.stringify({
+      lead: built.lead, queue: built.queue, sections: built.sections, upwardQuestions: built.upwardQuestions,
+      role: built.role, empty: built.empty, safe: built.safe })));
+  ok('…and a packet with nothing refused counts zero rather than omitting the field',
+    packet.buildPacket({ actor, nodes: scope, feed: { items: [honest] } }).refusedForLanguage === 0);
   ok('…and false when a promise is placed directly into the queue, so the flag is computed rather than declared',
     (() => {
       const sneaked = packet.buildPacket({ actor, nodes: scope, feed: { items: [honest] } });

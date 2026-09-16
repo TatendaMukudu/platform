@@ -146,6 +146,25 @@ function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs 
   const scope = actorScope(nodes, actor);
   const feedItems = Array.isArray(feed) ? feed : (feed.items || []);
   const visibleItems = feedItems.filter(item => canUseItem(item, scope, nodes, opts));
+  /* ── A GUARD THAT FIRES INVISIBLY IS A GUARD NOBODY CAN TELL IS WORKING ────────────────────
+     `canUseItem` refuses an item whose own text predicts, diagnoses or promises that an option
+     will work, and the item then vanishes with no trace anywhere. The refusal is right; the
+     silence is the part that is not.
+
+     WHAT IS NOT DONE HERE, and deliberately. The reader is told nothing. `ai/team-state.js`
+     names a WITHHELD topic because that refusal is a privacy one and a leader can act on it —
+     they can go and ask more people. A language refusal is not actionable by any reader: nobody
+     can make a producer phrase something better, so the only thing an acknowledgement conveys is
+     that SOMETHING exists about somebody. On a short queue in a small squad that is an inference
+     channel and buys the reader nothing, and the rule is that privacy beats explanatory UX.
+
+     So it is counted, not displayed. A COUNT, with no id, no text, no subject and no scope — the
+     smallest fact that makes the guard observable, which is what turns "a producer started
+     emitting promises" from something nobody would ever discover into something a metric shows.
+     The caller records it; this module does no IO. */
+  const refusedForLanguage = feedItems.filter(item =>
+    item && item.safe !== false && !visibleItems.includes(item)
+    && !_visibleText(item).every(t => guard.describesOnly(t))).length;
   const upwardQuestions = routeQuestions(questions, scope, nodes);
   const packetItems = [...visibleItems];
   for (const q of upwardQuestions) {
@@ -172,6 +191,9 @@ function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs 
   return {
     actorId: scope.userId,
     role: scope.role,
+    // How many items this reader was not shown because their own text failed the language guard.
+    // A number and nothing else; see the note above buildPacket's filter.
+    refusedForLanguage,
     leaderNodeIds: scope.leaderNodeIds,
     memberNodeIds: scope.memberNodeIds,
     visibleNodes: scope.visibleNodes,
