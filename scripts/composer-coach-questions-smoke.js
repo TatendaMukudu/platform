@@ -178,6 +178,48 @@ const server = app.listen(0, async () => {
     ok('CQ-G1 the answer is about their position, not about a shortage of evidence',
       /not on a group yet/i.test(none.text) && !/enough authorised evidence/i.test(none.text));
 
+    /* ══ H — PROVIDER DOWN SAYS WHICH THING IS MISSING, AND WHERE THE DOOR IS ════════════════
+       With no model the action interpreter is unavailable, so "Create a Focus to try player-led
+       debriefs" selected no action and fell through to a generic capture card — under a reply
+       about the REASONING ENGINE being switched off, which is a different subsystem. A coach
+       reading that learns nothing true: the product can still start a focus, and the control is
+       two taps away on the question's own screen.
+
+       The signpost chooses no action, binds no object, proposes nothing and writes nothing. It
+       fires only when the interpreter is unavailable, so it can never pre-empt the governed path
+       or disagree with it. */
+    console.log('\n  H — WITH NO MODEL, AN ACTION REQUEST IS ANSWERED HONESTLY');
+    for (const [what, utterance] of [
+      ['Focus',   'Create a Focus to try player-led debriefs.'],
+      ['Inquiry', 'Create an Inquiry into why substitutes feel disconnected.'],
+      ['High',    'Create a High about our pressing being much more coordinated today.'],
+      ['Low',     'Create a Low about substitute role clarity.'],
+    ]) {
+      const r = await ask(utterance);
+      ok(`CQ-H1 "${what}": it says plainly that it has created nothing`,
+        /have not created anything/i.test(r.text));
+      ok(`CQ-H1b "${what}": …and names the reason as the language model, not as a reasoning engine`,
+        /language model is unavailable/i.test(r.text));
+      ok(`CQ-H1c "${what}": …and points at the control that still works with no provider`,
+        /Work on this|group screen/i.test(r.text));
+      ok(`CQ-H1d "${what}": …and confirms the words are kept privately rather than lost`,
+        /nothing was saved or shared/i.test(r.text));
+    }
+    /* AND IT IS A SIGNPOST, NOT A SECOND INTENT ENGINE. It must not fire on an ordinary sentence,
+       and it must never be the thing that acts. */
+    const ordinary = await ask('Nobody talks after we lose.');
+    ok('CQ-H2 an ordinary observation gets no signpost, because there was no action to read',
+      !/have not created anything/i.test(ordinary.text));
+    const question = await ask('What have we tried?');
+    ok('CQ-H2b …and neither does a question the product can actually answer',
+      !/have not created anything/i.test(question.text));
+    /* CQ-H3 WAS `async () => true` FOR ONE EDIT — an assertion that cannot fail, which is the
+       vacuous kind this repository keeps catching in its own tests. Removed rather than left in
+       beside the real one. What follows counts. */
+    const focusCount = ((await call('GET', '/api/objects?kind=focus&scope=all', undefined, 'coach')).j || {}).objects || [];
+    ok('CQ-H3 the signpost writes nothing — counted, after four separate requests to create something',
+      focusCount.length === 1);
+
   } catch (e) { fail++; console.error('  FAIL composer-coach-questions threw:', e && e.stack); }
 
   server.close();

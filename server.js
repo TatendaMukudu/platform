@@ -15729,6 +15729,33 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (actionReading.needsClarification && !parts.some(x => String(x).includes(actionReading.needsClarification))) {
     parts.push(actionReading.needsClarification);
   }
+  /* ── PROVIDER DOWN: SAY WHICH THING IS UNAVAILABLE, AND WHERE THE DOOR IS ──────────────────
+     With no model the action interpreter returns `unavailable`, no allow-listed action is ever
+     selected, and an utterance like "Create a Focus to try player-led debriefs" fell through to a
+     generic capture card — under a reply about the REASONING ENGINE being switched off, which is
+     a different subsystem entirely. A coach reading that learns nothing true: the product can
+     still start a focus, and the control is two taps away on the question's own screen.
+
+     THIS IS A SIGNPOST, NOT AN INTENT ENGINE, and the distinction is the whole safety argument:
+
+       it chooses no action, binds no object, proposes nothing and writes nothing;
+       it fires ONLY when the interpreter is unavailable, so it can never pre-empt the governed
+       path or disagree with it;
+       it is pure syntax — a leading create/start/record verb next to one of the four object
+       words the product already has — and it says the same sentence whichever it matched, so
+       there is nothing for it to get subtly wrong;
+       and it points at the EXISTING deterministic control, which is the one thing that still
+       works with no provider.
+
+     Provider-down must never silently perform a consequential action. It must also not pretend
+     the capability is gone. */
+  if (actionReading.unavailable && /^\s*(?:please\s+)?(?:create|start|open|make|add|record|log)\b[^]{0,80}?\b(focus|inquiry|high|low)\b/i.test(String(text || ''))) {
+    const _signpost = 'I cannot read that as an action while the language model is unavailable, '
+      + 'so I have not created anything. You can still do it yourself: open the thing it is about '
+      + 'and choose "Work on this", or use the group screen. What you typed is in this private '
+      + 'conversation and nothing was saved or shared.';
+    if (!parts.some(x => String(x).includes('have not created anything'))) parts.push(_signpost);
+  }
   let responseText = parts.join(' ');
   /* ── THE DETERMINISTIC COPY IS ENGLISH, AND SAYS SO ────────────────────────────────────────
      Everything assembled above is written in this file. It is not model-written, so there is
