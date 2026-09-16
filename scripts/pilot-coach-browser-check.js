@@ -409,6 +409,66 @@ _rebuildEmailIndex();
       !!(await fresh.page.$('#iq-composer-input')));
     await fresh.ctx.close();
 
+    /* ══ J — VOICE, AS PART OF THE JOURNEY RATHER THAN AS A FEATURE ═════════════════════════
+       Voice is already built and tested and is not redesigned here. What this checks is the part
+       a pilot actually depends on: that it is present, that it degrades honestly where it is not
+       available, that typing never stops working, and that a spoken sentence carries no more
+       authority than a typed one — it lands in the same composer, goes through the same governed
+       turn, and confirms the same way.
+
+       Headless Chromium has no SpeechRecognition, which makes this the unsupported-browser case
+       for free — the one a coach on an older phone will hit. */
+    console.log('\n  J — VOICE IS A WAY IN, NOT A SECOND AUTHORITY');
+    await coach.page.evaluate(() => navigate('home'));
+    await coach.page.waitForTimeout(1800);
+    const mic = await coach.page.$('#iq-mic');
+    ok('PC-J1 the microphone is offered beside the composer, on the screen a coach lands on',
+      !!mic);
+    ok('PC-J2 …labelled for what it does, and announced as a control rather than a toggle with no state',
+      !!mic && /speak instead of typing/i.test(await mic.evaluate(el => el.getAttribute('aria-label') || '')));
+    const micBox = mic && await mic.boundingBox();
+    ok('PC-J3 …and a thumb can hit it at 390px', !!micBox && micBox.height >= 36 && micBox.width >= 36);
+    /* THE TWO WAYS VOICE CAN BE UNUSABLE, and a pilot hits both: a browser with no speech
+       recognition at all, and one that has it and is refused the microphone. Headless Chromium
+       reports support and is then denied permission, which is the SECOND case — the commoner one
+       on a real phone, where a coach taps the mic and the permission sheet is dismissed. The
+       assertion covers whichever this build produces rather than pinning one, because a check
+       that only passes on the branch that happens to run is a check of the harness. */
+    const supported = await coach.page.evaluate(
+      () => !!(window.IQVoice && window.IQVoice.isSupported && window.IQVoice.isSupported()));
+    await mic.click();
+    await coach.page.waitForTimeout(700);
+    const voiceState = await textOf(coach.page, '#iq-voice-state');
+    ok('PC-J4 whichever way voice is unusable here, the product says which one it was',
+      supported
+        ? /microphone access was declined|no speech was picked up|could not hear/i.test(voiceState)
+        : /not available in this browser/i.test(voiceState));
+    ok('PC-J5 …and every one of those sentences ends by pointing at typing, which always works',
+      /just type|typing works as normal|or type/i.test(voiceState));
+    ok('PC-J6b …and it is announced, so a coach who cannot see the state line is still told',
+      await coach.page.evaluate(() => {
+        const el = document.getElementById('iq-voice-state');
+        return !!el && el.getAttribute('role') === 'status' && !!el.getAttribute('aria-live');
+      }));
+    ok('PC-J6 …and nothing was recorded by tapping it — a microphone that cannot listen must not create anything',
+      !posts.some(p => /assistant\/turn/.test(p.url) && p.body && /^$/.test(String(p.body.text || 'x'))));
+    /* A TRANSCRIPT IS JUST TEXT IN THE BOX. That is the whole authority claim: voice fills the
+       same field a thumb would, and everything after it is the path a typed sentence takes. */
+    posts.length = 0;
+    await coach.page.fill('#iq-composer-input', 'Talking dropped off again after Saturday');
+    await coach.page.evaluate(() => MemberApp.wsSend());
+    await coach.page.waitForTimeout(2200);
+    const spoken = posts.find(p => /assistant\/turn/.test(p.url));
+    ok('PC-J7 what lands in the composer goes through the ordinary governed turn',
+      !!spoken && spoken.body.text === 'Talking dropped off again after Saturday');
+    ok('PC-J8 …carrying no marker that would let a spoken sentence be treated as better evidence',
+      !!spoken && !('voice' in spoken.body) && !('spoken' in spoken.body) && !('transcript' in spoken.body));
+    ok('PC-J9 …and typing remained available throughout, which is the rule that makes voice optional',
+      await coach.page.evaluate(() => {
+        const t = document.getElementById('iq-composer-input');
+        return !!t && !t.disabled && !t.readOnly;
+      }));
+
     /* ══ I — PROVIDER DOWN ══════════════════════════════════════════════════════════════════ */
     console.log('\n  I — AND EVERY LINE ABOVE WAS WRITTEN WITH NO MODEL REACHABLE');
     ok('PC-I1 the whole walkthrough ran with models switched off',
