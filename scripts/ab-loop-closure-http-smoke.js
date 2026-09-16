@@ -40,6 +40,7 @@ process.env.NODE_ENV    = 'test';
 
 const S  = require('../server.js');
 const ce = require('../ai/cross-evidence.js');
+const teamState = require('../ai/team-state.js');
 const { app, _loadAllStores, _rebuildEmailIndex, issueToken,
         groupCandidates, _noteGroupCandidates, _allObjectsFor } = S;
 
@@ -143,6 +144,58 @@ const server = app.listen(0, async () => {
     ok('AB-D4 …with what has been recorded since, so the next decision has somewhere to start',
       !!((rel.j || {}).loop || {}).observedSince
       && Number.isFinite(((rel.j).loop.observedSince || {}).records));
+
+    console.log('\n  G — THE WORDS THE COACH IS OFFERED ARE THE WORDS THE PRODUCT RECORDS');
+    /* THE LEARNING ARROW, AND IT WAS BROKEN WHERE IT MATTERS MOST. The group's closed vocabulary
+       is better / no_change / worse / unclear, and `recordFocusOutcome` coerces anything else to
+       `unclear`. The coach's own buttons sent `helped` — the PERSONAL focus vocabulary — so every
+       time a coach pressed "It helped", the product recorded "too tangled to tell" and the group
+       learned nothing from the one signal the whole loop exists to earn.
+
+       No suite caught it, because every suite sent a valid group word directly. None of them ever
+       drove the values the CLIENT offers, which is the only place the two vocabularies meet. */
+    const fs = require('fs'), path = require('path');
+    const appJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+    const offered = (appJs.match(/\$\{\['better', 'no_change', 'worse', 'unclear'\]\.map\(rkey/) || [])[0];
+    ok('AB-G1 the group outcome buttons offer the group\'s own four words',
+      !!offered);
+    ok('AB-G2 …and every one of them is in the kernel\'s closed vocabulary',
+      ['better', 'no_change', 'worse', 'unclear'].every(w => teamState.OUTCOME_RESULTS.includes(w)));
+    ok('AB-G3 …and `helped`, which is the PERSONAL vocabulary, is not among them',
+      !teamState.OUTCOME_RESULTS.includes('helped'));
+
+    /* DRIVEN, ONE BUTTON AT A TIME, THROUGH THE REAL ROUTE. A parity check on source text would
+       not have caught the original defect either — the words were all spelled correctly, they
+       were simply the wrong set. What matters is what comes back out of the store. */
+    for (const word of teamState.OUTCOME_RESULTS) {
+      const made2 = await call('POST', '/api/group/squad/focus',
+        { text: `Try something and record ${word}`, fromInquiryId: inq.inquiryId }, 'coach');
+      const fid2 = ((made2.j || {}).focus || {}).focusId;
+      const rec = await call('POST', `/api/group/squad/focus/${fid2}/outcome`, { result: word }, 'coach');
+      ok(`AB-G4 "${word}" is recorded as "${word}" and not coerced`,
+        rec.status === 200 && (((rec.j || {}).focus || {}).outcome || {}).result === word);
+    }
+
+    /* AND AN UNKNOWN WORD IS A REFUSAL. Coercing it to `unclear` is right as a last line inside
+       the constructor and wrong as a first one at the boundary: it is what made a broken caller
+       silent for as long as it was. */
+    const stale = await call('POST', '/api/group/squad/focus',
+      { text: 'One more', fromInquiryId: inq.inquiryId }, 'coach');
+    const staleId = ((stale.j || {}).focus || {}).focusId;
+    const bad = await call('POST', `/api/group/squad/focus/${staleId}/outcome`, { result: 'helped' }, 'coach');
+    ok('AB-G5 a word from the WRONG vocabulary is refused, not quietly filed as "unclear"',
+      bad.status === 400);
+    ok('AB-G6 …and the refusal names what it expected, so the next caller cannot guess wrong',
+      Array.isArray((bad.j || {}).expected)
+      && (bad.j).expected.join(',') === teamState.OUTCOME_RESULTS.join(','));
+    ok('AB-G7 …and nothing was written on the focus by that refusal',
+      () => {
+        const f = (S.teamFocuses[O].squad || []).find(x => x.focusId === staleId);
+        return !f.outcome && f.status === 'active';
+      });
+
+    ok('AB-G8 every word the kernel allows has English for a person to read',
+      teamState.OUTCOME_RESULTS.every(w => new RegExp(`\\b${w}:\\s*'`).test(appJs)));
 
     console.log('\n  E — THE ALIAS RESOLVES BY IDENTITY, AND INVENTS NOTHING');
     /* Each of these is a way the repair could have been wrong. */

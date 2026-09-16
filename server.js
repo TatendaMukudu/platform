@@ -16444,6 +16444,24 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
   if (!focus) return res.status(404).json({ error: 'focus not found' });
 
   const body = req.body || {};
+  /* ── AN UNKNOWN RESULT IS A REFUSAL, NOT A QUIET "UNCLEAR" ─────────────────────────────────
+     `recordFocusOutcome` coerces an unrecognised result to `unclear`, and that coercion is right
+     where it sits: a focus that ran alongside six other changes honestly cannot be separated, and
+     recording that is worth more than a guess. But it is a LAST line, and used as a first one it
+     hides a broken caller — which is exactly what happened.
+
+     The group's closed vocabulary is better / no_change / worse / unclear. The coach's own buttons
+     sent `helped`, which is the PERSONAL focus vocabulary, so every time a coach pressed
+     "It helped" the product recorded **unclear** and the group learned nothing from the one signal
+     the whole loop exists to earn. Nothing failed; the value was simply replaced on the way past.
+
+     So the route allowlists (AGENTS.md §2.7, fail closed) and says what it expected. A client bug
+     of this shape can now never be silent again. */
+  if (!teamState.OUTCOME_RESULTS.includes(body.result)) {
+    return res.status(400).json({ error: 'unknown outcome',
+      expected: teamState.OUTCOME_RESULTS,
+      note: 'Say how it went in the group\'s own words. "Too tangled to tell" is a real answer and is one of them.' });
+  }
   teamState.recordFocusOutcome(focus, {
     result: body.result, note: body.note, by: userId, now: Date.now(),
     status: teamState.FOCUS_STATUSES.includes(body.status) ? body.status : 'done',

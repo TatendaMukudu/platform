@@ -12715,7 +12715,17 @@ const MemberApp = {
             ${leads ? `
               <div class="iqg-focus-ask">When it has run, what happened?</div>
               <div class="iqg-outcome-btns">
-                ${['helped', 'no_change', 'unclear'].map(rkey => `
+                ${/* THE GROUP'S OWN FOUR WORDS. These were `helped, no_change, unclear` — and
+                      `helped` is the PERSONAL focus vocabulary, not this one. ai/team-state.js
+                      OUTCOME_RESULTS is better / no_change / worse / unclear, and anything else is
+                      coerced to `unclear`, so every time a coach pressed "It helped" the product
+                      recorded "too tangled to tell" and the group learned nothing from the single
+                      most valuable signal in the loop.
+
+                      `worse` was never offered at all, so a group could only ever record good news
+                      or no news. A product that cannot be told something made things worse is not
+                      keeping an honest record. */''}
+                ${['better', 'no_change', 'worse', 'unclear'].map(rkey => `
                   <button type="button" class="btn btn-outline btn-sm"
                     onclick="MemberApp.recordGroupOutcome('${esc(nodeId)}','${esc(focus.focusId)}','${rkey}')"
                   >${esc(this._OUTCOME_WORDS[rkey])}</button>`).join('')}
@@ -12949,7 +12959,18 @@ const MemberApp = {
   /* The three outcome words, in a person's language. The closed vocabulary belongs to
      ai/team-state.js OUTCOME_RESULTS; this is only its English, in one place so the group
      screen and the object thread cannot drift into two readings of one word. */
-  _OUTCOME_WORDS: { helped: 'It helped', no_change: 'Nothing changed', unclear: 'Too tangled to tell' },
+  /* BOTH CLOSED VOCABULARIES, because this renders both grains and they are deliberately not the
+     same. A GROUP records better / no_change / worse / unclear about a change it tried
+     (ai/team-state.js OUTCOME_RESULTS); a PERSON answers helped / no / mixed about their own
+     commitment (server `_recordPersonalFocusOutcome`). Those are different questions and R8.3
+     kept them apart on purpose. This map was missing `better` and `worse` entirely — so the two
+     words a group is most likely to record fell through to the raw key and a coach read "better"
+     where the product meant to say something. */
+  _OUTCOME_WORDS: {
+    better: 'It got better', no_change: 'Nothing changed', worse: 'It got worse',
+    unclear: 'Too tangled to tell',
+    helped: 'It helped', no: 'It did not help', mixed: 'Mixed',
+  },
 
   async _renderReading(kind, objectId, scope = 'self') {
     const box = document.getElementById('iqt-reading');
