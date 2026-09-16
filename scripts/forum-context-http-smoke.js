@@ -164,9 +164,23 @@ const server = app.listen(0, async () => {
   try {
     console.log('\n  A — ALL FOUR KINDS EXIST AS REAL OBJECTS WITH A REAL ROOM');
     const objs = {};
+    /* FOUR OBJECTS THAT ARE FOUR DIFFERENT THINGS. A High and a Low are PROJECTIONS of an
+       inquiry and share its id, so their room IS that inquiry's room — which is correct, and
+       which means "the INQUIRY object" has to be one the High and the Low are not projections
+       of, or this section would be asserting that a room is isolated from itself.
+
+       That could be left to luck while the group bucket filed exactly ONE inquiry object: the one
+       that won the ranking slot, which `openQuestion` deliberately picks from an inquiry the
+       High and Low are not already reporting. The bucket now files every one of a group's
+       inquiries — before this pass the other three had no object at all and 404'd from the thread
+       route — so the first one returned can be the High's or the Low's own inquiry, and the
+       fixture has to say which it means instead of taking whatever sorts first. */
+    const _taken = new Set();
     for (const kind of ['high', 'low', 'inquiry', 'focus']) {
       const r = await get(`/api/objects?kind=${kind}&scope=group:sq`, T.p1);
-      objs[kind] = ((r.j && r.j.objects) || [])[0] || null;
+      const rows = (r.j && r.j.objects) || [];
+      objs[kind] = (kind === 'inquiry' ? rows.find(o => o && !_taken.has(String(o.id))) : rows[0]) || null;
+      if (objs[kind]) _taken.add(String(objs[kind].id));
       ok(`FC-A1 a group ${kind.toUpperCase()} is in the squad's bucket — without it nothing below is testing that kind`,
         !!objs[kind] && !!objs[kind].id);
     }

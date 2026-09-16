@@ -17112,7 +17112,23 @@ function _objectBucket(code, userId, scope = 'self') {
       stillUnknown: raw.stillUnknown || [], falsifiers: raw.falsifiers || [],
       contested: raw.contested === true, banded: scope !== 'self', seed: id,
     });
-    const priority = raw.priority || raw.severity || (raw.confidence || {}).band || 'low';
+    /* ── A CONFIDENCE BAND IS NOT A PRIORITY, AND FEEDING IT AS ONE MADE EVERY INQUIRY LAST ──
+       `priority` fell through to `(raw.confidence || {}).band`, so an inquiry arrived at the
+       Priority Office carrying `supported` in the priority field. `PRIORITY_RANK` is
+       urgent/high/medium/low/none; `supported` is in none of them, so `_rank` returned its
+       fallback and the priority term contributed ZERO. Meanwhile `confidence` — which has a band
+       vocabulary and is worth 20 a rank — was reading `raw.confidence`, an OBJECT, and keying to
+       nothing.
+
+       So both terms that could have spoken for an inquiry were silent, and every inquiry in the
+       product scored 8 while any focus scored 108. Measured on a phone: a squad's well-supported
+       open question could not reach the first screen past a focus that had already finished.
+
+       Nothing in ai/priority-office.js changes. The scorer was given a band where it expected a
+       priority and an object where it expected a band; this hands it the fields it documents,
+       in the vocabularies it documents, and lets its own arithmetic decide. */
+    const priority = raw.priority || raw.severity || 'low';
+    const kernelConfidence = (raw.confidence && raw.confidence.band) || raw.band || 'none';
     // The human reading, so every surface renders from ONE shape instead of each inventing
     // its own from the raw object — which is how two different inquiry cards came to exist.
     /* AND THE CARD ITSELF IS PICKED BY KIND. `inquiryCard` was used for all four, so a Focus —
@@ -17123,7 +17139,7 @@ function _objectBucket(code, userId, scope = 'self') {
       ? present.focusCard(raw, { mine: _mine, groupName: _groupName || null, now: Date.now() })
       : present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
           stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
-    out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, id })),
+    out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, kernelConfidence, id })),
       parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, present: card,
       about: `${kind}:${id}`, scope, raw });
   };
@@ -17258,6 +17274,36 @@ function _objectBucket(code, userId, scope = 'self') {
        computed: `_groupProjections` is the same array `buildTeamState` was just handed, and
        `_safeLeaderSubjectProjection` is the same redaction `/api/group/:n/inquiry` applies, so a
        finding about a named person cannot reach a thread by this door either. */
+    /* ── EVERY ONE OF THIS GROUP'S QUESTIONS IS AN OBJECT, NOT JUST THE ONE THAT WON A SLOT ──
+       Found by opening the app: a squad with four live inquiries had ONE. The other three
+       returned 404 from the thread route, appeared in `/api/objects` at no scope, and reached
+       Home, the attention list, the Library and the connections reader nowhere. A coach could
+       READ them — the group screen renders all of them in full — and could not open one, talk to
+       it, attach anything to it, prioritise it, or have a Focus's loop point at it.
+
+       That is not the three-slot projection being too small. `high`, `low` and `question` are the
+       SURFACE — what a squad is shown first — and they are left exactly as they are. This is the
+       object INDEX, which is a different job and was being derived from the surface: whichever
+       inquiry happened to win the ranking was the only one that existed as an object.
+
+       Nothing widens. `_mayReadGroup` gated this branch several lines above, these are the same
+       projections `buildTeamState` was handed, `_safeLeaderSubjectProjection` is the same
+       redaction `/api/group/:n/inquiry` applies to the same list, and a reader who cannot open
+       the group still gets nothing. One reader catching up to what the group route has always
+       returned. */
+    const _filedInquiries = new Set();
+    for (const _p of _groupProjections) {
+      if (!_p || !_p.inquiryId) continue;
+      if (_p.leaderSubject === true && !_leaderSubjectReaders(code, nodeId, _p).includes(userId)) continue;
+      const _sp = _safeLeaderSubjectProjection(_p);
+      const _obj = { ..._sp, about: _sp.topicLabel || '' };
+      _obj.signalCount = _sp.signals; delete _obj.signals;
+      /* The one in the question slot is filed WITH the question the ranking chose, so the screen
+         that opens it shows the same open line the squad surface does. */
+      if (state.question && String(state.question.inquiryId) === String(_p.inquiryId)) continue;
+      _filedInquiries.add(String(_p.inquiryId));
+      add('inquiry', _obj);
+    }
     if (state.question) {
       const _full = _groupProjections.find(p => String(p.inquiryId) === String(state.question.inquiryId));
       const _safe = _full ? _safeLeaderSubjectProjection(_full) : null;

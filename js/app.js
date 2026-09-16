@@ -12869,8 +12869,16 @@ const MemberApp = {
     const wouldHelp = (i.wouldHelp || []).map(w => (w && (w.question || w.statement)) || w).filter(Boolean).slice(0, 2);
     return `
       <div class="iqg-inq-row" id="iqg-inq-${esc(i.inquiryId)}">
-        ${/* WHAT WE'RE SEEING. The observation, and what it rests on — origins, not voices. */''}
-        <div class="iqg-inq-topic">${esc(label)}</div>
+        ${/* WHAT WE'RE SEEING. The observation, and what it rests on — origins, not voices.
+
+              AND IT IS A DOOR. Every one of a group's questions now has a thread — before this
+              pass only the one that won the ranking slot did, and the other three 404'd — so the
+              row that names a question opens it. A coach moves Home → the group → this question
+              → its own screen, which is the journey the product is about, and until now the last
+              step had nothing to step onto. */''}
+        <button type="button" class="iqg-inq-topic iqg-inq-open"
+          onclick="MemberApp.openObjectThread('inquiry','${esc(i.inquiryId)}','group:${esc(nodeId)}')"
+          aria-label="Open ${esc(label)}">${esc(label)}</button>
         <div class="iqg-inq-meta">
           ${i.contested ? 'People describe this differently' :
             (typeof i.independentOrigins === 'number'

@@ -110,7 +110,14 @@ const server = app.listen(0, async () => {
 
     console.log('\n  C — THE EDGE SURVIVES THE FACT THAT ONE INQUIRY HAS TWO NAMES');
     const objects = _allObjectsFor(O, 'coach') || [];
-    const lowObj  = objects.find(o => o.kind === 'low' || o.kind === 'high' || o.kind === 'inquiry');
+    /* THE PROJECTION SPECIFICALLY, not "whichever of the three names turns up first". Since the
+       group bucket began filing every one of a group's inquiries as an object — before that, only
+       the one that won the ranking slot existed and the others 404'd — the same inquiry is
+       present under BOTH `low:<id>` and `inquiry:<id>`. That is the very condition this section
+       is about, so picking by whichever sorted first would have had it testing the literal
+       against itself and calling the result a pass. */
+    const lowObj  = objects.find(o => (o.kind === 'low' || o.kind === 'high')
+      && String((o.raw || {}).inquiryId || o.id) === inq.inquiryId);
     const focObj  = objects.find(o => o.kind === 'focus');
     ok('AB-C1 the coach\'s object for the question is a PROJECTION carrying the inquiry id',
       !!lowObj && String((lowObj.raw || {}).inquiryId || lowObj.id) === inq.inquiryId);
@@ -118,16 +125,24 @@ const server = app.listen(0, async () => {
       ce.refOf(lowObj) !== `inquiry:${inq.inquiryId}`);
 
     const eg = ce.edges(objects);
+    /* THE EDGE LANDS ON THE INQUIRY, UNDER WHICHEVER OF ITS NAMES THE SET RESOLVES TO. This used
+       to pin the literal string `low:<id>`, which was the only name the inquiry had at the time.
+       A literal `inquiry:<id>` object now exists too — every one of a group's inquiries is filed,
+       not only the one that wins the ranking slot — and `edges()` prefers a literal over an
+       alias, which is its own documented law and is asserted at AB-E3 below.
+       `sameThingRefs` is the module's answer to "which names denote this thing", so asking it is
+       asserting the law rather than one spelling of it. */
+    const _names = new Set(ce.sameThingRefs(objects, ce.refOf(lowObj)));
     ok('AB-C3 the addresses edge exists (it was dropped, silently)',
-      eg.some(e => e.from === ce.refOf(focObj) && e.type === 'addresses' && e.to === ce.refOf(lowObj)));
+      eg.some(e => e.from === ce.refOf(focObj) && e.type === 'addresses' && _names.has(e.to)));
     ok('AB-C4 …and the inverse, which is the end a coach reads from',
-      eg.some(e => e.from === ce.refOf(lowObj) && e.type === 'addressed_by' && e.to === ce.refOf(focObj)));
+      eg.some(e => _names.has(e.from) && e.type === 'addressed_by' && e.to === ce.refOf(focObj)));
     ok('AB-C5 …expressed in a name the caller can actually resolve',
       eg.every(e => objects.some(o => ce.refOf(o) === e.from) && objects.some(o => ce.refOf(o) === e.to)));
 
     const loopFromFocus = ce.loop(objects, ce.refOf(focObj));
     ok('AB-C6 the focus knows what it addresses (it reported null)',
-      !!loopFromFocus && loopFromFocus.addresses === ce.refOf(lowObj));
+      !!loopFromFocus && _names.has(loopFromFocus.addresses));
     ok('AB-C7 …and no longer says the focus did not record what it was started to work on',
       !(loopFromFocus.open || []).some(t => /does not say what it was started to work on/i.test(String(t))));
 

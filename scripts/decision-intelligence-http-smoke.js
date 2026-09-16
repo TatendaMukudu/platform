@@ -204,6 +204,79 @@ const server = app.listen(0, async () => {
     ok('DI-9a falsifiers travel with the inquiry, computed rather than written by anybody',
       Array.isArray(comms4.falsifiers));
 
+
+    /* ══ EVERY QUESTION THIS GROUP HAS IS SOMETHING A COACH CAN OPEN ══════════════════════════
+       Found by opening the app rather than by reading the code: a squad with four live inquiries
+       had ONE object. The other three returned 404 from the thread route, appeared in
+       `/api/objects` at no scope, and reached Home, the attention list, the Library and the
+       connections reader nowhere. A coach could READ them — the group screen renders every one in
+       full — and could not open one, talk to it, attach anything to it, or have a Focus's loop
+       point at it.
+
+       That is not the three-slot surface being too small. `high`, `low` and `question` are what a
+       squad is shown FIRST and are untouched. This is the object INDEX, which was being derived
+       from the surface: whichever inquiry won the ranking was the only one that existed. */
+    console.log('\n  REACHABLE — EVERY ONE OF THE GROUP\'S QUESTIONS, NOT JUST THE ONE THAT WON A SLOT');
+    {
+      const listed = await call('GET', '/api/objects?kind=inquiry&scope=group:squad', undefined, 'coach');
+      const ids = ((listed.j || {}).objects || []).map(o => String(o.id));
+      ok('DI-X1 both of this group\'s questions are objects, not just the ranked one',
+        ids.includes(comms.inquiryId) && ids.includes(late.inquiryId));
+      const all = await call('GET', '/api/objects?kind=inquiry&scope=all', undefined, 'coach');
+      ok('DI-X2 …and both reach the merged list Home reads',
+        ((all.j || {}).objects || []).map(o => String(o.id)).includes(late.inquiryId));
+      const th = await call('GET', `/api/objects/inquiry/${late.inquiryId}/thread?scope=group:squad`, undefined, 'coach');
+      ok('DI-X3 …and the one that did NOT win the slot opens, where it used to 404',
+        th.status === 200 && !!(th.j || {}).present);
+      ok('DI-X4 …carrying its own topic in words rather than a canonical key',
+        !/football\.|_/.test(String(((th.j || {}).present || {}).summary && th.j.present.summary.title || 'x')));
+      /* AND NOT ONE OBJECT MORE THAN THE GROUP ROUTE ALREADY RETURNED. This files what
+         `/api/group/:n/inquiry` has always returned to the same reader through the same gate; if
+         the two ever disagree, something here widened rather than connected. */
+      const viaGroup = await inquiries('coach');
+      ok('DI-X5 …and the index matches the group route exactly, so this connected rather than widened',
+        ids.slice().sort().join(',') === viaGroup.map(i => String(i.inquiryId)).sort().join(','));
+      const outsiderSees = await call('GET', '/api/objects?kind=inquiry&scope=group:squad', undefined, 'p1');
+      ok('DI-X6 …and a member of the group sees the same ones, through the same gate',
+        ((outsiderSees.j || {}).objects || []).length === ids.length);
+    }
+
+    /* ══ AN INQUIRY IS NOT STRUCTURALLY LAST ON THE FIRST SCREEN ══════════════════════════════
+       `_objectBucket` fell through to `(raw.confidence || {}).band` for an object's PRIORITY, so
+       an inquiry arrived at the Priority Office carrying `supported` in the priority field.
+       PRIORITY_RANK is urgent/high/medium/low/none; `supported` is in none of them, so the
+       priority term contributed zero. Meanwhile `confidence` — which HAS a band vocabulary and is
+       worth 20 a rank — was being handed `raw.confidence`, an object, and keyed to nothing.
+
+       Both terms that could speak for an inquiry were silent. Measured on a phone: every inquiry
+       in the product scored 8 while any focus scored 108, so a squad's well-supported open
+       question could not reach the first screen past a focus that had already finished.
+
+       Nothing in ai/priority-office.js changed. It was given a band where it expected a priority
+       and an object where it expected a band. */
+    console.log('\n  RANKED — WITH THE FIELDS THE SCORER ACTUALLY DOCUMENTS');
+    {
+      const inqObjs = ((await call('GET', '/api/objects?kind=inquiry&scope=all', undefined, 'coach')).j || {}).objects || [];
+      const focObjs = ((await call('GET', '/api/objects?kind=focus&scope=all', undefined, 'coach')).j || {}).objects || [];
+      const lead = inqObjs.find(o => String(o.id) === comms.inquiryId) || {};
+      ok('DI-Y1 a supported inquiry no longer carries a confidence band in its PRIORITY field',
+        lead.priority === 'low' || lead.priority === 'medium' || lead.priority === 'high' || lead.priority === 'urgent');
+      ok('DI-Y2 …and scores on more than the polarity term alone, which was all it had',
+        Number(lead.score) > 8);
+      ok('DI-Y3 …so a well-supported open question is not structurally below a finished focus',
+        !!focObjs.length && Number(lead.score) > Number(focObjs[0].score));
+      /* AND THE SCORE STILL COMES FROM THE ONE OWNER. A browser that re-ranks is a second
+         Priority Office nobody can test, and so is a server route that scores its own way. */
+      ok('DI-Y4 …with the number computed by ai/priority-office.js and nowhere else',
+        () => {
+          const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+          const i = src.indexOf('function _objectBucket');
+          const body = src.slice(i, src.indexOf('\nfunction ', i + 10));
+          return /priorityOffice\._score\(priorityOffice\.normalizeItem\(/.test(body)
+            && !/score\s*=\s*\d/.test(body);
+        });
+    }
+
     /* ══ THE SAME JOURNEY, ENTERED FROM THE OTHER END ═════════════════════════════════════════
        The brief: a person must be able to enter from the Inquiry side AND the Focus side without
        contradictory identity or wording. This is where the id-namespace defect lived — the same
