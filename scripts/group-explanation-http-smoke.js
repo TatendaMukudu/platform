@@ -58,13 +58,19 @@ const ok = (n, c) => {
 const O = 'gex', OTHER = 'gey';
 const SQUAD = Array.from({ length: 14 }, (_, i) => 'p' + (i + 1));
 const users = { coach: { id: 'coach', name: 'Coach', email: 'c@g.io', role: 'coach', orgCode: O, status: 'active', leadershipNodeIds: ['squad'] },
-                outsider: { id: 'outsider', name: 'Outsider', email: 'o@g.io', role: 'member', orgCode: O, status: 'active' } };
+                outsider: { id: 'outsider', name: 'Outsider', email: 'o@g.io', role: 'member', orgCode: O, status: 'active' },
+                rescoach: { id: 'rescoach', name: 'Reserves Coach', email: 'rc@g.io', role: 'coach', orgCode: O, status: 'active', leadershipNodeIds: ['reserves'] },
+                r1: { id: 'r1', name: 'R1', email: 'r1@g.io', role: 'member', orgCode: O, status: 'active', assignedNodeIds: ['reserves'] } };
 for (const id of SQUAD) users[id] = { id, name: id.toUpperCase(), email: `${id}@g.io`, role: 'member', orgCode: O, status: 'active', assignedNodeIds: ['squad'] };
 
 _loadAllStores({
   orgMeta: { [O]: { orgName: "Alma Men's Soccer", orgMode: 'sports' }, [OTHER]: { orgName: 'Rival Club', orgMode: 'sports' } },
   orgUsers: { [O]: users, [OTHER]: { rival: { id: 'rival', name: 'Rival', email: 'r@y.io', role: 'coach', orgCode: OTHER, status: 'active', leadershipNodeIds: ['theirs'] } } },
-  orgNodes: { [O]: { squad: { nodeId: 'squad', name: 'First Team', parentId: null, childNodeIds: [], memberIds: SQUAD, leaderIds: ['coach'], rev: 1 } },
+  /* A SECOND GROUP IN THE SAME ORG. Cross-TENANT refusal is the easy case and was already
+     covered; the dangerous one is a sibling inside the same organisation, where every id resolves
+     and only the audience boundary stands between them. */
+  orgNodes: { [O]: { squad: { nodeId: 'squad', name: 'First Team', parentId: null, childNodeIds: [], memberIds: SQUAD, leaderIds: ['coach'], rev: 1 },
+                     reserves: { nodeId: 'reserves', name: 'Reserves', parentId: null, childNodeIds: [], memberIds: ['r1'], leaderIds: ['rescoach'], rev: 1 } },
               [OTHER]: { theirs: { nodeId: 'theirs', name: 'Theirs', parentId: null, childNodeIds: [], memberIds: [], leaderIds: ['rival'], rev: 1 } } },
 });
 _rebuildEmailIndex();
@@ -262,6 +268,37 @@ const server = app.listen(0, async () => {
     ok('GX-J2 …and the refusal says why, in words about the object rather than about a rule',
       /about a person/i.test(String((aboutPerson.j || {}).error || '')));
     delete inquiryStates[O]['group:squad'].leadership;
+
+
+    /* ══ M — AN EXPLANATION OFFERED HERE REACHES NOBODY ELSE ══════════════════════════════════
+       THE ATTACK: a private explanation influencing another audience. Cross-tenant refusal is the
+       easy case and section I already had it. The dangerous one is a SIBLING GROUP inside the same
+       organisation, where every id resolves, the tenant partition never fires, and the only thing
+       standing between the two is the audience boundary itself.
+
+       The proposer here is the COACH — the most senior person who can reach the route — so if
+       authority were going to carry a theory across a boundary anywhere, it would be here. */
+    console.log('\n  M — AN EXPLANATION OFFERED HERE REACHES NOBODY ELSE');
+    {
+      const theirs = await call('GET', '/api/group/reserves/inquiry', undefined, 'rescoach');
+      ok('GX-M1 the sibling group\'s own coach reads their own group fine',
+        theirs.status === 200);
+      ok('GX-M2 …and not one word of the first team\'s explanation is in it',
+        !/worried about criticising/i.test(JSON.stringify(theirs.j || {})));
+      const theirState = await call('GET', '/api/group/reserves/state', undefined, 'rescoach');
+      ok('GX-M3 …nor in the surface their squad reads',
+        theirState.status === 200 && !/worried about criticising/i.test(JSON.stringify(theirState.j || {})));
+      const peeking = await call('GET', '/api/group/squad/inquiry', undefined, 'rescoach');
+      ok('GX-M4 …and a leader of another group in the same org cannot open the first team at all',
+        peeking.status === 403 || (((peeking.j || {}).inquiries) || []).length === 0);
+      const theirMember = await call('GET', '/api/group/squad/inquiry', undefined, 'r1');
+      ok('GX-M5 …and neither can one of their members',
+        theirMember.status === 403 || (((theirMember.j || {}).inquiries) || []).length === 0);
+      const writing = await call('POST', `/api/group/reserves/inquiry/${inq0.inquiryId}/explanation`,
+        { text: 'carrying the first team theory across' }, 'rescoach');
+      ok('GX-M6 …and the first team\'s inquiry id, used against the sibling group, finds nothing rather than something',
+        writing.status === 404);
+    }
 
     console.log('\n  K — AND NONE OF IT NEEDED A MODEL');
     ok('GX-K1 every assertion above ran with models switched off',

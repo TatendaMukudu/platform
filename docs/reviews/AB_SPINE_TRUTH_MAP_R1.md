@@ -157,3 +157,101 @@ unilaterally.**
 - **REPAIR:** F4 (the group bucket's single inquiry slot).
 - **BUILD:** nothing. No new store, no new object type, no second recommendation engine, no
   Decision object.
+
+---
+
+# Part II — what the pass actually found and did
+
+Written after the work, against the map above. Where Part I turned out to be wrong, it is
+corrected here rather than quietly edited, because a truth map that rewrites its own history is
+not a record of anything.
+
+## 7. Corrections to Part I
+
+**F3 was right and understated.** The inverse loop read was missing, and repairing it exposed a
+second, worse instance of the same defect: `edges()` resolved an inquiry ref by identity when an
+edge was BUILT and expressed it in one name, which is correct — but a reader arriving by one of
+the object's *other* names found an empty neighbourhood. A coach standing on the squad's `low`
+surface read "nothing has been tried about this" while the focus that addressed it sat one edge
+away under the name `inquiry:<id>`. Identity is now resolved at READ time as well
+(`crossEvidence.sameThingRefs`), over the set the caller already authorised.
+
+**F4 was overstated.** The inquiry does reach the coach — as a Low. What is actually true is
+narrower and still worth recording: the group bucket has exactly three projection slots
+(high / low / question), so a group's *fourth* live inquiry is invisible to any surface that reads
+objects rather than `/api/group/:n/inquiry`. Not repaired this pass; listed in section 11.
+
+**F1 was adjudicated, and the recommendation was taken.** The founder chose option (b): a human
+may deliberately propose a candidate explanation through the existing governed contribution
+boundary. Part I said this pass would implement (c) plus the honest absence. It implemented (b).
+
+## 8. The trap that (b) opened, which Part I did not see
+
+`_groupInquiryProjections` carried the leading hypothesis as a bare string while its rivals
+travelled with their own band and status. So `ai/team-state.js` rendered it as the group's CLAIM
+at `fit.band` — the band the OBSERVATION earned from five independent origins.
+
+Opening the human path without fixing that would have dressed an unevidenced theory in the
+standing of five people who described the thing it claims to explain and never endorsed the reason
+for it. That is "authority makes it true" arriving by a side door, and it becomes reachable the
+moment a human may propose an explanation.
+
+`hypothesisStanding` now travels with the projection, carrying the hypothesis's OWN band, status
+and support count. A hypothesis is admitted as the group's claim only when the kernel has given it
+standing of its own — read from the computed band, never recounted (L-DC1).
+
+A second instance of the same class: `alternatives` was every rival regardless of standing,
+refuted ones included, separated only by a `status` field no consumer read. Harmless while nothing
+rendered alternatives; a live defect the moment the group screen drew them under "What might
+explain it". Refuted explanations now travel as `ruledOut` — kept, because corrections preserve
+history and a group that cannot see what it dropped will propose it again.
+
+## 9. The two frontier categories, which must not be collapsed
+
+An UNKNOWN is a statement about what the record does not establish. It costs nobody anything and
+is described deterministically from state, so it is not gated.
+
+A QUESTION is an ACT. It spends somebody's attention, creates social pressure, and can distort the
+behaviour it asks about. `ai/inquiry.js` decides whether one is worth asking and is genuinely hard
+to pass: "why does communication drop after results" scores 0.02 and the critic blocks it
+`no_reliable_owner`, because nobody is the system of record for why a group behaves a certain way.
+
+That refusal is correct. The honest response is to say there is nothing useful to ask yet, not to
+lower the bar until something comes out. Collapsing the two is how a product ends up asking a squad
+a leading question in order to have something to put under a heading.
+
+## 10. Decision Intelligence V1 — the nine, assessed
+
+| # | Question | Disposition |
+|---|---|---|
+| 1 | What do we know? | **Reused.** Observation, independent origins, kernel-computed band. |
+| 2 | What don't we know? | **Connected.** `_inquiryFrontier`, derived from the inquiry's own state. |
+| 3 | What might explain it? | **Connected**, plus the standing repair in section 8. |
+| 4 | What have we tried before? | **Connected.** The join was missing, not the data: a group Focus has recorded `origin.inquiryId` since the origin field existed. Scoped to this inquiry, and deliberately not to "similar" ones. |
+| 5 | What happened afterward? | **Reused.** The outcome word, attached to the question it was about. |
+| 6 | What are reasonable options? | **Not answered.** No machinery could answer it honestly. |
+| 7 | What would each option teach us? | **Not answered.** Same reason. |
+| 8 | Is there enough to test something? | **New, deterministic.** Three states with the reason for each. No ranking, no score, no probability. |
+| 9 | What should we observe afterward? | **Connected.** `falsifiers`, computed since ai/diagnose.js was written and never rendered. |
+
+Six and seven are refused rather than left undone, and the refusal is asserted (DI-6a, DI-6b). An
+options generator would be the system proposing what to do and then, one release later, ranking
+its own proposals. There is no honest way to rank them, because nothing in the record establishes
+what will work. The coach writes the option in their own words — which is the "human chooses" step
+the spine already had.
+
+## 11. Still open, for the next pass or for Codex
+
+1. **The group bucket's three projection slots.** A group's fourth live inquiry reaches no
+   object surface. Corrected F4, above.
+2. **Nothing in production emits `challenges`.** A hypothesis can only be refuted by writing a
+   challenging proposal through the kernel; there is no route for it. The GX-L block mints the
+   refutation at the kernel and says so. The same gap `level: 'hypothesis'` had before this pass.
+3. **A refused packet item is dropped silently.** `canUseItem` now fails closed on language, which
+   is right, but a leader is shown nothing rather than "something was withheld and why". The
+   `withheld` channel that `ai/team-state.js` uses is the precedent to follow.
+4. **`outcome-intelligence.bestForPattern` still has no production caller.** It ranks by Wilson
+   lower bound. It should either gain a caller that is honest about what a ranking is, or be
+   retired. Leaving a ranking engine in the tree with no caller is how one acquires a caller.
+5. **`packet.safe` and `stamped.safe` still share a name for two different properties.** The
+   packet now requires both, but `priority.stamp` continues to call a consent property `safe`.
