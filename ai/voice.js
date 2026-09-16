@@ -173,10 +173,26 @@ function explainObject(obj = {}) {
     };
   }
 
+  /* ── WITH NO CLAIM, THERE IS NOTHING TO BE CONFIDENT ABOUT ────────────────────────────────
+     This fallback was `I'm ${sure} about this one.` — and `sure` is read off the band, which on a
+     group inquiry is the OBSERVATION's band, earned by however many people described the thing.
+     So an object with no admitted claim printed "I'm confident about this one" in IntelliQ's own
+     voice, with nothing following it. Found on a phone, under a badge reading "Early thinking",
+     on the same screen.
+
+     It became the common case rather than an edge one when a hypothesis stopped being admitted
+     as the claim until the kernel had given it standing of its own. That gating is right. This
+     sentence was the part that had to change with it: the honest thing to say when there is no
+     read is that there is no read, and then say what IS established — that people have described
+     something and the reason for it is still open.
+
+     The band is deliberately NOT spoken here. A confidence word beside "I don't have a read yet"
+     is the same lie in a quieter register: the reader has no claim to attach it to, so they will
+     attach it to the observation, which is not what it was measured on. */
   const claimLine = claim
     ? `${_pick(['I think', 'My read is', 'What I make of it'], seed + 'c')} ${_sentence(String(claim).replace(/^I think\s+/i, ''))} ${_cap(sure)}.`
         .replace('What I make of it ', 'What I make of it: ').replace('My read is ', 'My read is that ')
-    : `I'm ${sure} about this one.`;
+    : `I don't have a read on this yet${prov ? ' — what has been described is on the record, and the reason for it is still open' : ''}.`;
 
   // WHY I THINK THAT. Counts and independence — never a name, never a quote.
   const reasons = (Array.isArray(because) ? because : []).map(_sentence).filter(Boolean);

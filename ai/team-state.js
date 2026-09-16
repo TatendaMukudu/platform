@@ -495,13 +495,36 @@ function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
     return _num(b.lastUpdatedAt) - _num(a.lastUpdatedAt);
   });
   const top = sorted[0];
+  /* ── A QUESTION AND AN UNKNOWN ARE NOT THE SAME SENTENCE ──────────────────────────────────
+     This slot took `stillUnknown[0]` and called it the question, which was harmless while every
+     unknown was written by the member intake path as an interrogative. It stopped being harmless
+     the moment a group inquiry's frontier began deriving unknowns from its own state, because
+     those are DECLARATIVE by construction: "One explanation has been offered, and nothing
+     recorded supports it yet" is a true statement about the record and is not a question.
+
+     Fed through the caller's sentence it produced, on Home and on the group screen: "The open
+     question is one explanation has been offered, and nothing recorded supports it yet." Broken
+     English on the first screen a coach sees, and worse than broken — it presents a statement of
+     what the record does not establish as though somebody had been asked something.
+
+     So the slot says WHICH IT IS. `wouldHelp` carries the questions the value gate and critic
+     actually passed, and those are real questions; everything else is an unknown and is labelled
+     as one. No new store and no new judgement: both fields are already computed upstream, and
+     this only stops the two being conflated. */
+  const asked = _arr(top.wouldHelp)
+    .map(w => _s((w && (w.question || w.text || w.statement)) || w, 300))
+    .filter(Boolean)[0] || '';
+  const unknown = _s(_arr(top.stillUnknown)[0], 300);
   return {
     inquiryId: _s(top.inquiryId, 64),
-    question: _s(_arr(top.stillUnknown)[0], 300),
+    question: asked || unknown,
+    // 'question' when somebody could actually be asked it; 'unknown' when it is a statement
+    // about what the record does not establish. The caller's wording depends on this.
+    kind: asked ? 'question' : 'unknown',
     about: _s((top.topic && (top.topic.label || top.topic.canonicalConcept)) || '', 120),
     band: _s((top.confidence || {}).band || 'tentative', 32),
     contested: top.contested === true,
-    otherUnknowns: _arr(top.stillUnknown).slice(1, 4).map(u => _s(u, 300)),
+    otherUnknowns: _arr(top.stillUnknown).slice(asked ? 0 : 1, 4).map(u => _s(u, 300)),
   };
 }
 
@@ -601,8 +624,18 @@ function statementFor({ high, low, question, focus, withheld = [] } = {}) {
     return `${_cap(high.about)} and ${_lower(low.about)} are moving in opposite directions. Whether they are connected is not something we can tell from what we have.`;
   }
   if (question) {
-    return question.contested
-      ? `People here are describing ${_lower(question.about || 'this')} differently. That disagreement is the useful part — it is worth resolving before acting on either account.`
+    if (question.contested) {
+      return `People here are describing ${_lower(question.about || 'this')} differently. That disagreement is the useful part — it is worth resolving before acting on either account.`;
+    }
+    /* AN UNKNOWN IS REPORTED AS AN UNKNOWN. "The open question is one explanation has been
+       offered, and nothing recorded supports it yet" was this sentence swallowing a declarative
+       statement, and it read as a grammar failure because it was one. */
+    /* AND IT DOES NOT SAY IT TWICE. Every surface that renders this statement renders the
+       question line directly above it, so restating the sentence verbatim spent the closing line
+       — the one sentence that sounds like the system speaking — on an echo. It says what the
+       state MEANS instead, which is what the line is for. */
+    return question.kind === 'unknown'
+      ? `That is what we do not know yet. It is a real answer rather than a gap, and it is the thing worth closing before anything is tried.`
       : `The open question is ${_lower(question.question)} Nothing we hold answers it yet.`;
   }
   if (high) {

@@ -7073,12 +7073,37 @@ function _teamStateCard(s) {
         <div class="tstate-name">${esc(s.node.name)}</div>
         <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
       </div>
-      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis, s.high && s.high.explained))}
+      ${/* ── THE LABELS ARE WHAT A COACH WOULD CALL THESE, NOT WHAT WE CALL THEM ─────────────
+            "High", "Low", "Inquiry" and "Focus" are the canonical object kinds and they stay the
+            canonical object kinds — every id, route, store and test still says so. What changed
+            is the four words a coach reads at 390px, because the first screen was a catalogue of
+            our ontology and a coach has no reason to learn it. The order is unchanged and each
+            line still renders only when the server sent one, so an honest silence stays an
+            honest silence rather than becoming a placeholder. */''}
+      ${line('Going well', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis, s.high && s.high.explained))}
       ${changeMind(s.high && s.high.explained)}
-      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis, s.low && s.low.explained))}
+      ${line('Worth attention', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis, s.low && s.low.explained))}
       ${changeMind(s.low && s.low.explained)}
-      ${line('Inquiry', s.question && s.question.question, s.question && s.question.contested ? 'people describe this differently' : '')}
-      ${line('Focus', focus && focus.text, focusSub)}
+      ${/* AND AN UNKNOWN SAYS IT IS AN UNKNOWN. The server now distinguishes a question somebody
+            could be asked from a statement about what the record does not establish; labelling
+            both "Inquiry" was how "one explanation has been offered, and nothing recorded
+            supports it yet" came to sit under a heading that implied somebody had been asked. */''}
+      ${line(s.question && s.question.kind === 'unknown' ? 'Still unknown' : 'Still working out',
+        s.question && s.question.question,
+        s.question && s.question.contested ? 'people describe this differently' : '')}
+      ${line('We are trying', focus && focus.text, focusSub)}
+      ${/* ── WHAT WE TRIED, AND WHAT CAME OF IT ──────────────────────────────────────────────
+            The fifth of the six things a coach should learn in ten seconds, and the card had no
+            line for it: `history` has travelled on this payload since the outcome loop closed and
+            reached the first screen nowhere. It is the half of the loop that has anything to say.
+            The outcome word is the group's own, and the line claims no cause — "after" is the
+            whole of what was recorded. */''}
+      ${(() => {
+        const last = (s.history || []).filter(f => f && f.outcome)[0];
+        if (!last) return '';
+        return line('We tried', last.text,
+          `after it: ${(MemberApp._OUTCOME_WORDS[last.outcome.result] || 'recorded').toLowerCase()}`);
+      })()}
       ${withheld}
       <div class="tstate-says">${esc(s.statement)}</div>
     </div>`;
@@ -12302,6 +12327,13 @@ const MemberApp = {
           // the thread-binding key and would break every object thread if written over.
           ? `<div class="iq-inq-about">${esc(item.whose)}</div>` : ''}
         ${claim ? `<p class="iq-inq-hyp">${esc(claim)}</p>` : ''}
+        ${/* A CANDIDATE EXPLANATION IS NOT DROPPED AND IS NOT PROMOTED. The card puts `thinking`
+              directly under the band badge, so the server now withholds an unevidenced
+              hypothesis from that field — and the honest thing to do with it is to say it, once,
+              with what it actually rests on attached. Silence here would have been the other
+              failure: a coach whose squad has offered a theory would see no sign of it. */''}
+        ${sum.possibleExplanation ? `<p class="iq-inq-maybe">Someone suggested: ${esc(sum.possibleExplanation.statement)}<span class="iq-inq-maybe-w">${
+          sum.possibleExplanation.supportedBy ? 'Something supports this' : 'Nothing supports this yet'}</span></p>` : ''}
         ${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}
         ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}</div>` : ''}
         ${item.parkedBecause ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Set aside</span> ${esc(item.parkedBecause)}</div>` : ''}
@@ -12379,13 +12411,60 @@ const MemberApp = {
         ? `<p class="iqt-p iqt-rival">It could also be that ${esc(this._lowerFirst(rival.statement))}${rival.standing ? ` — though that is only ${esc(String(rival.standing).toLowerCase())} so far` : ''}.</p>`
         : '';
 
+      /* ── WHAT SOMEBODY SUGGESTED, AT ITS OWN STANDING ──────────────────────────────────────
+         The server withholds an unevidenced hypothesis from `thinking`, because `thinking` is
+         rendered directly under the band badge. It travels as `possibleExplanation` instead, and
+         dropping it here would be the opposite failure: a coach whose squad has offered a theory
+         would see no sign of it on the one screen about that question. */
+      const maybe = sum.possibleExplanation;
+      const maybeLine = maybe && maybe.statement
+        ? `<p class="iqt-p iqt-maybe">Someone suggested it is because ${esc(this._lowerFirst(maybe.statement))} — ${
+            maybe.supportedBy ? 'something supports that' : 'nothing on the record supports that yet'}.</p>`
+        : '';
+
+      /* ── WHAT WE TRIED, AND WHAT CAME OF IT ────────────────────────────────────────────────
+         The action half of this question, on the question's own screen. It is scoped to THIS
+         inquiry by the origin a group Focus has recorded since the origin field existed, so it
+         cannot pick up what the group did about something else. The outcome word is the group's
+         own and the sentence claims no cause — "after it" is the whole of what was recorded.
+
+         Rendered only when there IS something. A "what we tried" heading over an empty list is a
+         schema showing through, and this screen already had three of those. */
+      const tried = (data.triedBefore || []).filter(t => t && t.text).slice(0, 2);
+      // Which focuses the opening has already named, so the connections panel below can add to
+      // the story rather than repeat it. Set before _renderRelated runs.
+      this._triedShown = tried.map(t => t.focusId).filter(Boolean);
+      const triedLine = tried.length ? `
+        <div class="iqt-tried">
+          <div class="iqt-tried-h">What we have tried about this</div>
+          ${tried.map(t => `<div class="iqt-tried-r"><span class="iqt-tried-t">${esc(t.text)}</span><span class="iqt-tried-o">${
+            t.outcome ? `after it: ${esc((this._OUTCOME_WORDS[t.outcome] || 'recorded').toLowerCase())}`
+              : (t.status === 'active' ? 'still running' : 'nothing recorded yet')}</span></div>`).join('')}
+          <div class="iqt-tried-n">What was recorded after each one. Nothing here says a focus caused
+            what followed it.</div>
+        </div>` : '';
+
+      /* ── AND WHETHER THERE IS ENOUGH TO TRY ANYTHING ───────────────────────────────────────
+         The server's answer in the server's words. Three states, no ranking and no score. "Not
+         enough evidence yet" is the commonest one and is printed as plainly as the others. */
+      const ready = data.readiness;
+      const readyLine = ready && ready.state ? `
+        <p class="iqt-p iqt-ready">${esc(
+          ready.state === 'worth_testing' ? 'There may be something here worth trying.'
+          : ready.state === 'gather_information' ? 'Worth learning more before trying anything.'
+          : 'Not enough evidence yet to suggest anything worth trying.')}
+          <span class="iqt-ready-w">${esc(ready.because || '')}</span></p>` : '';
+
       const opening = `
         <div class="iqt-opening">
           <p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>
           ${x.provenance ? `<p class="iqt-p iqt-prov">${esc(x.provenance)}</p>` : ''}
+          ${maybeLine}
           ${rivalLine}
           ${(det.falsifiers || [])[0] ? `<p class="iqt-p iqt-falsify">What would change my mind: ${esc(det.falsifiers[0])}</p>` : ''}
           ${sum.openQuestion ? `<p class="iqt-ask">${esc(sum.openQuestion)}</p>` : ''}
+          ${readyLine}
+          ${triedLine}
         </div>`;
 
       // CHAT STYLE. The opening is IntelliQ's first message in the conversation, not a document
@@ -12775,7 +12854,12 @@ const MemberApp = {
      outcome learning crediting the system for a coach's own thinking. */
   _groupInquiryRow(nodeId, i, leads) {
     const esc = s => this._escape(String(s == null ? '' : s));
-    const label = (i.topic && (i.topic.label || i.topic.canonicalConcept)) || 'Something the group is working out';
+    /* THE SERVER'S READING OF THE TOPIC, not this file's. `topic.label || canonicalConcept` is
+       what printed `football.attendance_timing` on a coach's phone: an inquiry whose topic was
+       never given a human label falls straight through to the machine key. `present.humanTopic`
+       already knew how to read one out loud and the row was not asking it. The canonical topic
+       still travels beside this and is unchanged; only what is drawn has. */
+    const label = i.topicLabel || (i.topic && i.topic.label) || 'Something the group is working out';
     const explanations = [
       ...(i.hypothesis ? [{ statement: i.hypothesis, band: (i.hypothesisStanding || {}).band || 'tentative',
         supportedBy: (i.hypothesisStanding || {}).supportedBy || 0 }] : []),
@@ -13028,8 +13112,22 @@ const MemberApp = {
     if (!r.ok || !r.data || !r.data.ok) { box.innerHTML = ''; return; }
     const j = r.data;
     const esc = s => this._escape(String(s == null ? '' : s));
-    const related = (j.related || []).filter(x => x && x.kind && x.label);
+    /* ── SAID ONCE, IN THE RIGHT PLACE ─────────────────────────────────────────────────────
+       The thread's opening now names what was tried about this question and what came of it,
+       because that is where a coach reads it. This panel was saying the same two facts twice more
+       — as a "Being worked on by" link and again as "What you recorded" — so one focus and one
+       outcome word appeared three times on one screen. Repetition is how a reader learns that a
+       screen is padded.
+
+       The division of labour is by what each can say. The opening answers WHAT WE TRIED AND WHAT
+       CAME OF IT. This panel keeps what the opening cannot: what has been recorded SINCE, and
+       what is still open. So the edges the opening already covered are dropped here rather than
+       restated, and nothing is hidden that is not shown better a few lines above. */
+    const shownAbove = new Set((this._triedShown || []).map(String));
+    const related = (j.related || []).filter(x => x && x.kind && x.label)
+      .filter(x => !(x.type === 'addressed_by' && shownAbove.has(String(x.ref || '').split(':').slice(1).join(':'))));
     const loop = j.loop || null;
+    const loopAlreadySummarised = loop && shownAbove.has(String(loop.focus || '').split(':').slice(1).join(':'));
 
     // The words for an edge. The server sends the machine name; a person reads a sentence, and
     // the sentence is about the RECORD rather than about cause.
@@ -13062,13 +13160,13 @@ const MemberApp = {
       loopHTML = `
         <div class="iqt-loop">
           <div class="iqt-loop-head">How this has gone</div>
-          ${loop.addresses && a ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Started to work on</span>
+          ${loop.addresses && a && !loopAlreadySummarised ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Started to work on</span>
             <span class="iqt-loop-v">${esc(a.label)}</span></div>` : ''}
           ${loop.sharedOrigins && loop.sharedOrigins.length ? `<div class="iqt-loop-step">
             <span class="iqt-loop-k">Resting on</span>
             <span class="iqt-loop-v">${loop.sharedOrigins.length === 1
               ? 'the same account it came from' : 'the same accounts it came from'}</span></div>` : ''}
-          ${loop.outcome ? `<div class="iqt-loop-step"><span class="iqt-loop-k">What you recorded</span>
+          ${loop.outcome && !loopAlreadySummarised ? `<div class="iqt-loop-step"><span class="iqt-loop-k">What you recorded</span>
             <span class="iqt-loop-v">${esc(this._OUTCOME_WORDS[loop.outcome] || loop.outcome)}</span></div>` : ''}
           ${since ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Recorded since</span>
             <span class="iqt-loop-v">${since.records === 0 ? 'nothing yet'
@@ -13124,7 +13222,12 @@ const MemberApp = {
        empty space is a bug. */
     if (!j) { box.innerHTML = ''; return; }
     if (!j.ok) {
-      box.innerHTML = j.reason
+      /* AND A FACT ABOUT THE DEPLOYMENT IS NOT NEWS ABOUT THIS OBJECT. "This deployment does not
+         send anything outside" is true of every object on every screen forever; printing it on
+         each one teaches a person to skip the place where a real refusal about THIS object would
+         appear. Only a reason that is about this object is drawn. */
+      const _aboutThisObject = j.reason && !/deployment|not configured|no provider|disabled/i.test(String(j.reason));
+      box.innerHTML = _aboutThisObject
         ? `<div class="iqt-reading-none">No outside reading here — ${this._escape(String(j.reason))}.</div>`
         : '';
       return;
@@ -13172,9 +13275,14 @@ const MemberApp = {
     } catch (_) { return; }
     if (!j || !j.ok) { box.innerHTML = ''; return; }
     if (!j.chart) {
-      // A REFUSAL IS SHOWN, NOT SWALLOWED. "Not enough people for a picture that stays anonymous"
-      // is a fact about the squad worth knowing; an empty space says nothing and reads as a bug.
-      box.innerHTML = j.note ? `<div class="iqt-chart-none">${this._escape(j.note)}</div>` : '';
+      /* A REFUSAL IS SHOWN, NOT SWALLOWED. "Not enough people for a picture that stays anonymous"
+         is a fact about the squad worth knowing; an empty space says nothing and reads as a bug.
+
+         BUT "NOTHING TO DRAW YET" IS NOT A REFUSAL. It is the ordinary state of almost every
+         object, and this drew it anyway — one of three stacked apologies a coach met on the
+         Inquiry screen, under a heading for a thing they had never asked to see. The server now
+         says which of the two it is; only a refusal earns a line. */
+      box.innerHTML = (j.note && j.refused) ? `<div class="iqt-chart-none">${this._escape(j.note)}</div>` : '';
       return;
     }
     box.innerHTML = this._chartHTML(j.chart);
@@ -13297,7 +13405,13 @@ const MemberApp = {
             `typeof AttachmentHandler === 'undefined'` for exactly this reason. */''}
       <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}">`;
     if (!list.length) {
-      box.innerHTML = `<div class="iqt-mat-empty">Nothing attached yet. Attach a deck, a document or a spreadsheet and IntelliQ will answer from it.</div>${attach}`;
+      /* THE DOOR STAYS, THE APOLOGY GOES. "Attach material" is a real capability and hiding it
+         would make it a capability nobody has — that is the failure this file keeps finding. But
+         the sentence explaining what attaching is FOR is an instruction manual printed on every
+         object whether or not anybody wanted one, and it was the third of three stacked apologies
+         on the Inquiry screen. The control says what it does; it does not need an essay beside
+         it, and a coach who taps it can read one then. */
+      box.innerHTML = attach;
       return;
     }
     box.innerHTML = `

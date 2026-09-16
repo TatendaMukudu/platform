@@ -3013,6 +3013,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   padding:.22rem .6rem;border-radius:999px;color:var(--text-muted);
   border:1px solid color-mix(in srgb, currentColor 22%, transparent);opacity:.85}
 .iq-inq-hyp{font-size:var(--fs-lg);line-height:1.58;margin:0 0 .55rem}
+/* A SUGGESTION READS QUIETER THAN A FINDING, and what it rests on is on the next line rather
+   than in a footnote — an unsupported claim and the fact that it is unsupported have to be read
+   in the same glance or the second one does not get read at all. */
+.iq-inq-maybe{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:0 0 .55rem;
+  overflow-wrap:anywhere}
+.iq-inq-maybe-w{display:block;font-size:var(--fs-sm);color:var(--text-muted);margin:.15rem 0 0}
 .iq-inq-why{font-size:var(--fs);color:var(--text-muted);line-height:1.5}
 /* The open question is separated by space and a hairline — the only rule on the card, so it
    lands as the turn in the thought rather than as a divider between two fields. */
@@ -3139,6 +3145,21 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-mat:empty{display:none}
 .iqt-mat-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
   color:var(--text-secondary);margin:.85rem 0 .45rem}
+/* THE JOURNEY'S LATER HALVES, ON THE QUESTION'S OWN SCREEN. A suggestion reads quieter than a
+   finding; what was tried wraps rather than scrolls at 390px; and the readiness line carries no
+   colour that ranks one answer above another, because "not enough evidence yet" is not a worse
+   answer than "worth trying". */
+.iqt-maybe{color:var(--text-secondary)}
+.iqt-ready{margin:.7rem 0 .2rem}
+.iqt-ready-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+.iqt-tried{margin:.8rem 0 0;padding:.7rem 0 0;border-top:1px solid var(--border)}
+.iqt-tried-h{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .4rem}
+.iqt-tried-r{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;margin:0 0 .35rem}
+.iqt-tried-t{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqt-tried-o{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-tried-n{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.35rem 0 0}
 .iqt-mat-empty,.iqt-mat-note,.iqt-mat-by{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;margin:.25rem 0}
 .iqt-mat-row{margin:0 0 .4rem}
 .iqt-mat-open{display:block;width:100%;text-align:left;background:var(--bg-card);

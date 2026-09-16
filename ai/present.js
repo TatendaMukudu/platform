@@ -159,6 +159,18 @@ function humanStatus(status) { return STATUS_TEXT[String(status || '').trim()] |
    person sees first and `detail` is what they get if they ask. Putting the split in the
    projection means the first screen cannot accidentally grow a field, because growing it takes
    a deliberate edit here rather than a stray line in a template. */
+/* ── HAS THE LEADING EXPLANATION EARNED STANDING OF ITS OWN? ──────────────────────────────────
+   The same predicate `ai/team-state.js` applies, for the same reason, at the other owner that
+   renders a claim beside a confidence band. `ai/diagnose.js newHypothesis` births a hypothesis at
+   `tentative` with "nothing supports this yet" written in, and `applyProposals` raises it only
+   from evidence — so `tentative` is exactly "nobody has evidenced this". Absent standing reads as
+   unsupported, which is the safe direction and the one an older projection gets. */
+function hypothesisHasStanding(i) {
+  if (!i || !i.hypothesis) return false;
+  const band = String(((i.hypothesisStanding || {}).band) || '').trim();
+  return !!band && band !== 'tentative';
+}
+
 function inquiryCard(inquiry = {}) {
   const i = inquiry && typeof inquiry === 'object' ? inquiry : {};
   const topic = i.topic || {};
@@ -183,8 +195,30 @@ function inquiryCard(inquiry = {}) {
          beside a summary field is a surface that will eventually invent its own. */
       standingWhy: confidenceWhy(conf),
       status: humanStatus(i.status),
-      // What we currently think, in the kernel's own words — never re-worded here.
-      thinking: i.hypothesis ? String(i.hypothesis) : null,
+      /* ── WHAT WE THINK, AND WHAT SOMEBODY HAS MERELY SUGGESTED ───────────────────────────
+         `thinking` is rendered by every card DIRECTLY UNDER the band badge above, so whatever
+         goes here is read at that band. That was safe while a hypothesis could only arrive from
+         evidence. It stopped being safe when a human could propose one: the card then printed
+         "players are worried about criticising each other" under a badge reading WELL SUPPORTED,
+         on Home, where the badge had been earned by five people describing the thing the theory
+         claims to explain — none of whom endorsed the theory.
+
+         `ai/team-state.js` already refused this for the squad surface. The rule needed to be
+         here as well, because this is the OTHER owner that renders a claim beside a band, and a
+         law with one owner and two renderers is a law with a hole in it.
+
+         So a hypothesis is admitted as `thinking` only when the kernel has given it standing of
+         its own — read from the band the kernel computed for THAT hypothesis, never recounted
+         here (L-DC1). Otherwise it travels as `possibleExplanation`, at its own standing, where
+         a card cannot mistake it for the finding. Absent standing reads as unsupported, which is
+         the safe direction and the one an older projection gets. */
+      thinking: hypothesisHasStanding(i) ? String(i.hypothesis) : null,
+      possibleExplanation: (!hypothesisHasStanding(i) && i.hypothesis) ? {
+        statement: String(i.hypothesis),
+        standing: humanBand((i.hypothesisStanding || {}).band || 'tentative'),
+        band: String((i.hypothesisStanding || {}).band || 'tentative'),
+        supportedBy: Number((i.hypothesisStanding || {}).supportedBy) || 0,
+      } : null,
       // ONE unknown on the first screen. The concept is one of the strongest IntelliQ has and
       // a list of six buries it; one open question reads as curiosity, six reads as a form.
       openQuestion: unknowns[0] || null,
@@ -325,4 +359,4 @@ function focusCard(focus = {}, opts = {}) {
 }
 
 module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
-  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard };
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, hypothesisHasStanding };

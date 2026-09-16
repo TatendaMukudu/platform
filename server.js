@@ -16522,6 +16522,15 @@ function _groupInquiryProjections(code, nodeId) {
     const leaderSubject = subjectRef.startsWith('member:') && (!knownPerson || isLeader);
     return {
       inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      /* WHAT THIS IS CALLED, IN WORDS A PERSON READS. The canonical topic stays exactly where it
+         is and travels unchanged; this is the reading of it, from the one owner that knows how —
+         `present.humanTopic` strips a leading domain segment and title-cases the rest, and is
+         already what every other inquiry surface uses. Without it the group screen printed
+         `football.attendance_timing` on a coach's phone, because the row read
+         `topic.label || topic.canonicalConcept` and an inquiry whose topic was never given a
+         label falls through to the key. Canonical identity is preserved internally; only the
+         presentation changes. */
+      topicLabel: present.humanTopic(i.topic),
       subjectRef, subjectId, leaderSubject,
       polarity: val.polarity, contested: val.contested, valenceReason: val.reason,
       hypothesis: lead ? lead.statement : null,
@@ -16641,6 +16650,7 @@ function _safeLeaderSubjectProjection(projection) {
   if (!projection || projection.leaderSubject !== true) return projection;
   return {
     inquiryId: projection.inquiryId, topic: projection.topic, status: projection.status,
+    topicLabel: projection.topicLabel,
     subjectRef: projection.subjectRef, subjectId: projection.subjectId, leaderSubject: true,
     polarity: projection.polarity, contested: projection.contested,
     hypothesis: null, alternatives: [], confidence: projection.confidence,
@@ -17063,10 +17073,42 @@ function _objectBucket(code, userId, scope = 'self') {
       // An INQUIRY carries its name in `topic`, not in any of the fields below, so every
       // inquiry fell through to the literal fallback and every card on the bucket page read
       // "Current understanding." present.humanTopic also strips the canonical key.
-      kind, label: raw.title || raw.text || raw.headline || raw.about
-        || (raw.topic ? present.humanTopic(raw.topic) : '') || 'Current understanding',
-      claim: raw.body || raw.hypothesis || raw.text || raw.claim || '',
+      /* THE TOPIC COMES BEFORE `about`, because `about` is a RAW field. `openQuestion` builds it
+         as `topic.label || topic.canonicalConcept`, so an inquiry whose topic was never given a
+         human label arrived here as `football.attendance_timing` and was printed. `humanTopic`
+         is the one place that knows how to read a canonical key out loud, and it was being
+         reached only when `about` happened to be empty. */
+      kind, label: raw.title || raw.text || raw.headline
+        || (raw.topic ? present.humanTopic(raw.topic) : '') || raw.about
+        || 'Current understanding',
+      /* ── AND THE SAME STANDING RULE, BECAUSE THIS IS ALSO A CLAIM BESIDE A BAND ────────────
+         `voice.explainObject` writes "I think <claim>. Confident." — the claim and the band in
+         one sentence. Handing it an unevidenced hypothesis with the OBSERVATION's band produced,
+         on Home, "I think players are worried about criticising each other. Confident." beneath a
+         badge reading WELL SUPPORTED, about a theory one person had offered and nothing
+         supported.
+
+         This is the fourth renderer that pairs a claim with a band, and the fourth place the same
+         law had to hold. Rather than a fourth copy of the predicate, it is imported from
+         `ai/present.js`, which owns the reading of a hypothesis's standing. A hypothesis with no
+         standing of its own is simply not passed as the claim; the card carries it as a
+         suggestion instead, at its own standing, where it cannot be mistaken for the finding. */
+      claim: raw.body
+        || (raw.hypothesis && present.hypothesisHasStanding(raw) ? raw.hypothesis : '')
+        || raw.text || raw.claim || '',
       band: raw.band || (raw.confidence || {}).band, because: (raw.confidence || {}).because || [],
+      /* ── THE PROVENANCE CHIP, WHICH NO OBJECT CARD HAD EVER BEEN GIVEN ────────────────────
+         `voice.provenance` is called on every one of these and returned null every time, because
+         the counts were never passed in. So "several people, more than one independent source" —
+         the one line no summariser can write, and what ai/voice.js calls the cheapest credibility
+         in the product — was composed, discarded and rendered nowhere on any card.
+
+         It matters most on exactly the state this screen is now in: a badge saying WELL SUPPORTED
+         above a sentence saying there is no read yet is ambiguous until something says WHAT is
+         well supported. The chip is that something. `banded` stays as it was, so a group object
+         still reads "several people" rather than a count small enough to point at somebody. */
+      contributors: Number(raw.contributors) || 0,
+      independentOrigins: Number(raw.independentOrigins) || 0,
       stillUnknown: raw.stillUnknown || [], falsifiers: raw.falsifiers || [],
       contested: raw.contested === true, banded: scope !== 'self', seed: id,
     });
@@ -17187,12 +17229,48 @@ function _objectBucket(code, userId, scope = 'self') {
     const nodeId = scope.slice(6);
     const subject = _groupSubjectRef(code, nodeId);
     if (!subject.ok || !_mayReadGroup(code, nodeId, userId)) return null;
+    const _groupProjections = _groupInquiryProjections(code, nodeId);
     const state = teamState.buildTeamState({
       node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
-      inquiries: _groupInquiryProjections(code, nodeId), findings: _groupPatternFindings(code, nodeId),
+      inquiries: _groupProjections, findings: _groupPatternFindings(code, nodeId),
       focuses: _teamFocuses(code, nodeId), now: Date.now(),
     });
-    add('high', state.high); add('low', state.low); add('inquiry', state.question);
+    add('high', state.high); add('low', state.low);
+    /* ── THE INQUIRY OBJECT IS THE INQUIRY, NOT THE SLOT THAT CHOSE IT ───────────────────────
+       This filed `state.question` — `{ inquiryId, question, about, band, contested,
+       otherUnknowns }`, which is `openQuestion`'s RANKING output and nothing else. Every surface
+       that resolves an object through this bucket therefore received an inquiry with no `topic`,
+       no `confidence` object, no hypothesis, no alternatives, no falsifiers and no frontier.
+
+       Driven in a browser at 390px, that is what a coach saw when they opened the single most
+       important screen in the product: a title, a badge, one sentence, and three consecutive
+       apologies for things that were not attached. One tap away, the group screen showed the same
+       inquiry with six sections — what we're seeing, what might explain it, what we still don't
+       know, what would show we have this wrong, what we've tried, and whether there is enough to
+       try anything. Two views of ONE object, and the better one was the one nobody was pointed at.
+
+       Worse, the thin slot made the screen contradict itself. `present.inquiryCard` reads
+       `raw.confidence` and found nothing, so it printed "Early thinking"; `voice.explainObject`
+       reads `raw.band` and found `supported`, so it printed "I'm confident about this one" —
+       directly beneath it. One object, one screen, two bands.
+
+       So the FULL projection is filed, carrying the chosen question with it. Nothing new is
+       computed: `_groupProjections` is the same array `buildTeamState` was just handed, and
+       `_safeLeaderSubjectProjection` is the same redaction `/api/group/:n/inquiry` applies, so a
+       finding about a named person cannot reach a thread by this door either. */
+    if (state.question) {
+      const _full = _groupProjections.find(p => String(p.inquiryId) === String(state.question.inquiryId));
+      const _safe = _full ? _safeLeaderSubjectProjection(_full) : null;
+      /* `signals` IS A COUNT ON A PROJECTION AND AN ARRAY ON A RAW OBJECT, and this bucket's
+         `raw` is the array kind — `_objectsWithEvidenceFor` joins the real signals back onto it,
+         and three readers call `.map` on them. Spreading the projection whole put a number where
+         an array belongs and took the composer down with `(raw.signals || []).map is not a
+         function`. The count is kept under its own name rather than thrown away; the field that
+         means something else keeps meaning that. */
+      const _merged = _safe ? { ..._safe, ...state.question, topic: _safe.topic } : null;
+      if (_merged) { _merged.signalCount = _safe.signals; delete _merged.signals; }
+      add('inquiry', _merged || state.question);
+    }
     /* `state.focuses` DOES NOT EXIST, and never did. ai/team-state.js buildTeamState returns the
        active `focus` and the closed `history`; there is no plural field, so `state.focuses || []`
        was an empty array on every call and this loop never ran once. The consequence was silent
@@ -17437,6 +17515,16 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
     openingSpeech: _oApproved.ok ? _oSpeech : '',
     openingNote: _oApproved.ok ? '' : _oApproved.note,
     prioritised: _mine.includes(`${kind}:${object.id}`),
+    /* ── THE ACTION HALF OF THIS QUESTION, ON THE QUESTION'S OWN SCREEN ──────────────────────
+       Both fields are already on the group inquiry projection this object was built from — they
+       reach the group screen and reached this one nowhere, which is how the two most important
+       views of one object came to disagree about how much was known. Read off `raw` rather than
+       recomputed: the projection is the owner and nothing here is entitled to a second opinion.
+
+       A personal object has neither, and gets neither. Absent is the honest answer and the
+       client draws no heading for it. */
+    triedBefore: Array.isArray((object.raw || {}).triedBefore) ? object.raw.triedBefore : [],
+    readiness: (object.raw || {}).readiness || null,
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
     forumKind: _aud.forumKind,
     /* HOW MANY PEOPLE, AND WHY NOT. A screen that is told only "no" has to invent a reason, and
@@ -19509,14 +19597,21 @@ app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
 
   const want = String(req.query.kind || '');
   const built = _chartFor(code, userId, obj, want);
-  if (!built) return res.json({ ok: true, chart: null, note: 'Nothing on the record to draw yet.' });
+  /* ── "NOTHING TO DRAW" IS NOT A REFUSAL, AND IS NOT REPORTED AS ONE ────────────────────────
+     A refusal is worth a sentence: "not enough people for a picture that stays anonymous" is a
+     fact about the squad a coach can act on. Having no chart is not — it is the ordinary state of
+     almost every object, and printing it put a small apology on the most important screen in the
+     product, one of three stacked together. `refused` lets the screen tell the two apart instead
+     of treating every absent chart as news. */
+  if (!built) return res.json({ ok: true, chart: null, refused: false,
+    note: 'Nothing on the record to draw yet.' });
   // BASIS — the refs this viewer's chart is allowed to be built from, gathered from the same
   // object they were cleared to read. A point citing anything else is refused as firmly as an
   // invented one, because a chart drawn from something outside the basis is a chart of data the
   // viewer was never shown.
   const governed = chart.governChart(built.spec, { basis: built.basis });
   if (!governed.ok) {
-    return res.json({ ok: true, chart: null, note: chart.refusalNote(governed.violations),
+    return res.json({ ok: true, chart: null, refused: true, note: chart.refusalNote(governed.violations),
       violations: governed.violations.map(v => v.kind) });
   }
   /* ── AND THEN THE SAME QUESTION EVERY OTHER CHANNEL ANSWERS (L-MF4, L-MF7) ─────────────────
