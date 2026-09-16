@@ -16362,11 +16362,45 @@ app.post('/api/group/:nodeId/candidates/:candidateId/dismiss', requireAuth, (req
    the kernel's own word for exactly that state, and `discriminate` answers what would separate
    rival explanations at least cost, which is the honest form of "what would help us learn". */
 function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
-  if (!inq) return { unknowns: [], wouldHelp: null, why: 'no inquiry' };
+  if (!inq) return { unknowns: [], wouldHelp: [], readiness: null, why: 'no inquiry' };
   const hyps = (inq.hypotheses || []).filter(h => h && h.status !== 'refuted');
   const supported = hyps.filter(h => (h.supportRefs || []).length > 0);
   const topic = (inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || 'this';
   const uncertainties = [];
+
+  /* ── IS THERE ENOUGH TO SUGGEST SOMETHING WORTH TESTING? ──────────────────────────────────
+     The founder's eighth decision-intelligence question, and the one with the most ways to
+     answer it dishonestly. "Not enough evidence yet" is a valid and important output; watching
+     is a legitimate position; and gathering information is the right move more often than
+     acting. So this returns one of three STATES with the reason it is in that state, and it
+     does NOT rank options, score them, or produce a probability.
+
+     DETERMINISTIC CODE DECIDES. Every input is something the kernel already computed — whether
+     any live explanation has support of its own, how many are competing, and whether the group
+     described the thing in opposite directions. Nothing here re-judges evidence; it reads the
+     judgements that were already made and states which of three positions they add up to. */
+  const liveHyps = hyps;
+  const testReadiness = (() => {
+    if (inq.contested === true || (inq.contradictions || []).length) {
+      return { state: 'gather_information',
+        because: 'The group has described this in opposite directions, so acting on either reading would settle a disagreement the group has not had yet.' };
+    }
+    if (supported.length === 1 && liveHyps.length === 1) {
+      return { state: 'worth_testing',
+        because: 'One explanation has something behind it and nothing is competing with it.' };
+    }
+    if (liveHyps.length > 1 && !supported.length) {
+      return { state: 'gather_information',
+        because: `${liveHyps.length} explanations are competing and nothing recorded separates them yet.` };
+    }
+    if (!liveHyps.length) {
+      return { state: 'not_enough_evidence',
+        because: 'Nobody has offered an explanation yet, so there is nothing to test.' };
+    }
+    return { state: 'not_enough_evidence',
+      because: 'Nothing recorded supports any of the explanations offered so far.' };
+  })();
+
 
   /* A pattern with candidate explanations and nothing behind any of them. The observation itself
      may be well supported — that is the ordinary and most interesting case. */
@@ -16412,7 +16446,7 @@ function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
     });
   }
 
-  if (!uncertainties.length) return { unknowns: [], wouldHelp: [], why: 'nothing open' };
+  if (!uncertainties.length) return { unknowns: [], wouldHelp: [], readiness: testReadiness, why: 'nothing open' };
   const built = uncertainties.map(u => inquiry.buildUncertainty(u));
 
   /* ── TWO CATEGORIES, AND THEY ARE NOT THE SAME THING ──────────────────────────────────────
@@ -16458,7 +16492,7 @@ function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
     if (sep && sep.key) wouldHelp.push({ kind: 'observe', text: String(sep.key).slice(0, 300), separates: sep.separates, about: why.id });
   }
 
-  return { unknowns, wouldHelp,
+  return { unknowns, wouldHelp, readiness: testReadiness,
     why: wouldHelp.length ? 'open' : 'nothing worth asking yet — see the unknowns' };
 }
 
@@ -16555,6 +16589,34 @@ function _groupInquiryProjections(code, nodeId) {
          observation that would separate rival explanations. Empty is the common answer and the
          honest one: "nothing worth asking yet" is a real state, not a gap to be filled. */
       wouldHelp: _frontier.wouldHelp,
+      /* ── AND WHETHER THERE IS ENOUGH TO SUGGEST SOMETHING WORTH TESTING ──────────────────
+         One of three states with the reason it is in that state. "Not enough evidence yet" is a
+         real answer and the commonest one. No ranking, no score, no probability. */
+      readiness: _frontier.readiness,
+      /* ── WHAT THIS GROUP HAS ALREADY TRIED ABOUT THIS, AND WHAT CAME OF IT ────────────────
+         Question 4 of the founder's nine, and it needed no new store: a group Focus has recorded
+         `origin.inquiryId` since the origin field existed, and the group screen already lists
+         what the group has tried. What was missing was the JOIN — the history was rendered for
+         the NODE, undifferentiated, so a coach looking at one question could not tell which of
+         five past attempts was about the thing in front of them.
+
+         SCOPED TO THIS INQUIRY, and deliberately not to "similar" ones: a resemblance judgement
+         here would be the system deciding two questions are the same thing, which is exactly the
+         kind of claim it is not entitled to make. Only what was explicitly started FROM this
+         inquiry counts as having been tried about it. */
+      triedBefore: _teamFocuses(code, nodeId)
+        .filter(f => f && f.origin && String(f.origin.inquiryId || '') === String(i.inquiryId))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 3)
+        .map(f => ({
+          focusId: String(f.focusId || ''),
+          text: String(f.text || '').slice(0, 300),
+          status: String(f.status || 'active'),
+          // The outcome word, or null. Null is "nothing has been recorded yet", which is a
+          // different statement from "it did nothing" and must not be rendered as one.
+          outcome: f.outcome && teamState.OUTCOME_RESULTS.includes(f.outcome.result) ? f.outcome.result : null,
+          at: Number(f.createdAt) || 0,
+        })),
       // WHAT WOULD SHOW THIS IS WRONG (D12). Computed on every inquiry since diagnose.js was
       // written and never projected, so the one line no competitor can produce reached no caller.
       falsifiers: (i.falsifiers || []).slice(0, 3)
@@ -19318,7 +19380,11 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
      about it. Nothing new is derived here and no second notion of a loop exists. */
   let loop = kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
   if (!loop) {
-    const addressedBy = near.find(e => e.from === target && e.type === 'addressed_by');
+    /* `near` is already identity-resolved by `neighbourhood`, so this no longer re-checks
+       `e.from === target`. It could not: the same inquiry is `low:<id>` on the squad surface and
+       `inquiry:<id>` in the open-question slot, and pinning the edge to the exact name the reader
+       happened to arrive by is what made the loop unreadable from the end a coach stands at. */
+    const addressedBy = near.find(e => e.type === 'addressed_by');
     if (addressedBy) loop = crossEvidence.loop(authorised, addressedBy.to);
   }
   /* THE CALLS THIS PERSON HAS MADE about how evidence stands to this focus. Refs and words only,

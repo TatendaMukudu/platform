@@ -3520,6 +3520,16 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqg-inq-none{font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 .45rem}
 .iqg-inq-out{font-size:var(--fs-sm);color:var(--text-secondary);margin:.45rem 0 0;
   overflow-wrap:anywhere}
+/* Wraps at phone width: a focus sentence and its outcome word do not share a line at 390px,
+   and a row that scrolls sideways is a row nobody reads the right-hand end of. */
+.iqg-inq-tried{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;margin:0 0 .35rem}
+.iqg-inq-tried-t{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-inq-tried-o{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+/* The readiness line carries no colour that ranks it. "Not enough evidence yet" is not a worse
+   answer than "worth trying", and styling it as a warning would make it one. */
+.iqg-inq-ready{margin:.6rem 0 .5rem;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary)}
+.iqg-inq-ready-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
 .iqg-exp-panel,.iqg-start{margin:.6rem 0 0}
 .iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
 .iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}

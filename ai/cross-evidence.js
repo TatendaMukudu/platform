@@ -253,9 +253,34 @@ function edges(objects = []) {
 
 /* Everything touching one object, with the object's own ref removed from each edge's far side so
    a caller can render "this is connected to X" without re-deriving direction. */
-function neighbourhood(objects = [], target = null) {
+/* ── THE NAMES THAT DENOTE THE SAME THING AS `target` ────────────────────────────────────────
+   A High, a Low and an open-question object can all be PROJECTIONS of one inquiry, and all three
+   carry that inquiry's id. So the question a coach is standing on has several names at once, and
+   which one they arrived by is an accident of which surface sent them.
+
+   `edges()` already resolves an inquiry ref by identity when the edge is BUILT, and expresses
+   every edge in one name the caller can resolve. That is correct and it is not enough: whichever
+   name it settled on, a reader arriving by one of the OTHERS found an empty neighbourhood. The
+   symptom was the id-namespace defect returning in a new place — a coach on the squad's `low`
+   surface reading "nothing has been tried about this" while the focus that addressed it sat one
+   edge away under the name `inquiry:<id>`.
+
+   So identity is resolved at READ time as well as at build time, over the set the caller has
+   already authorised and never beyond it. */
+function sameThingRefs(objects = [], target = null) {
   const t = _s(target, 120);
-  return edges(objects).filter(e => e.from === t);
+  const rows = _arr(objects).filter(o => refOf(o));
+  const self = rows.find(o => refOf(o) === t);
+  const key = self ? _inquiryIdOf(self) : null;
+  if (!key) return [t];
+  return [...new Set([t, ...rows.filter(o => _inquiryIdOf(o) === key).map(o => refOf(o))])];
+}
+
+/* Everything touching one object — under ANY of its names — with the object's own names removed
+   from the far side, so a projection of an inquiry is never reported as connected to itself. */
+function neighbourhood(objects = [], target = null) {
+  const names = new Set(sameThingRefs(objects, target));
+  return edges(objects).filter(e => names.has(e.from) && !names.has(e.to));
 }
 
 /* ── THE A -> B LOOP ────────────────────────────────────────────────────────────────────────
@@ -366,5 +391,5 @@ function loop(objects = [], focusRef = null) {
    having it is what stops `supports` becoming the default for anything ambiguous. */
 const FOCUS_RELATIONS = Object.freeze(['supports', 'undermines', 'unclear']);
 
-module.exports = { REL, INVERSE, KINDS, FOCUS_RELATIONS, ref, refOf, parseRef, edges, neighbourhood, loop,
+module.exports = { REL, INVERSE, KINDS, FOCUS_RELATIONS, ref, refOf, parseRef, edges, sameThingRefs, neighbourhood, loop,
   evidenceRefsOf, originRefsOf };

@@ -12836,6 +12836,41 @@ const MemberApp = {
             ${wouldHelp.map(w => `<div class="iqg-inq-help">${esc(w)}</div>`).join('')}
           </div>` : ''}
 
+        ${/* WHAT WE HAVE TRIED ABOUT THIS, AND WHAT CAME OF IT. Scoped to this inquiry by the
+              server, from the origin a group Focus has always recorded. A blank outcome says
+              "nothing recorded yet", which is not the same as "it did nothing". */''}
+        ${(i.triedBefore || []).length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we have tried about this</div>
+            ${(i.triedBefore || []).map(t => `
+              <div class="iqg-inq-tried">
+                <span class="iqg-inq-tried-t">${esc(t.text)}</span>
+                <span class="iqg-inq-tried-o">${t.outcome
+                  ? esc(this._OUTCOME_WORDS[t.outcome] || t.outcome)
+                  : (t.status === 'active' ? 'still running' : 'nothing recorded yet')}</span>
+              </div>`).join('')}
+            <div class="iqg-note">What was recorded after each one. Nothing here says a focus caused
+              what followed it.</div>
+          </div>` : ''}
+
+        ${/* WHAT WOULD SHOW THIS IS WRONG. Computed since ai/diagnose.js was written and never
+              rendered anywhere a group could read it. It is the line no competitor produces. */''}
+        ${(i.falsifiers || []).length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What would show we have this wrong</div>
+            ${(i.falsifiers || []).slice(0, 2).map(f => `<div class="iqg-inq-help">${esc(f)}</div>`).join('')}
+          </div>` : ''}
+
+        ${/* IS THERE ENOUGH TO TRY SOMETHING? The server's answer, in the server's words. Three
+              states, no ranking and no score. "Not enough evidence yet" is the commonest one and
+              is printed as plainly as the others, because a product that can only ever say "do
+              this" is not helping anybody decide anything. */''}
+        ${i.readiness ? `<div class="iqg-inq-ready iqg-ready-${esc(i.readiness.state)}">${esc(
+          i.readiness.state === 'worth_testing' ? 'There may be something here worth trying.'
+          : i.readiness.state === 'gather_information' ? 'Worth learning more before trying anything.'
+          : 'Not enough evidence yet to suggest anything worth trying.')}
+          <span class="iqg-inq-ready-w">${esc(i.readiness.because)}</span></div>` : ''}
+
         ${leads ? `<button type="button" class="btn btn-outline btn-sm"
           onclick="MemberApp.startGroupFocus('${esc(nodeId)}','${esc(i.inquiryId)}')">Work on this as a group</button>` : ''}
       </div>`;
