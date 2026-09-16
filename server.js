@@ -16185,6 +16185,108 @@ app.post('/api/group/:nodeId/contribute', requireAuth, (req, res) => {
 /* POST /api/group/:nodeId/withdraw — take back what I contributed. The group evidence is
    superseded by the SAME correction machinery a member's own revision uses: nothing is deleted,
    and the record still explains what was believed and why it stopped being believed. */
+/* POST /api/group/:nodeId/inquiry/:inquiryId/explanation — "we think it is because…"
+
+   A HUMAN MAY OFFER A CANDIDATE EXPLANATION, AND IT STAYS A CANDIDATE. Until now a group inquiry
+   could only ever hold observations: `contribution.toGroupProposal` emits `level: 'observation'`
+   and nothing in production emitted `level: 'hypothesis'`, so "what might explain it" was empty by
+   construction and the people who were actually there had no way to say what they thought.
+
+   FOUNDER DECISION, September 2026: the explanation belongs to the people who were there, and a
+   human may propose one deliberately through this boundary. What it must NOT become is true
+   because they said it.
+
+   Nothing here decides that, and nothing here could. The kernel already owns every part of it and
+   this route only opens a door to it:
+
+     · `diagnose.newHypothesis` starts at score 0, band `tentative`, status `open`, with the
+       reason "nothing supports this yet" written in.
+     · Which explanation LEADS is decided by evidence score in `applyProposals`, never by who
+       proposed it, their role, or when it arrived.
+     · A rival never overwrites an incumbent — they coexist and compete.
+     · `_groupInquiryProjections` now carries the leading hypothesis's OWN standing, and
+       `ai/team-state.js` refuses to render an unsupported explanation as the group's finding.
+
+   INDEPENDENCE IS NOT THE PROPOSER'S TO CLAIM. The server stamps `source` with the authenticated
+   user, exactly as the member intake path does, so one person proposing the same explanation
+   three times is one origin — and so is a model rephrasing it.
+
+   AUTHORITY IS THE SAME GATE AS ANY OTHER CONTRIBUTION. `contribution.mayContribute` decides,
+   which means belonging to the node and acting deliberately; a leader gets no extra weight here,
+   because leading a group is not evidence about why something happens.
+
+   NO PROVIDER IS INVOLVED. This is a person's own words through a deterministic path, so it works
+   exactly the same when every model is unreachable — which is the state the pilot runs in. */
+app.post('/api/group/:nodeId/inquiry/:inquiryId/explanation', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+
+  const leads = _leadsNode(code, nodeId, userId);
+  const gate = contribution.mayContribute({
+    actorId: userId, ownerId: userId,              // their own words, so they own them
+    role: leads ? 'leader' : 'member',
+    inNode: _inNode(code, nodeId, userId), leadsNode: leads,
+    explicit: true,                                 // reaching this endpoint IS the deliberate act
+  });
+  if (!gate.allowed) return res.status(403).json({ error: gate.reason });
+
+  const text = String((req.body || {}).text || '').trim().slice(0, 300);
+  if (!text) return res.status(400).json({ error: 'Say what you think might explain it.' });
+
+  /* THE INQUIRY MUST BE THIS GROUP'S OWN, resolved through the same store the group reads, so an
+     id from another group or another tenant finds nothing rather than something. */
+  const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+  const key = Object.keys(bySubject).find(k => bySubject[k] && bySubject[k].inquiryId === String(req.params.inquiryId));
+  if (!key) return res.status(404).json({ error: 'no such inquiry for this group' });
+
+  /* A LEADER-SUBJECT FINDING IS NOT A PLACE TO PUT A THEORY ABOUT A PERSON. Those route to the
+     subject and their own leader by L-D27, and an explanation offered into one would be a claim
+     about a named individual wearing a group's clothes. */
+  const projection = (_groupInquiryProjections(code, nodeId) || [])
+    .find(p => p.inquiryId === String(req.params.inquiryId));
+  if (projection && projection.leaderSubject === true) {
+    return res.status(403).json({ error: 'this one is about a person, so it is not a place to propose an explanation' });
+  }
+
+  const now = Date.now();
+  const before = JSON.parse(JSON.stringify(bySubject[key]));
+  const after = diagnose.applyProposals(bySubject[key], [{
+    id: 'hyp_' + generateId(),
+    level: 'hypothesis',
+    text,
+    // WHO SAID IT IS THE SERVER'S TO STAMP, never the caller's — the same rule the member intake
+    // path applies, and for the same reason: a proposer free to label their own source could turn
+    // one voice into several corroborating ones.
+    source: userId,
+    originRef: `explanation:${userId}:${now}`,
+    originKind: 'reported',            // an account of WHY, not a direct observation of the thing
+    turnId: `explanation:${userId}:${now}`,
+    authority: 'self_report',
+    directness: 'inferred',            // an explanation is inferred by construction
+    contributedBy: userId,
+    contributedAt: now,
+    contributorRole: leads ? 'leader' : 'member',
+  }], { now });
+  inquiryStates[code][subject.subjectRef][key] = after;
+
+  _audit(code, { actor: userId, action: 'team_focus_set', subjectIds: [], basis: 'explanation_proposed' });
+  scheduleSave();
+
+  const lead = (after.hypotheses || []).find(h => h.id === after.leadingHypothesisId) || null;
+  const mine = (after.hypotheses || []).find(h => String(h.statement).trim() === text) || null;
+  res.json({ ok: true,
+    inquiryId: after.inquiryId,
+    explanation: mine ? { statement: mine.statement, band: mine.confidence.band,
+      status: mine.status, supportedBy: (mine.supportRefs || []).length } : null,
+    /* WHAT THE GROUP'S OWN STANDING DID, which is nothing. Said out loud because the one thing a
+       person might reasonably expect from proposing an explanation is that it changes how sure
+       the system is, and it must not. */
+    inquiryConfidence: { band: after.confidence.band, unchanged: after.confidence.band === before.confidence.band },
+    note: 'Recorded as a possible explanation, not as a finding. It carries no weight until something supports it, and anyone can offer a different one.' });
+});
+
 app.post('/api/group/:nodeId/withdraw', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const nodeId = String(req.params.nodeId);
@@ -16234,6 +16336,132 @@ app.post('/api/group/:nodeId/candidates/:candidateId/dismiss', requireAuth, (req
 /* The group's inquiries, projected once and shared by every reader of them. Extracted so the
    team-grain surface below cannot drift into a second, subtly different projection of the same
    state — which is how two views of one truth start disagreeing about what the group believes. */
+/* ── WHAT WE STILL DO NOT KNOW, AND WHAT WOULD HELP US LEARN IT ───────────────────────────────
+   A group inquiry's frontier was always empty. `missingSignals` is written only in the member
+   intake path (`after.missingSignals = unknowns…`), never by `_admitGroupContributions`, so
+   `stillUnknown` on every group projection was `[]` — and the coach's "what we still don't know"
+   had nothing in it however much the group did not know.
+
+   NOTHING NEW DECIDES ANY OF THIS. `ai/inquiry.js` is the canonical owner of what is worth asking
+   and has been live since it was written — it is simply pointed at org-state and staleness
+   (`_deriveOrgUncertainties`, `_lifecycleUncertainties`) and never at an inquiry's own state. This
+   derives uncertainties from the inquiry, hands them to the SAME engine, and keeps what survives.
+
+   The engine's gauntlet is the point of reusing it rather than writing a question here: value
+   (`questionValue` — is this worth somebody's attention at all), the critic (`critique` — is the
+   question leading, accusatory, or answerable without asking), and the health guard
+   (`healthGuard` — is it about something private or sensitive). A question this file invented
+   would have passed none of them.
+
+   IT DERIVES, IT DOES NOT STORE. Nothing is written back to the inquiry: the frontier is a read
+   over canonical state, so a hypothesis arriving or an origin being superseded changes it on the
+   next read with nothing to keep in step.
+
+   AN EXPLANATION DOES NOT CLOSE AN UNKNOWN. Somebody offering a theory is the system knowing LESS
+   than before, not more — there is now a candidate nobody has tested. `UNSUPPORTED_HYPOTHESIS` is
+   the kernel's own word for exactly that state, and `discriminate` answers what would separate
+   rival explanations at least cost, which is the honest form of "what would help us learn". */
+function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
+  if (!inq) return { unknowns: [], wouldHelp: null, why: 'no inquiry' };
+  const hyps = (inq.hypotheses || []).filter(h => h && h.status !== 'refuted');
+  const supported = hyps.filter(h => (h.supportRefs || []).length > 0);
+  const topic = (inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || 'this';
+  const uncertainties = [];
+
+  /* A pattern with candidate explanations and nothing behind any of them. The observation itself
+     may be well supported — that is the ordinary and most interesting case. */
+  if (hyps.length && !supported.length) {
+    uncertainties.push({
+      id: `${inq.inquiryId}:why`,
+      type: inquiry.UNCERTAINTY.UNSUPPORTED_HYPOTHESIS,
+      claim: `why ${topic} happens`,
+      observedBaseline: `${topic} has been described by ${(inq.confidence && inq.confidence.origin && inq.confidence.origin.independentOrigins) || 0} separate accounts`,
+      hypotheses: hyps.map(h => ({ statement: h.statement, probe: null, probeCost: 0.3 })),
+      impact: 'medium', urgency: 'low',
+      privacyClass: 'team-shared', derivable: false,
+      resolutionOwner: 'organisation',
+    });
+  }
+
+  /* The group described the same thing in opposite directions. The kernel already treats that as
+     a first-class state rather than a tie to break, and it is the most informative thing an
+     inquiry can be. */
+  if (inq.contested === true || (inq.contradictions || []).length) {
+    uncertainties.push({
+      id: `${inq.inquiryId}:contested`,
+      type: inquiry.UNCERTAINTY.CONTRADICTION,
+      claim: topic,
+      currentBeliefs: hyps.slice(0, 2).map(h => ({ value: h.statement, confidence: h.confidence.score, authority: 'self_report' })),
+      impact: 'medium', urgency: 'medium',
+      privacyClass: 'team-shared', derivable: false,
+      resolutionOwner: 'organisation',
+    });
+  }
+
+  /* Anything the inquiry already recorded as its own collection frontier. Group inquiries have
+     none today; a member's do, and reading the field rather than the path means this works for
+     both the moment either writes one. */
+  for (const m of (inq.missingSignals || []).slice(0, 3)) {
+    const q = (m && (m.question || m)) || '';
+    if (!q) continue;
+    uncertainties.push({
+      id: `${inq.inquiryId}:${String(q).slice(0, 40)}`,
+      type: inquiry.UNCERTAINTY.MISSING_REQUIRED,
+      claim: String(q), impact: 'low', urgency: 'low',
+      privacyClass: 'team-shared', derivable: false, resolutionOwner: 'organisation',
+    });
+  }
+
+  if (!uncertainties.length) return { unknowns: [], wouldHelp: [], why: 'nothing open' };
+  const built = uncertainties.map(u => inquiry.buildUncertainty(u));
+
+  /* ── TWO CATEGORIES, AND THEY ARE NOT THE SAME THING ──────────────────────────────────────
+     An UNKNOWN is a statement about what the record does not establish. It costs nobody
+     anything, it is true whether or not we ever act on it, and it is described deterministically
+     from state — which is why it is not gated.
+
+     A QUESTION is an ACT. It spends somebody's attention, creates social pressure, and can
+     distort the very behaviour it asks about; `ai/inquiry.js` exists to decide whether one is
+     worth asking, and it is genuinely hard to pass. Driven here: "why does communication drop
+     after results" scores 0.02 and the critic blocks it `no_reliable_owner` — because nobody IS
+     the system of record for why a group behaves a certain way. That refusal is correct, and the
+     honest response to it is to say there is nothing useful to ask yet, not to lower the bar
+     until something comes out.
+
+     Collapsing the two is how a product ends up asking a squad a leading question in order to
+     have something to put under a heading. */
+  const unknowns = built.map(u => {
+    if (u.type === inquiry.UNCERTAINTY.UNSUPPORTED_HYPOTHESIS) {
+      const n = (u.hypotheses || []).length;
+      return { about: u.id, kind: u.type,
+        statement: n === 1
+          ? 'One explanation has been offered, and nothing recorded supports it yet.'
+          : `${n} explanations have been offered, and nothing recorded separates them yet.` };
+    }
+    if (u.type === inquiry.UNCERTAINTY.CONTRADICTION) {
+      return { about: u.id, kind: u.type,
+        statement: 'The group has described this in opposite directions, and that disagreement is not resolved.' };
+    }
+    return { about: u.id, kind: u.type, statement: String(u.claim || '').slice(0, 300) };
+  }).filter(x => x.statement);
+
+  /* AND WHAT WOULD ACTUALLY HELP — through the gauntlet, and often empty. Two things can survive
+     it: a question the engine judged worth asking, and a PROBE that would separate rival
+     explanations (`discriminate`), which is an observation to make rather than a person to ask
+     and so does not spend anybody's attention. */
+  const { plans } = inquiry.planInquiries(built, { threshold: 0.15, maxAsks: 3 });
+  const wouldHelp = plans.map(p => ({ kind: 'ask', text: p.question, why: p.why || null, about: p.uncertaintyId }));
+
+  const why = built.find(u => u.type === inquiry.UNCERTAINTY.UNSUPPORTED_HYPOTHESIS);
+  if (why && (why.hypotheses || []).length > 1) {
+    const sep = inquiry.discriminate(why);
+    if (sep && sep.key) wouldHelp.push({ kind: 'observe', text: String(sep.key).slice(0, 300), separates: sep.separates, about: why.id });
+  }
+
+  return { unknowns, wouldHelp,
+    why: wouldHelp.length ? 'open' : 'nothing worth asking yet — see the unknowns' };
+}
+
 function _groupInquiryProjections(code, nodeId) {
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return [];
@@ -16247,6 +16475,7 @@ function _groupInquiryProjections(code, nodeId) {
     // is a first-class outcome, not a tie to be broken: if people described the same thing in
     // opposite directions, the group does not agree yet, and reporting it as a High or a Low
     // would settle on the leader's behalf a disagreement they are the one who should see.
+    const _frontier = _inquiryFrontier(i, { memberCount: _nodeMembers(code, nodeId).length });
     const forThis = _groupCands(code).filter(c => c.nodeId === nodeId && c.concept === ((i.topic && i.topic.canonicalConcept) || ''));
     const val = teamState.valenceOf(forThis);
     const subjectRef = String(i.subjectRef || subject.subjectRef);
@@ -16262,6 +16491,22 @@ function _groupInquiryProjections(code, nodeId) {
       subjectRef, subjectId, leaderSubject,
       polarity: val.polarity, contested: val.contested, valenceReason: val.reason,
       hypothesis: lead ? lead.statement : null,
+      /* ── AND WHAT THE LEADING EXPLANATION RESTS ON, WHICH IS NOT WHAT THE INQUIRY RESTS ON ──
+         The rivals below have always travelled with their own band and status. The LEADING one
+         travelled as a bare string — so every reader downstream had to borrow a band from
+         somewhere, and the only band in reach was the inquiry's, earned by the observation from
+         however many independent origins. An explanation nobody has evidenced would then be
+         rendered at `supported`, on the strength of five people who described the thing it claims
+         to explain and never endorsed the claim itself.
+
+         That is "authority makes it true" arriving by a side door, and it becomes reachable the
+         moment a human may propose an explanation. `supportedBy` counts the refs the kernel
+         actually attached to this hypothesis: zero is the honest and common answer. */
+      hypothesisStanding: lead
+        ? { band: lead.confidence.band, score: lead.confidence.score, status: lead.status,
+            supportedBy: (lead.supportRefs || []).length,
+            because: (lead.confidence.because || []).slice(0, 3) }
+        : null,
       alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
       confidence: i.confidence,
       // What it rests on, counted the way confidence counts it: separate underlying occurrences,
@@ -16276,7 +16521,21 @@ function _groupInquiryProjections(code, nodeId) {
       // report two corrections where one claim was withdrawn.
       corrected: sig.filter(s => s.supersededBy).length,
       contradictions: active.filter(s => s.dissents).length,
-      stillUnknown: (i.missingSignals || []).map(m => m.question),
+      /* THE FRONTIER, DERIVED FROM THIS INQUIRY'S OWN STATE. `missingSignals` is written only by
+         the member intake path, so for a group this was `[]` however much the group did not know.
+         `_inquiryFrontier` reads what is open — candidate explanations nobody has evidenced, a
+         contested account, anything the inquiry recorded itself — and runs it through the SAME
+         value gate, critic and health guard every other question in the product passes. Both
+         sources are kept: a group inquiry that one day writes its own missingSignals keeps them. */
+      stillUnknown: (() => {
+        const own = (i.missingSignals || []).map(m => m && (m.question || m)).filter(Boolean);
+        const derived = _frontier.unknowns.map(u => u.statement);
+        return [...new Set([...own, ...derived])].slice(0, 3);
+      })(),
+      /* AND WHAT WOULD ACTUALLY HELP — a question the engine judged worth asking, or an
+         observation that would separate rival explanations. Empty is the common answer and the
+         honest one: "nothing worth asking yet" is a real state, not a gap to be filled. */
+      wouldHelp: _frontier.wouldHelp,
       // WHAT WOULD SHOW THIS IS WRONG (D12). Computed on every inquiry since diagnose.js was
       // written and never projected, so the one line no competitor can produce reached no caller.
       falsifiers: (i.falsifiers || []).slice(0, 3)

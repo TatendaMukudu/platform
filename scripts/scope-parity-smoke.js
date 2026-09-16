@@ -158,7 +158,20 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
    scouting deck to read from" from "a claim about this squad". It grants nothing; it is the
    thing that REFUSES, and material-classification-smoke drives every combination of its three
    requirements including the one the founder named: user assertion alone. */
-ok('W4 inventory names every current scope reference', inventory.length === 74 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 74 -> 76, September 2026. Two call sites, both on ONE new governed boundary:
+   POST /api/group/:nodeId/inquiry/:inquiryId/explanation, where a human may propose a candidate
+   explanation for a group inquiry.
+
+   They are `_inNode` and `_leadsNode`, passed together into `contribution.mayContribute` — the
+   SAME gate every other contribution passes, asked in the same way, rather than a second opinion
+   about who may speak into a group. The route grants nothing on the strength of them: leading the
+   node buys no extra weight, because leading a group is not evidence about why something happens
+   there. What they decide is only whether this person belongs to this group at all.
+
+   The count going up is the honest record of a new boundary existing, not of scope being
+   loosened: before this route there was no way for anybody, at any level, to put an explanation
+   on a group inquiry. */
+ok('W4 inventory names every current scope reference', inventory.length === 76 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

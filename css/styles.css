@@ -3502,8 +3502,23 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqg-inq-topic{font-size:var(--fs-lg);line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere}
 .iqg-inq-claim{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:.2rem 0 0;
   overflow-wrap:anywhere}
-.iqg-inq-meta,.iqg-inq-open{font-size:var(--fs-sm);color:var(--text-secondary);margin:.3rem 0 .45rem}
-.iqg-start{margin:.6rem 0 0}
+.iqg-inq-meta,.iqg-inq-open,.iqg-inq-help{font-size:var(--fs-sm);color:var(--text-secondary);margin:.3rem 0 .45rem}
+/* THE SEVEN THINGS ARE SEVEN THINGS. What we're seeing, what might explain it, what we still
+   don't know and what would help us learn are drawn as separate blocks with their own headings
+   because running them together is how a candidate explanation turns into a finding by layout
+   alone. The rule is typographic here and epistemic everywhere else, and it is the same rule. */
+.iqg-inq-sec{margin:.55rem 0 0}
+.iqg-inq-sec-h{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .3rem}
+.iqg-inq-exp{margin:0 0 .45rem}
+.iqg-inq-exp-t{display:block;font-size:var(--fs-md);line-height:1.5;color:var(--text-primary);
+  overflow-wrap:anywhere}
+/* "Nothing supports this yet" sits WITH the explanation, not in a footnote — an unsupported
+   claim and the fact that it is unsupported have to be read in the same glance or the second
+   one does not get read at all. */
+.iqg-inq-exp-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+.iqg-inq-none{font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-exp-panel,.iqg-start{margin:.6rem 0 0}
 .iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
 .iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}
 .iqg-hist{margin:1rem 0}

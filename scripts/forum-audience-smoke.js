@@ -355,8 +355,23 @@ const server = app.listen(0, async () => {
       !!ctxSame && ctxSame.sameObject === 'focus:tf_crowd');
     ok('FA-I1b …with no author on it, because forum speech is anonymous to every human and the one reader that is not a human must not be the way round that',
       !('authorId' in ctxSame.messages[0]) && !JSON.stringify(ctxSame).includes('p1'));
-    ok('FA-I2 …and a turn about a DIFFERENT object the same person can also read is handed nothing from it',
-      _forumContext(C, 'p1', 'inquiry:inq_crowd') === null);
+    /* FA-I2 USED TO ASSERT `=== null` HERE, AND IT PASSED FOR THE WRONG REASON. p1 posted into
+       the crowd inquiry's own room back at FA-E1, so there was never nothing to be handed; the
+       null came from `_allObjectsFor` not carrying that inquiry as an object at all, because the
+       crowd inquiry recorded no unknown and so never reached `teamState.openQuestion`. The
+       assertion's own words — "a DIFFERENT object the same person CAN ALSO READ" — described a
+       state that did not exist, and the moment the frontier pass gave a group inquiry a derived
+       unknown, the premise became true and the assertion went red. It was measuring an accident.
+
+       THE INVARIANT IT MEANT TO PROTECT IS ISOLATION, NOT EMPTINESS. Each object's turn is handed
+       ITS OWN room and not one word of any other. So that is what is asserted: the inquiry turn
+       gets the inquiry's room, keyed to itself, and the focus's sentence is nowhere in it. The
+       genuinely-nothing cases are I2b and I3 below, where the person cannot read the object. */
+    const ctxOther = _forumContext(C, 'p1', 'inquiry:inq_crowd');
+    ok('FA-I2 …and a turn about a DIFFERENT object the same person can also read is handed THAT object\'s room and not this one\'s',
+      !!ctxOther && ctxOther.sameObject === 'inquiry:inq_crowd'
+      && ctxOther.messages.every(m => !/stepping at different moments/.test(m.text))
+      && /first pass is on/.test(JSON.stringify(ctxOther.messages)));
     ok('FA-I2b …and neither is a group object in a node this person is not on',
       _forumContext(C, 'p1', 'inquiry:inq_lonely') === null);
     ok('FA-I3 somebody who cannot read the object at all gets nothing',

@@ -12776,20 +12776,114 @@ const MemberApp = {
   _groupInquiryRow(nodeId, i, leads) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const label = (i.topic && (i.topic.label || i.topic.canonicalConcept)) || 'Something the group is working out';
+    const explanations = [
+      ...(i.hypothesis ? [{ statement: i.hypothesis, band: (i.hypothesisStanding || {}).band || 'tentative',
+        supportedBy: (i.hypothesisStanding || {}).supportedBy || 0 }] : []),
+      ...(i.alternatives || []).map(a => ({ statement: a && a.statement, band: (a && a.band) || 'tentative', supportedBy: 0 })),
+    ].filter(e => e.statement).slice(0, 4);
+    const unknowns = (i.stillUnknown || []).filter(Boolean).slice(0, 3);
+    const wouldHelp = (i.wouldHelp || []).map(w => (w && (w.question || w.statement)) || w).filter(Boolean).slice(0, 2);
     return `
       <div class="iqg-inq-row" id="iqg-inq-${esc(i.inquiryId)}">
+        ${/* WHAT WE'RE SEEING. The observation, and what it rests on — origins, not voices. */''}
         <div class="iqg-inq-topic">${esc(label)}</div>
-        ${i.hypothesis ? `<div class="iqg-inq-claim">${esc(i.hypothesis)}</div>` : ''}
         <div class="iqg-inq-meta">
           ${i.contested ? 'People describe this differently' :
             (typeof i.independentOrigins === 'number'
               ? `${i.independentOrigins} separate ${i.independentOrigins === 1 ? 'account' : 'accounts'}`
               : 'several accounts')}
         </div>
-        ${(i.stillUnknown || [])[0] ? `<div class="iqg-inq-open">Still unknown: ${esc(i.stillUnknown[0])}</div>` : ''}
+
+        ${/* WHAT MIGHT EXPLAIN IT — a SEPARATE section, and it must stay separate. Collapsing a
+              candidate explanation into the observation above is precisely how "we think it's
+              because…" becomes "it's because…". Each one carries its own standing, which is the
+              kernel's, and `supportedBy: 0` is the common and honest answer. */''}
+        <div class="iqg-inq-sec">
+          <div class="iqg-inq-sec-h">What might explain it</div>
+          ${explanations.length
+            ? explanations.map(e => `
+                <div class="iqg-inq-exp">
+                  <span class="iqg-inq-exp-t">${esc(e.statement)}</span>
+                  <span class="iq-inq-band iq-band-${esc(e.band)}">${esc(_CONFIDENCE_WORDS[e.band] || 'Early thinking')}</span>
+                  <span class="iqg-inq-exp-w">${e.supportedBy
+                    ? `${e.supportedBy} thing${e.supportedBy === 1 ? '' : 's'} support${e.supportedBy === 1 ? 's' : ''} this so far`
+                    : 'Nothing supports this yet'}</span>
+                </div>`).join('')
+            : `<div class="iqg-inq-none">No one has offered an explanation yet.</div>`}
+          ${/* THE DOOR. Open to anyone in the group, not only the leader — leading a group is not
+                evidence about why something happens, and `contribution.mayContribute` on the route
+                is the gate this merely reflects. */''}
+          ${i.leaderSubject ? '' : `<button type="button" class="btn btn-outline btn-sm"
+            onclick="MemberApp.startGroupExplanation('${esc(nodeId)}','${esc(i.inquiryId)}')">Suggest what might explain it</button>`}
+        </div>
+
+        ${unknowns.length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we still don't know</div>
+            ${unknowns.map(u => `<div class="iqg-inq-open">${esc(u)}</div>`).join('')}
+          </div>` : ''}
+
+        ${wouldHelp.length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What would help us learn</div>
+            ${wouldHelp.map(w => `<div class="iqg-inq-help">${esc(w)}</div>`).join('')}
+          </div>` : ''}
+
         ${leads ? `<button type="button" class="btn btn-outline btn-sm"
           onclick="MemberApp.startGroupFocus('${esc(nodeId)}','${esc(i.inquiryId)}')">Work on this as a group</button>` : ''}
       </div>`;
+  },
+
+  /* PROPOSE A CANDIDATE EXPLANATION — the human half of "what might explain it".
+     `POST /api/group/:nodeId/inquiry/:inquiryId/explanation` existed with no caller, which is the
+     same failure this file has hit before: a route with no door is a capability nobody has.
+
+     The screen promises nothing the server does not do. It does not say the group now thinks
+     this, it does not show a confidence it has not earned, and the note it prints afterwards is
+     the SERVER'S note, not a sentence composed here to sound reassuring. No provider is involved
+     anywhere on this path, so it works identically when every model is unreachable. */
+  async startGroupExplanation(nodeId, inquiryId) {
+    const row = document.getElementById(`iqg-inq-${inquiryId}`);
+    if (!row) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (row.querySelector('.iqg-exp-panel')) return;      // already open; never two panels
+    const panel = document.createElement('div');
+    panel.className = 'iqg-exp-panel';
+    panel.innerHTML = `
+      <label class="iqg-start-l" for="iqg-x-${esc(inquiryId)}">What do you think might explain it?</label>
+      <div class="iq-field"><textarea id="iqg-x-${esc(inquiryId)}" class="iq-field-input" rows="2"
+        placeholder="In your own words — for example, we think it happens because…"></textarea></div>
+      <div class="iqg-start-btns">
+        <button type="button" class="btn btn-primary btn-sm"
+          onclick="MemberApp.confirmGroupExplanation('${esc(nodeId)}','${esc(inquiryId)}')">Offer this</button>
+        <button type="button" class="btn btn-outline btn-sm"
+          onclick="this.closest('.iqg-exp-panel').remove()">Not now</button>
+      </div>
+      <div class="iqg-start-note">It is recorded as a possible explanation, not as what the group
+        has found. It carries no weight until something supports it, and anyone can offer a
+        different one.</div>`;
+    row.appendChild(panel);
+    const ta = panel.querySelector('textarea');
+    if (ta) ta.focus();
+  },
+
+  async confirmGroupExplanation(nodeId, inquiryId) {
+    const ta = document.getElementById(`iqg-x-${inquiryId}`);
+    const text = ta ? String(ta.value || '').trim() : '';
+    const panel = ta && ta.closest('.iqg-exp-panel');
+    const note = panel && panel.querySelector('.iqg-start-note');
+    if (!text) {
+      if (note) note.textContent = 'Say what you think might explain it, in your own words, before offering it.';
+      return;
+    }
+    const r = await this._read(
+      `/api/group/${encodeURIComponent(nodeId)}/inquiry/${encodeURIComponent(inquiryId)}/explanation`,
+      { method: 'POST', body: { text } });
+    if (!r.ok) {
+      if (note) note.textContent = (r.message || 'That could not be offered just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
   },
 
   /* Does this person lead the group? Read from the roles the session already carries, and used
