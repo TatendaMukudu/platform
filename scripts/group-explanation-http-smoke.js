@@ -275,6 +275,68 @@ const server = app.listen(0, async () => {
         return i > 0 && !/ai\.complete|await ai\.|gateway\./.test(body);
       });
 
+    /* ══ L — AN EXPLANATION THE EVIDENCE RULED OUT IS NOT STILL A CANDIDATE ═══════════════════
+       THE ATTACK, and the one the founder named: a corrected or superseded explanation carrying
+       on influencing what the group is guided towards. The kernel has always got this right —
+       `applyProposals` sets `status: 'refuted'` when the case against decisively outweighs the
+       case for, and excludes refuted hypotheses from `live` when choosing which one leads.
+
+       THE PROJECTION DID NOT. `alternatives` was `hyps.filter(h => h !== lead)` — every rival
+       regardless of standing — so a ruled-out theory travelled beside a live one with only a
+       `status` field to tell them apart, and not one consumer read it. That cost nothing while
+       nothing rendered alternatives. It costs a great deal the moment a human may propose one
+       and the group screen draws them all under "What might explain it".
+
+       REFUTATION IS MINTED AT THE KERNEL HERE, not through a route, because nothing in production
+       emits `challenges` yet — the same gap `level: 'hypothesis'` had until this pass. What is
+       driven through production is everything that matters afterwards: the store the route writes
+       is the store this writes, and the projection and the HTTP read are the real ones.
+
+       AND IT IS RULED OUT, NOT DELETED. Corrections preserve history (AGENTS.md invariant 5), so
+       it has to still be readable as something the group considered and dropped. Disappearing
+       would be its own lie: a group that cannot see what it ruled out will propose it again. */
+    console.log('\n  L — AN EXPLANATION THE EVIDENCE RULED OUT IS NOT STILL A CANDIDATE');
+    {
+      const diagnose = require('../ai/diagnose.js');
+      const key = Object.keys(inquiryStates[O]['group:squad'])
+        .find(k => inquiryStates[O]['group:squad'][k].inquiryId === inq0.inquiryId);
+      const cur = inquiryStates[O]['group:squad'][key];
+      const doomed = (cur.hypotheses || []).find(h => /schedule changed/.test(h.statement));
+      ok('GX-L1 the rival explanation is on the record and open before anything challenges it',
+        !!doomed && doomed.status !== 'refuted');
+      inquiryStates[O]['group:squad'][key] = diagnose.applyProposals(cur, [{
+        id: 'ch_1', level: 'observation', challenges: doomed.id,
+        text: 'the schedule did not change this season',
+        source: 'p9', originRef: 'o_sched_1', originKind: 'direct_observation', turnId: 't_ch1',
+        authority: 'self_report', directness: 'observed', contributedBy: 'p9', contributedAt: Date.now(),
+      }], { now: Date.now() });
+      const after = inquiryStates[O]['group:squad'][key];
+      const nowRefuted = (after.hypotheses || []).find(h => h.id === doomed.id);
+      ok('GX-L2 the kernel rules it out once nothing live still supports it',
+        !!nowRefuted && nowRefuted.status === 'refuted');
+
+      const inqL = await oneInquiry('coach');
+      ok('GX-L3 …and the projection stops offering it as something that MIGHT explain it',
+        (inqL.alternatives || []).every(a => !/schedule changed/.test(String(a && a.statement)))
+        && (inqL.alternatives || []).every(a => a && a.status !== 'refuted'));
+      ok('GX-L4 …while keeping it, because what a group ruled out is part of what it knows',
+        (inqL.ruledOut || []).some(r => /schedule changed/.test(String(r && r.statement))));
+
+      const stL = await state('coach');
+      ok('GX-L5 the surface a squad reads carries the same answer, from the same projection',
+        ((stL.low || {}).explanations || []).every(e => !/schedule changed/.test(String(e && e.statement))));
+      ok('GX-L6 …and the live explanation is still there, so this ruled one out rather than emptying the list',
+        ((stL.low || {}).explanations || []).some(e => /worried about criticising/.test(String(e && e.statement))));
+      ok('GX-L7 …and the screen that draws them reads the projection rather than filtering for itself',
+        () => {
+          const fs = require('fs'), path = require('path');
+          const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+          const i = ui.indexOf('_groupInquiryRow(nodeId, i, leads)');
+          const body = ui.slice(i, i + 3000);
+          return i > 0 && /i\.alternatives/.test(body) && !/refuted/.test(body);
+        });
+    }
+
   } catch (e) { fail++; console.error('  FAIL group-explanation suite threw:', e && e.stack); }
 
   server.close();

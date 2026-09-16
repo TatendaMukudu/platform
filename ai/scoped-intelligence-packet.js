@@ -53,9 +53,33 @@ function subjectNodeIds(nodes = [], subjectId) {
   return out.sort();
 }
 
+/* EVERY SENTENCE ON AN ITEM THAT A LEADER WOULD ACTUALLY READ. The gate below reads these
+   directly rather than trusting a producer's own verdict, so a producer that never computed one
+   cannot skip the check by omission. */
+function _visibleText(item = {}) {
+  const s = item.suggestion || {};
+  return [item.title, item.body, item.line, s.text, s.label].filter(Boolean).map(String);
+}
+
 function canUseItem(item = {}, scope = {}, nodes = [], opts = {}) {
   const userId = scope.userId;
-  if (!item || item.safe === false) return false;
+  if (!item) return false;
+  /* ── FAIL CLOSED ON LANGUAGE, NOT ON A PRODUCER'S SAY-SO ────────────────────────────────────
+     This was `item.safe === false`, which refuses only an item that ALREADY ADMITTED it was
+     unsafe. An item that never computed the field sailed through — and every producer outside
+     this file is free not to compute it. Driven as an attack: a feed item bodied "a captain-led
+     debrief will fix this and is guaranteed to improve communication", with no `safe` field,
+     reached the packet, reached the lead slot, and the packet reported `safe: true` over the top
+     of it. AGENTS.md invariant 7 says allowlist the good states; this denylisted one bad one.
+
+     So the item's own visible text is put through `ai/language-guard.js` HERE — the existing
+     owner of that judgement, unchanged, already imported by this file. A producer's `safe: true`
+     no longer excuses the text, which is invariant 1: a module may not authorise its own output.
+
+     Refusing is the safe direction by the guard's own doctrine — a false positive costs a leader
+     one item, an under-block costs them a promise the record cannot keep. */
+  if (item.safe === false) return false;
+  if (!_visibleText(item).every(t => guard.describesOnly(t))) return false;
 
   if (item.scope != null) return graph.canSee(scope.visibleNodes, item.scope);
 
@@ -158,7 +182,16 @@ function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs 
     empty: stamped.empty,
     message: stamped.message,
     generatedBy: 'scoped-intelligence-packet',
-    safe: stamped.safe && upwardQuestions.every(q => q.safe && q.carriesPrivateContent === false),
+    /* AND `safe` MUST MEAN WHAT ITS READERS THINK IT MEANS. `priority.stamp` computes safety as
+       "every suggestion requires confirmation" — a CONSENT property. A caller reading
+       `packet.safe` is asking whether what is inside is safe to show, which is a LANGUAGE
+       property, and the two were travelling under one name: the packet reported `safe: true`
+       while its lead item promised a fix. Both are now required, read off the queue that is
+       actually being returned rather than off the items that were offered. */
+    safe: stamped.safe
+      && upwardQuestions.every(q => q.safe && q.carriesPrivateContent === false)
+      && [stamped.lead, ...(stamped.queue || [])].filter(Boolean)
+           .every(i => _visibleText(i).every(t => guard.describesOnly(t))),
   };
 }
 

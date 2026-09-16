@@ -16507,7 +16507,26 @@ function _groupInquiryProjections(code, nodeId) {
             supportedBy: (lead.supportRefs || []).length,
             because: (lead.confidence.because || []).slice(0, 3) }
         : null,
-      alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      /* ── WHAT MIGHT EXPLAIN IT IS WHAT MIGHT STILL EXPLAIN IT ────────────────────────────
+         This was `hyps.filter(h => h !== lead)` — every rival regardless of standing, refuted
+         ones included, distinguishable only by a `status` field no consumer read. That cost
+         nothing while nothing rendered alternatives to anybody. It costs a great deal now: the
+         group screen draws these under "What might explain it", and an explanation the evidence
+         ruled out sitting in that list is the product still guiding a group towards a theory it
+         has already abandoned.
+
+         The kernel has always had the answer — `applyProposals` excludes refuted hypotheses from
+         `live` when it decides which one leads. The projection simply did not ask. Filtering
+         here, at the one owner every surface reads, is what stops each surface inventing the
+         rule for itself and two of them disagreeing. */
+      alternatives: hyps.filter(h => h !== lead && h.status !== 'refuted')
+        .map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      /* AND RULED OUT IS NOT DELETED. Corrections preserve history: a group that cannot see what
+         it considered and dropped will propose it again, and "we tried that and it did not hold"
+         is one of the more valuable things a group knows. Carried separately so no reader can
+         mistake it for something still in play. */
+      ruledOut: hyps.filter(h => h.status === 'refuted')
+        .map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })).slice(0, 3),
       confidence: i.confidence,
       // What it rests on, counted the way confidence counts it: separate underlying occurrences,
       // not how many times the thing has been said.
@@ -18017,7 +18036,12 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       hypothesis: lead ? lead.statement : null,
       // Rivals are returned WITH their own confidence, because "could also be X" is a different
       // statement from "X is nearly as well supported as the leading explanation".
-      alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      // AND A REFUTED ONE IS NOT A RIVAL. Same rule as the group projection, for the same reason:
+      // "what might explain it" means what might STILL explain it. Ruled out is kept below.
+      alternatives: hyps.filter(h => h !== lead && h.status !== 'refuted')
+        .map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      ruledOut: hyps.filter(h => h.status === 'refuted')
+        .map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })).slice(0, 3),
       confidence: i.confidence,                     // { score, band, because } — deterministic
       // What CURRENTLY holds the picture up. A claim the person has since corrected is history,
       // and counting it here would tell them the read rests on more than it does.

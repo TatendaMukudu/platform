@@ -252,6 +252,59 @@ const server = app.listen(0, async () => {
     ok('AB-F3 …and no raw contributed text reaches the related read at all',
       !/nobody talks after a loss/i.test(JSON.stringify(memberRel.j || {})));
 
+    /* ══ H — EVERY PLACE AN OUTCOME IS SHOWN SAYS IT IS NOT A CAUSE ═══════════════════════════
+       THE ATTACK: a historical outcome described causally. "What each one achieved" and "What was
+       recorded after each one" are the same list of words with opposite epistemic content, and the
+       first one is what a product writes when nobody is guarding the sentence.
+
+       There are THREE places an outcome result reaches a coach's eyes — the ask that offers the
+       four words, the history of what the group has tried, and the loop panel on the object
+       thread. `reachability-smoke` guarded one of them. Mutating the other two — replacing the
+       caveat with "What each one achieved" — left npm test green apart from the asset stamp,
+       which is not an epistemic guard and would not have caught it on a release build.
+
+       KEYED ON THE RENDER SITES, NOT ON A SUBSTRING OF THE FILE. A regex over the whole of
+       app.js passes as long as ONE caveat survives anywhere, which is precisely the failure it is
+       supposed to catch. Each block is located by the code that renders the outcome and checked
+       on its own, so losing any single one turns this red. */
+    console.log('\n  H — EVERY PLACE AN OUTCOME IS SHOWN SAYS IT IS NOT A CAUSE');
+    {
+      const fs = require('fs'), path = require('path');
+      const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+      const notCausal = /never a claim that the focus caused it|not a\s+claim that the focus caused it|Nothing here says a focus caused/;
+      const blockAround = (needle, before, after) => {
+        const i = ui.indexOf(needle);
+        return i < 0 ? '' : ui.slice(Math.max(0, i - before), i + after);
+      };
+      const siteAsk  = blockAround("MemberApp.recordGroupOutcome('", 0, 1200);
+      const siteHist = blockAround('_OUTCOME_WORDS[f.outcome && f.outcome.result]', 0, 500);
+      const siteLoop = blockAround('_OUTCOME_WORDS[loop.outcome]', 0, 900);
+      ok('AB-H1 the four words are offered with the caveat attached, at the moment of recording',
+        !!siteAsk && notCausal.test(siteAsk));
+      ok('AB-H2 …the history of what the group has tried says what FOLLOWED, not what it achieved',
+        !!siteHist && notCausal.test(siteHist));
+      ok('AB-H3 …and the loop panel on the object thread says it too',
+        !!siteLoop && notCausal.test(siteLoop));
+      /* THE CAVEAT ITSELF CONTAINS THE WORD "caused", so the causal-language check has to run on
+         what is left once the DENIAL is removed. My first version of this asserted the bug as
+         correct in reverse: it went red on the very sentence that makes the block safe. */
+      const withoutDenial = b => String(b).replace(notCausal, '').replace(/caused it/g, '');
+      ok('AB-H4 …and none of the three describes an outcome as something the focus achieved or caused',
+        [siteAsk, siteHist, siteLoop].map(withoutDenial).every(b =>
+          b && !/\bachieved\b/i.test(b) && !/because of (this|the) focus/i.test(b)
+            && !/\bthe focus (caused|delivered|produced|drove)\b/i.test(b)
+            && !/\bworked\b/i.test(b)));
+      /* AND THE WORDS THEMSELVES DO NOT SMUGGLE ONE IN. `better` is a description of what
+         followed; "it worked" would be a verdict on cause wearing the same button. */
+      ok('AB-H5 …and the outcome words describe what happened rather than pronouncing on cause',
+        () => {
+          const i = ui.indexOf('_OUTCOME_WORDS: {');
+          const body = ui.slice(i, ui.indexOf('}', i));
+          return i > 0 && /It got better/.test(body) && /Too tangled to tell/.test(body)
+            && !/\bit worked\b/i.test(body) && !/\bfixed\b/i.test(body) && !/\bsolved\b/i.test(body);
+        });
+    }
+
   } catch (e) { fail++; console.error('  FAIL ab-loop-closure suite threw:', e && e.stack); }
 
   server.close();

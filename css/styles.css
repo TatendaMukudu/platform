@@ -3518,6 +3518,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    one does not get read at all. */
 .iqg-inq-exp-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
 .iqg-inq-none{font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-inq-out{font-size:var(--fs-sm);color:var(--text-secondary);margin:.45rem 0 0;
+  overflow-wrap:anywhere}
 .iqg-exp-panel,.iqg-start{margin:.6rem 0 0}
 .iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
 .iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}

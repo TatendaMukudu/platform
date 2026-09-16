@@ -12815,6 +12815,13 @@ const MemberApp = {
                 is the gate this merely reflects. */''}
           ${i.leaderSubject ? '' : `<button type="button" class="btn btn-outline btn-sm"
             onclick="MemberApp.startGroupExplanation('${esc(nodeId)}','${esc(i.inquiryId)}')">Suggest what might explain it</button>`}
+          ${/* WHAT THE GROUP ALREADY RULED OUT. Kept and shown, because a group that cannot see
+                what it considered and dropped will propose it again, and "we tried that and it
+                did not hold" is one of the more valuable things a group knows. The projection
+                decides what belongs here; this only draws it. */''}
+          ${(i.ruledOut || []).length ? `
+            <div class="iqg-inq-out">Ruled out by what came after:
+              ${(i.ruledOut || []).map(r => esc(r && r.statement)).filter(Boolean).join('; ')}</div>` : ''}
         </div>
 
         ${unknowns.length ? `
