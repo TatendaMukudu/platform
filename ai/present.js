@@ -278,12 +278,24 @@ const FOCUS_STANDING = Object.freeze({
   done:      'Closed',
   abandoned: 'Dropped',
 });
+/* ── TWO VOCABULARIES, BECAUSE THERE ARE TWO GRAINS ───────────────────────────────────────────
+   A PERSONAL focus asks whether it helped YOU; a GROUP focus asks what happened to the group, and
+   `ai/team-state.js OUTCOME_RESULTS` is better/no_change/worse/unclear. They were deliberately
+   kept separate when the group vocabulary was introduced, and both need a reading — a composer
+   answering "did it work?" at group grain was printing the raw enum (`after it: better`) because
+   only the personal one had words. The keys do not collide; `unclear` means the same in both. */
 const FOCUS_OUTCOME_TEXT = Object.freeze({
   helped:  'It helped',
   no:      'It did not help',
   mixed:   'Mixed',
+  better:    'It got better',
+  no_change: 'Nothing changed',
+  worse:     'It got worse',
   unclear: 'Too tangled up in other things to tell',
 });
+
+/* The same words, lower-cased for the middle of a sentence ("and after it, it got better"). */
+function outcomeText(result) { return FOCUS_OUTCOME_TEXT[String(result || '').trim()] || null; }
 
 function focusCard(focus = {}, opts = {}) {
   const f = focus && typeof focus === 'object' ? focus : {};
@@ -359,4 +371,4 @@ function focusCard(focus = {}, opts = {}) {
 }
 
 module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
-  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, hypothesisHasStanding };
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, hypothesisHasStanding, outcomeText };

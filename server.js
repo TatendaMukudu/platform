@@ -11014,8 +11014,45 @@ function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.no
       }
       return a.claim;
     });
-    const answer = [(lead && items.length) ? lead : opening, ...claims].join(' ').trim();
-    return { answer, confidence: items.length ? 'medium' : 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: items.length };
+    /* ── AND WHAT THE READER'S GROUPS ARE ACTUALLY WORKING OUT ──────────────────────────────
+       `_reasonScopedAgenda` is the BELIEF agenda — the reasoner's reads about people. It is not
+       the only thing a coach's record contains and it was the only thing this answer consulted.
+
+       Driven with models off, which is the pilot's state: a coach with four open group questions,
+       a human explanation on one of them, a focus started out of it and an outcome recorded was
+       told "the First Team area is ticking along; nothing's asking for you today" — at
+       `confidence: 'confirmed'`. Every one of those facts was on the group's own screen one tap
+       away. The composer was not missing an ability; it was reading one store and answering for
+       two.
+
+       So the group's own questions are counted, through `_allObjectsFor` — the same authorised
+       set every other object surface reads, with the same gate, adding not one object to it. The
+       sentence is the one `ai/voice.js` already composed for each object (D30); nothing is
+       phrased here. No new store, no second reasoner, no new owner. */
+    const groupReads = (_allObjectsFor(code, userId) || [])
+      .filter(o => o && o.whoseNodeId && (o.kind === 'inquiry' || o.kind === 'high' || o.kind === 'low'))
+      .filter(o => !o.parked)
+      .slice(0, 3)
+      .map(o => {
+        const headline = (o.explained && o.explained.headline) || (o.present && o.present.summary && o.present.summary.title) || '';
+        const where = o.whose ? String(o.whose) : 'your group';
+        return headline ? `${where} is working out ${String(headline).charAt(0).toLowerCase() + String(headline).slice(1).replace(/\.$/, '')}.` : '';
+      })
+      .filter(Boolean);
+    const total = items.length + groupReads.length;
+    const openingLine = _actorLevel(code, userId) === 'leader'
+      ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: total, areaLabel: area, seed: userId + 'ask' })
+      : voice.memberOpening({ name, timeOfDay: _timeOfDay(now), count: total, seed: userId + 'ask' });
+    const answer = [(lead && total) ? lead : openingLine, ...claims, ...groupReads].join(' ').trim();
+    /* A NOTHING-TO-REPORT LINE IS NOT A CONFIRMED FINDING. `confirmed` was being asserted for the
+       EMPTY case — the one case where the answer rests on nothing having been found, which is a
+       statement about the record's silence rather than a fact established from it. A reader has
+       no way to tell the difference and the badge said the system was sure. */
+    return { answer, confidence: total ? 'medium' : 'general',
+      limitations: total
+        ? ['a read from recorded signals, not a prediction']
+        : ['a read from recorded signals, not a prediction', 'nothing has been recorded that meets the bar to report'],
+      count: total };
   } catch (_) { return null; }
 }
 
@@ -12174,7 +12211,35 @@ function _reasonPersonAnswer(code, userId, personId, personName, { now = Date.no
    Returns null when the asker leads and belongs to nothing, so the caller falls through to
    the existing read. Nothing here widens scope: every node considered is one this user is
    already declared on. */
-function _teamStateAnswer(code, userId, question, { now = Date.now() } = {}) {
+/* ── WHICH OF THE COACH'S QUESTIONS IS THIS ───────────────────────────────────────────────────
+   Four things a coach asks constantly, which the deterministic path met with "I don't have enough
+   authorised evidence to answer that yet" — while the answer to every one of them was rendered on
+   the group's own screen one tap away:
+
+     "what don't we know?"   -> the frontier the projection already carries
+     "what have we tried?"   -> the focuses started out of this group's questions, and their outcomes
+     "did it work?"          -> the outcome word that was recorded, and the caveat that goes with it
+     "what could we do?"     -> whether there is enough to suggest trying anything, which is
+                                usually NO and is a real answer rather than a dead end
+
+   The dead-end line was not a refusal. It was a true statement about the free-text retrieval
+   bundle, delivered as though it were a statement about the product's knowledge, and a coach has
+   no way to tell those apart. Nothing new is computed for any of these — each is a field the
+   group projection already holds, read by the one function that already answers at group grain. */
+function _teamQuestionLens(q) {
+  const t = String(q || '').toLowerCase();
+  if (/\bwhat (?:don'?t|do not|dont) (?:we|i|you) know\b|\bwhat(?:'s| is) (?:still )?(?:unknown|unclear|open)\b|\bwhat are we (?:still )?unsure\b/.test(t)) return 'unknowns';
+  if (/\bwhat have we tried\b|\bwhat did we try\b|\bwhat(?:'ve| have) we done about\b|\banything tried\b/.test(t)) return 'tried';
+  if (/\bdid it work\b|\bdid that work\b|\bhow did (?:it|that) go\b|\bwhat came of\b|\bwhat happened (?:after|with)\b/.test(t)) return 'outcome';
+  if (/\bwhat (?:could|should|can) we do\b|\bwhat are (?:our|the) options\b|\bwhat(?:'s| is) worth trying\b|\bwhat next\b/.test(t)) return 'options';
+  /* "What could explain it?" was being routed to the reasoning register, which is off without a
+     model — so a coach asking the one question the explanation machinery exists for was told the
+     reasoning engine is switched off, while candidate explanations sat on the group's screen. */
+  if (/\bwhat (?:could|would|might|may) explain\b|\bwhy (?:might|would|could) (?:that|this|it)\b|\bwhat(?:'s| is) (?:behind|causing) (?:that|this|it)\b|\bpossible explanations?\b/.test(t)) return 'explanations';
+  return null;
+}
+
+function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = null } = {}) {
   try {
     const user = (orgUsers[code] || {})[userId];
     if (!user) return null;
@@ -12213,6 +12278,87 @@ function _teamStateAnswer(code, userId, question, { now = Date.now() } = {}) {
                     - ((a.high ? 1 : 0) + (a.low ? 1 : 0) + (a.question ? 1 : 0)))
       .slice(0, 2);
     if (!states.length) return null;
+
+    /* ── A LENS ANSWERS THE QUESTION THAT WAS ASKED ────────────────────────────────────────
+       Without one this function returns the whole group picture, which is the right answer to
+       "how are we doing?" and the wrong answer to "what have we tried?". Each lens reads fields
+       the projection already carries — nothing is computed here and no sentence is invented that
+       the kernel did not already compose. An empty lens answer is returned as an empty answer, so
+       the caller can fall through rather than this function inventing something to say. */
+    if (lens) {
+      const projections = nodeIds.flatMap(nodeId => _groupInquiryProjections(code, nodeId)
+        .filter(p => p.leaderSubject !== true || _leaderSubjectReaders(code, nodeId, p).includes(userId))
+        .map(p => ({ p, nodeName: ((orgNodes[code] || {})[nodeId] || {}).name || 'your group' })));
+      const many = nodeIds.length > 1;
+      const say = (nodeName, body) => (many ? `${nodeName}: ${body}` : body);
+      const out = [];
+      if (lens === 'unknowns') {
+        for (const { p, nodeName } of projections) {
+          for (const u of (p.stillUnknown || []).slice(0, 2)) {
+            out.push(say(nodeName, `On ${p.topicLabel || 'this'} — ${String(u).charAt(0).toLowerCase() + String(u).slice(1)}`));
+          }
+        }
+        if (!out.length) out.push('Nothing is recorded as open on what your group is working out. That is a real answer: it means nothing has been offered that the record cannot already account for.');
+      } else if (lens === 'tried' || lens === 'outcome') {
+        for (const { p, nodeName } of projections) {
+          for (const t of (p.triedBefore || []).slice(0, 2)) {
+            /* THE GROUP'S OWN WORDS, not the enum. `after it: better` is the kernel's vocabulary
+               read out loud to a coach, which is the exact thing ai/present.js exists to stop. */
+            const word = present.outcomeText(t.outcome);
+            const after = word
+              ? `and after it, ${word.charAt(0).toLowerCase() + word.slice(1)}`
+              : (t.status === 'active' ? 'and it is still running' : 'and nothing has been recorded about it yet');
+            out.push(say(nodeName, `About ${p.topicLabel || 'this'}, the group tried "${t.text}" ${after}.`));
+          }
+        }
+        if (out.length) out.push('That is what was recorded after each one. Nothing here says a focus caused what followed it.');
+        else out.push('Nothing has been tried yet about what your group is working out.');
+      } else if (lens === 'explanations') {
+        for (const { p, nodeName } of projections) {
+          /* THE STANDING TRAVELS WITH THE STATEMENT, because this sentence is the composer
+             speaking and an explanation read aloud without what it rests on is the same "authority
+             makes it true" defect in a different channel. */
+          const cands = [
+            ...(p.hypothesis ? [{ statement: p.hypothesis, supported: ((p.hypothesisStanding || {}).supportedBy || 0) > 0 }] : []),
+            ...(p.alternatives || []).map(a => ({ statement: a && a.statement, supported: false })),
+          ].filter(c => c.statement).slice(0, 2);
+          if (!cands.length) continue;
+          for (const c of cands) {
+            out.push(say(nodeName, `On ${p.topicLabel || 'this'}, someone suggested it is because ${
+              String(c.statement).charAt(0).toLowerCase() + String(c.statement).slice(1)} — ${
+              c.supported ? 'something on the record supports that' : 'nothing on the record supports that yet'}.`));
+          }
+          for (const r of (p.ruledOut || []).slice(0, 1)) {
+            out.push(say(nodeName, `Ruled out by what came after: ${r.statement}.`));
+          }
+        }
+        if (!out.length) out.push('Nobody has offered an explanation for what your group is working out yet. Anyone in the group can, and it stays a candidate until something supports it.');
+      } else if (lens === 'options') {
+        /* NO OPTIONS ARE GENERATED, and that is the point. What the product can honestly say is
+           whether there is enough to suggest trying anything — three states, no ranking, no
+           score. "Not enough evidence yet" is the commonest and is said as plainly as the rest. */
+        for (const { p, nodeName } of projections) {
+          const r = p.readiness;
+          if (!r || !r.state) continue;
+          const head = r.state === 'worth_testing' ? 'there may be something worth trying'
+            : r.state === 'gather_information' ? 'it is worth learning more before trying anything'
+            : 'there is not enough evidence yet to suggest anything worth trying';
+          const why = String(r.because || '');
+          out.push(say(nodeName, `On ${p.topicLabel || 'this'}, ${head} — ${why.charAt(0).toLowerCase() + why.slice(1)}`));
+        }
+        out.push('What to try is yours to decide; I can say what is recorded and what is not.');
+      }
+      return {
+        answer: out.join(' '),
+        confidence: out.length ? 'medium' : 'general',
+        limitations: [
+          'a read of the group, built only from what people deliberately contributed',
+          'nothing here says one thing caused another',
+        ],
+        count: projections.length,
+        nodes: states.map(s => s.node.nodeId),
+      };
+    }
 
     const lines = [];
     let found = 0;
@@ -12259,6 +12405,11 @@ function _assistantAnswer(code, userId, question) {
     || /\bhow(?:'s|'re| is| are)\s+(?:the\s+)?(we|things|everyone|team|organisation|organization|org|club|company|group|department|business|squad)\b/.test(q)
     || /\b(team|group|club|squad|organisation|organization|org|department|company)\s+(status|update|check-?in|health|doing)\b/.test(q)
   );
+  /* THE FOUR QUESTIONS A COACH ACTUALLY ASKS, ROUTED BEFORE THE RETRIEVAL DEAD END. Each was
+     answered "I don't have enough authorised evidence to answer that yet" — a true statement
+     about the free-text retrieval bundle, delivered as a statement about what the product knows,
+     with the real answer rendered on the group's own screen one tap away. */
+  const teamLens = _teamQuestionLens(q);
   const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
@@ -12330,6 +12481,17 @@ function _assistantAnswer(code, userId, question) {
     const r = _reasonReadAnswer(code, userId);
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
+  } else if (teamLens) {
+    const t = _teamStateAnswer(code, userId, question, { lens: teamLens });
+    if (t && t.answer) {
+      answer = t.answer; confidence = t.confidence; limitations = t.limitations;
+      try { _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: `assistant ${teamLens}` }); } catch (_) {}
+    } else {
+      // The reader is on no group at all, which is a fact about them rather than about the
+      // record. Said as that, rather than as a shortage of evidence.
+      answer = `You are not on a group yet, so there is nothing at group grain for me to read.`;
+      confidence = 'confirmed'; limitations = [];
+    }
   } else if (teamStatusQ) {
     // TEAM/ORG STATUS — "how's the team doing?" is a question about the GROUP, so it is
     // answered at the group's grain first: what is working, what needs attention, what is
