@@ -151,12 +151,58 @@ function _lineageRefs(o) {
    Directed, deduplicated, and only ever between two objects the caller handed in. `basis` says
    WHICH field produced the edge, because an edge nobody can trace back to a field is an edge
    somebody will eventually treat as a judgement. */
+/* ── ONE INQUIRY, TWO NAMES FOR IT ────────────────────────────────────────────────────────────
+   A High and a Low are PROJECTIONS of an inquiry and carry its id (`raw.inquiryId`) — so the same
+   underlying question is `inquiry:<id>` to whatever points at it and `low:<id>` to whoever is
+   reading it. `_projectedFromRef` has always known this; `edges()` did not, and dropped every edge
+   whose target was not literally present.
+
+   THE COST WAS THE WHOLE A→B LOOP. Driven at ae059a6 through the real routes: a coach contributes
+   five independent accounts, the group inquiry opens at `supported`, the coach starts a Focus from
+   it — `POST /api/group/:n/focus` verifies `fromInquiryId` against the group's own inquiries and
+   stores `origin: { from: 'inquiry', inquiryId }` — records an outcome of `better`, and then:
+
+       objects the coach has : ["focus:tf_…", "low:inq_ioc8jf8p"]
+       focus raw.origin      : { from: 'inquiry', inquiryId: 'inq_ioc8jf8p' }
+       edges()               : []
+       loop()                : addresses: null,
+                               open: ["this focus does not say what it was started to work on"]
+
+   The focus says exactly what it was started to work on. The product told the coach it did not,
+   because the bucket calls that inquiry a Low. Nothing threw, nothing was logged, and the one
+   sentence the whole loop exists to earn — "we tried this about that, and here is what happened"
+   — could never be said.
+
+   Resolution is by IDENTITY, never by kind: an `inquiry:<id>` ref resolves to an object whose own
+   inquiry id is `<id>`. It cannot invent a relationship, because it only ever finds an object the
+   caller already put in the set — which is the scope gate, unchanged. */
+function _inquiryIdOf(o) {
+  if (!o) return null;
+  if (o.kind === 'inquiry') return _s(o.id, 120) || null;
+  if (o.kind === 'high' || o.kind === 'low') {
+    return _s((o.raw && (o.raw.inquiryId || o.raw.sourceInquiryId)) || '', 120) || null;
+  }
+  return null;
+}
+
 function edges(objects = []) {
   const rows = _arr(objects).filter(o => refOf(o));
   const byRef = new Map(rows.map(o => [refOf(o), o]));
+  /* The alias map, built only from objects already in `rows`. A literal ref always wins: an alias
+     never displaces a real object, it only answers for one that is not here under that name. */
+  for (const o of rows) {
+    const iid = _inquiryIdOf(o);
+    if (!iid) continue;
+    const alias = ref('inquiry', iid);
+    if (alias && !byRef.has(alias)) byRef.set(alias, o);
+  }
+  /* And the canonical ref of whatever answered, so an edge is always expressed in the names the
+     caller can actually resolve — never a name that is only in this map. */
+  const nameOf = r => { const o = byRef.get(r); return o ? refOf(o) : null; };
   const out = [];
   const seen = new Set();
-  const add = (from, type, to, basis) => {
+  const add = (rawFrom, type, rawTo, basis) => {
+    const from = nameOf(rawFrom), to = nameOf(rawTo);
     if (!from || !to || from === to || !byRef.has(from) || !byRef.has(to)) return;
     if (!REL.includes(type)) return;
     const key = `${from}|${type}|${to}`;

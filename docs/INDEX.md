@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `9bb38b0f26b6c3cd60ba63bec3c429f0f8c972a4`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `159c05a4a141b831932d963ab8759509c1f20eff`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10).
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -397,6 +397,34 @@ Nothing in this repository has tested Neon, iOS Safari, or a deployed build.
 | An attached file's class is earned, not asserted: permission, provenance, confirmation | `ai/material.js` `classifyRequest` |
 | Settings is three tiers with three audiences, and a tier you may not use is absent rather than greyed out | `SETTINGS_TAB_ACCESS` / `_maySeeSettingsTab` |
 | External reading is scoped to the object it was asked from, and a focus with no concept refuses | reading route + `_objectBucket` |
+
+**PR #90 (open) — rounds 7 and 8, and the A→B spine.** Recovery continued on
+`codex/pilot-recovery-gate-r7`, then convergence on `gpt/ab-decision-spine-r1`. Full tables in
+`docs/reviews/CLAUDE_PILOT_RECOVERY_R8.md` and `docs/reviews/AB_SPINE_TRUTH_MAP_R1.md`. **PR #90
+carries PR #89's wider delta and must not be merged independently.**
+
+| Correction | Canonical owner |
+|---|---|
+| One authorisation owner; a token is not a person and a session is not a standing permission | `_authoriseRequest` |
+| The organisation you can change is the one you are signed in to | `PUT /api/org/profile` |
+| The host is not a tenant — instance-wide operations need the platform key | `requirePlatformOperator` |
+| Being in a node is not running it; one owner for org-tree authority, downward only | `_canManageNode` / `_mayChangeAnchor` |
+| A pack declares its own ontology; the kernel reads it and holds no industry noun | `ai/org-state.js` PACKS + `ai/org-context.js` |
+| A Focus is a commitment, not a belief, and is never rendered with a confidence band | `present.focusCard` |
+| Who can see each of your own objects — one store, one resolver, one reader | `_resolvePersonalAudience` + `objectAudiences` |
+| A long conversation is compressed, not truncated: a message something points at is not spare capacity | `_compactConversation` |
+| Which language to answer in is decided deterministically; the words are the model's | `ai/language.js` |
+| A substitute says it is one, through the vocabulary the product already had | `COMPOSER_DEGRADED` / `_degraded` |
+| **One inquiry has two names — a High or Low is a projection of it — so an edge resolves by identity** | `ai/cross-evidence.js` `edges()` |
+| **The A→B loop reads from whichever end you stand at, because a coach stands on the question** | `/api/objects/:kind/:id/related` |
+
+**What the A→B truth map established, so it is not rediscovered:** the loop already runs —
+contribution → Inquiry → Focus carrying `origin.inquiryId` → outcome → `learn`. There is no
+`ai/curiosity.js`; that capability is `ai/inquiry.js` and must not be duplicated.
+`outcome-intelligence.bestForPattern` ranks but has **no production caller**; the live surface is
+`earlySignalBrief`, which says "review before acting" and computes `safe` through the language
+guard. `prediction-boundary-smoke` was not retired — `8406d08` absorbed it into
+`language-guard-smoke` and strengthened it with `PERSON_FUTURE`.
 
 **Round 4 — the independent gate's eight items, and three DEAD CAPABILITIES.** The gate accepted
 eight of round 3's claims and returned seven items, with an objection worth keeping: *a verifier

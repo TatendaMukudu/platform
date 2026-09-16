@@ -19005,7 +19005,21 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
       whose: other.whose || '' };
   });
 
-  const loop = kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
+  /* ── THE LOOP, FROM WHICHEVER END YOU ARE STANDING AT ──────────────────────────────────────
+     This was `kind === 'focus' ? … : null`, so the A→B loop could only be read from the Focus.
+     Standing on the QUESTION — which is where a coach stands, because the question is what they
+     came to look at — there was no way to learn that something had been tried about it, let alone
+     how it went. The whole point of the loop is the one sentence "we tried this about that, and
+     here is what happened", and half of it was unreadable from the half people open.
+
+     It is the SAME loop and the SAME owner, entered from the other side: find the focus that
+     addresses this object through the edges already computed above, and ask `crossEvidence.loop`
+     about it. Nothing new is derived here and no second notion of a loop exists. */
+  let loop = kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
+  if (!loop) {
+    const addressedBy = near.find(e => e.from === target && e.type === 'addressed_by');
+    if (addressedBy) loop = crossEvidence.loop(authorised, addressedBy.to);
+  }
   /* THE CALLS THIS PERSON HAS MADE about how evidence stands to this focus. Refs and words only,
      superseded ones included, because "what did we think, and when" is part of the record. */
   const relations = kind === 'focus'
