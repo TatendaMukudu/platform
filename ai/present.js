@@ -322,6 +322,55 @@ const FOCUS_OUTCOME_TEXT = Object.freeze({
 /* The same words, lower-cased for the middle of a sentence ("and after it, it got better"). */
 function outcomeText(result) { return FOCUS_OUTCOME_TEXT[String(result || '').trim()] || null; }
 
+/* ── A HEADING A PERSON CAN READ AT A GLANCE ──────────────────────────────────────────────────
+   Founder, from a live screenshot: a Focus card was using the whole raw paragraph as its title,
+   so the heading was the entire thing the person had typed and there was nothing left for the
+   card to say.
+
+   WHAT THIS DOES NOT DO IS SUMMARISE. Turning "I think I'm doing well communicating, but I want
+   to get much better at organizing everyone when we're under pressure" into "Communicate better
+   under pressure" is a language task, and language is the model's half of the founder's law —
+   deterministic code that tried it would be inventing a claim about what somebody meant. Models
+   are off for the pilot, which is exactly when a fabricated heading would do the most damage.
+
+   So it takes a LEAD, never a summary: the first sentence, and if that is still long, the first
+   clause of it, cut at a word boundary. Nothing is invented and nothing is reordered — every word
+   in the lead is a word the person wrote, in the order they wrote it. The full text is carried
+   beside it as `full` so the card can show their own words underneath, and `leadIsWhole` says
+   whether anything was left out, so a surface never implies it is showing everything when it is
+   not. A short Focus is unaffected: it is its own lead and `leadIsWhole` is true. */
+const LEAD_MAX = 64;
+function focusLead(text) {
+  const t = String(text == null ? '' : text).trim().replace(/\s+/g, ' ');
+  if (!t) return { lead: '', full: '', leadIsWhole: true };
+  if (t.length <= LEAD_MAX) return { lead: t, full: t, leadIsWhole: true };
+
+  // First sentence, if there is one and it is not itself enormous.
+  const stop = t.search(/[.!?](\s|$)/);
+  let lead = stop > 0 ? t.slice(0, stop).trim() : t;
+
+  /* Still long: cut at a clause boundary — but the LAST one that fits, not the first. Taking the
+     first turned "Stay involved and help organise the team during difficult moments, especially
+     after we concede" into "Stay involved", which is a fragment rather than a heading: the
+     earliest boundary in a long sentence is usually the least informative place to stop. */
+  if (lead.length > LEAD_MAX) {
+    const BOUNDARY = /[,;:]|\s[—–-]\s|\sbut\s|\sand\s|\sso that\s|\sbecause\s/gi;
+    let best = -1, m;
+    while ((m = BOUNDARY.exec(lead)) !== null) {
+      if (m.index <= LEAD_MAX && m.index > 20) best = m.index;
+      if (m.index > LEAD_MAX) break;
+    }
+    if (best > 20) lead = lead.slice(0, best).trim();
+  }
+  // Still long: cut at the last word boundary that fits, never mid-word.
+  if (lead.length > LEAD_MAX) {
+    const cut = lead.slice(0, LEAD_MAX).lastIndexOf(' ');
+    lead = lead.slice(0, cut > 12 ? cut : LEAD_MAX).trim();
+  }
+  lead = lead.replace(/[,;:.\-—–]+$/, '').trim();
+  return { lead: lead || t.slice(0, LEAD_MAX).trim(), full: t, leadIsWhole: lead === t };
+}
+
 function focusCard(focus = {}, opts = {}) {
   const f = focus && typeof focus === 'object' ? focus : {};
   const status = ['active', 'done', 'abandoned'].includes(f.status) ? f.status : 'active';
@@ -333,6 +382,7 @@ function focusCard(focus = {}, opts = {}) {
     ? { result: f.outcome, note: '', recordedBy: null, at: null }
     : (f.outcome && typeof f.outcome === 'object' ? f.outcome : null);
   const text = String(f.text || (f.topic && f.topic.label) || '').trim();
+  const _lead = focusLead(text);
   /* WHOSE COMMITMENT IT IS. The caller knows; this only renders it. "You" and a group's name are
      the only two answers, because a Focus set for somebody else is not a thing the product has. */
   const mine = opts.mine !== false && !opts.groupName;
@@ -350,7 +400,15 @@ function focusCard(focus = {}, opts = {}) {
     canonicalConcept: '',
 
     summary: {
-      title: text || 'A focus',
+      /* THE HEADING IS A LEAD, AND THE PERSON'S OWN WORDS ARE KEPT WHOLE BESIDE IT. `title` used
+         to be the entire text, which on a real phone made the card's heading a paragraph. */
+      title: _lead.lead || 'A focus',
+      /* Exactly what they wrote, never trimmed, so nothing downstream has to go back for it and
+         no surface is tempted to reconstruct it from the lead. */
+      full: _lead.full,
+      /* False means the heading is showing less than they wrote, which is the only condition
+         under which a card owes them the rest. */
+      leadIsWhole: _lead.leadIsWhole,
       /* `standing` is the state of the commitment, not a confidence band. `band` is carried
          because callers style by it, and a commitment's band is not tentative — it is `stated`,
          a value no confidence scale produces, so a surface can never mistake one for the other. */
@@ -396,4 +454,4 @@ function focusCard(focus = {}, opts = {}) {
 }
 
 module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
-  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, hypothesisHasStanding, outcomeText };
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, focusLead, hypothesisHasStanding, outcomeText };

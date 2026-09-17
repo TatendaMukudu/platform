@@ -955,6 +955,12 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    home indicator. */
 .iq-composer-wrap{padding-bottom:calc(.35rem + env(safe-area-inset-bottom))}
 
+/* THEIR OWN WORDS, UNDER THE HEADING. The heading of a Focus is a LEAD -- the person's own opening
+   words, cut at a clause boundary -- so when it left something out, the rest belongs directly
+   beneath it, in their wording, at reading size rather than heading size. Quiet on purpose: the
+   heading is what you scan, this is what you read if the heading was not enough. */
+.iqt-said{margin:.35rem 0 0;font-size:var(--fs);line-height:1.5;color:var(--text-secondary)}
+
 /* ── THE SHELL COMPOSER IS PINNED TO THE VIEWPORT, NOT TO THE PAGE ────────────────────────────
    The composer in an object thread or the Forum is `position:sticky` and belongs inside that
    thread's own scroll flow, which is right: it follows the conversation it is part of.

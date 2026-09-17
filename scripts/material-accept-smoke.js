@@ -191,9 +191,29 @@ ok('M8d a failed upload offers a retry, because the picker has already been clea
 ok('M8e …once, not forever — a control that retries endlessly teaches somebody to keep pressing it',
   /this\._retryAttach = null;/.test(appJs));
 
-/* ── M9 — AND IT NEVER CLAIMS THE FILE IS EVIDENCE ────────────────────────────────────────── */
-ok('M9 a file attached in conversation is named as CONTEXT, never as evidence about anybody',
-  /context for this conversation, not evidence about you or your organisation/.test(wsAttachFn));
+/* ── M9 — AND ATTACHING SOMETHING DOES NOT CONTRIBUTE IT ───────────────────────────────────
+   THIS ASSERTION USED TO PIN A SENTENCE: "context for this conversation, not evidence about you
+   or your organisation". The founder removed that sentence, for two reasons that are both about
+   truth rather than tidiness.
+
+   It was a parser receipt with a lecture attached — the card also announced how many PARTS the
+   file had been split into, which is machinery, and attaching something is meant to be another
+   way of speaking rather than a filing operation.
+
+   And "not evidence" had quietly become FALSE as a flat claim. It is not evidence YET. The person
+   may say "use this as evidence", and the governed route for that exists (M9b). A sentence that
+   forecloses something the product supports teaches people not to ask for it.
+
+   So what is asserted here now is the LAW rather than the wording of one card: the attach path
+   uploads, and does nothing else. A receipt claiming the boundary is worth nothing if the code
+   beside it crosses the boundary, and a missing receipt costs nothing if the code does not. */
+ok('M9 attaching uploads and does no more — the client contributes nothing on the person\'s behalf',
+  /\/api\/assistant\/attachments/.test(wsAttachFn)
+  && !/\/contribute/.test(wsAttachFn)
+  && !/applyProposals/.test(wsAttachFn)
+  && !/\/evidence/.test(wsAttachFn));
+ok('M9a …and the card it shows makes no claim about what the file proves',
+  !/is evidence/i.test(wsAttachFn) && !/proves/i.test(wsAttachFn));
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
   /\/classification/.test(appJs));
 

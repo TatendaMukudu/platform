@@ -12575,6 +12575,16 @@ const MemberApp = {
             <div class="iqt-head-mid">
               <h1 class="iqt-title">${esc(title)}</h1>
               ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
+              ${/* THEIR OWN WORDS, WHOLE, UNDER THE HEADING. A Focus card used the entire raw
+                    paragraph as its title, so on a phone the heading WAS the paragraph. The
+                    heading is a lead now — the person's own opening words, never a summary,
+                    because summarising is the model's half and models are off for the pilot.
+
+                    Shown only when the lead left something out. When somebody writes a short
+                    Focus the heading already IS the whole thing, and repeating it underneath
+                    would be the product talking to itself. */ ''}
+              ${sum.full && sum.leadIsWhole === false
+                ? `<p class="iqt-said">${esc(sum.full)}</p>` : ''}
             </div>
             ${/* THE FORUM IS AN ICON, not the word "Forum". A text label in a header bar competes
                   with the object's own title for the one line a phone gives you, and it reads as a
