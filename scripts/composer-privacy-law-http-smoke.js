@@ -107,9 +107,19 @@ const server = app.listen(0, async () => {
     return parts.join('\n');
   };
 
+  /* HOW MANY GROUP CANDIDATES THIS PERSON HAS MINTED. Counting, not text-matching, and the reason
+     is a mutation that walked straight through the first version of this file. A candidate stores
+     `evidenceRef` and `originRef` and NEVER the raw words — that is the "evidence is referenced,
+     never copied" law working correctly — so an assertion that searched the store for the private
+     sentence was searching for something that structurally cannot be there. It could not have
+     failed for any product, which makes it decoration rather than a check. What a leak actually
+     looks like is a candidate appearing with this person as its contributor. */
+  const candidatesFrom = who => (groupCandidates[C] || []).filter(c => c && c.contributorId === who).length;
+
   try {
     /* ══ A — AN ORDINARY TURN IS PRIVATE, AND THERE IS NO MODE TO SET ══════════════════════ */
     console.log('\n  A — AN ORDINARY COMPOSER TURN IS PRIVATE');
+    const p1Before = candidatesFrom('p1');
     const t1 = await call('POST', '/api/assistant/turn', { text: PRIVATE, surface: 'home' }, 'p1');
     ok('A1 the turn is answered', t1.status === 200 && !!(t1.j && t1.j.response));
     ok('A2 …and the answer carries no visibility or audience decision at all',
@@ -124,6 +134,28 @@ const server = app.listen(0, async () => {
       t2.status === 200);
     ok('A4 …and saying so changed nothing about where it went',
       !(await everythingVisibleTo('coach')).includes('left side is where we keep losing'));
+    /* THE HALF A4 MISSED, and a mutation found the gap rather than a re-read. Wiring the injected
+       field to file the words as GROUP EVIDENCE left every assertion in this file green: nothing
+       reaches a coach's routes until a candidate is CONTRIBUTED, so a leak sitting in the
+       candidate store is invisible to any check that only reads screens. That is the worst version
+       of this defect rather than the mildest — it is the one nobody would notice. */
+    ok('A5 …and neither private turn minted a group candidate for this person',
+      candidatesFrom('p1') === p1Before);
+    /* THE CONTROL FOR A5, because "the count did not rise" is worth nothing unless the count can
+       rise. Minted through the same owner the fixture uses rather than through a turn: models are
+       off for this whole run — which is the pilot's real state — so no turn extracts proposals and
+       a turn-driven control would only prove that the model is absent. This proves the MEASURE is
+       live: `candidatesFrom` moves when a candidate is genuinely minted for somebody. */
+    const p6Before = candidatesFrom('p6');
+    _noteGroupCandidates(C, 'p6', 'member:p6', [{ id: 'ctl_p6', level: 'observation',
+      text: 'talking drops off after we lose',
+      sourceSpan: 'nobody on our team talks after a loss',
+      concerns: 'group', originRef: 'octl_p6', originKind: 'direct_observation', turnId: 'tctl_p6' }],
+      'communication', 'Communication after results');
+    ok('A6 the measure moves when a candidate really is minted, so A5 can fail',
+      candidatesFrom('p6') === p6Before + 1);
+    ok('A7 …and the private speaker still has none',
+      candidatesFrom('p1') === p1Before);
 
     /* ══ B — THE CONTROL IS GONE FROM THE CLIENT ═══════════════════════════════════════════
        Asserted against the source that ships. The rendered half is in the browser gate; this is
@@ -192,9 +224,10 @@ const server = app.listen(0, async () => {
       !outsiderSees.includes('father is unwell') &&
       !outsiderSees.includes('left side is where we keep losing'));
     /* AND IT DID NOT BECOME A CANDIDATE. Reaching the group's evidence would be the quietest
-       escape of all, because no screen would name the person. */
-    ok('D4 …and it never became a group candidate, which is the leak no screen would show',
-      !JSON.stringify(groupCandidates[C] || {}).includes('father is unwell'));
+       escape of all, because no screen would name the person. Counted rather than searched, for
+       the reason given above `candidatesFrom`: the store holds references, never words. */
+    ok('D4 …and the private speaker has still minted no group candidate at all',
+      candidatesFrom('p1') === p1Before);
 
     /* ══ E — BUT THE ARROW STILL POINTS INWARD ═════════════════════════════════════════════
        Removing a control must not have removed the legitimate direction: what the room has said,
@@ -267,14 +300,15 @@ const server = app.listen(0, async () => {
     const afterAtt = await everythingVisibleTo('coach');
     ok('H2 …and its contents do not appear in anything the coach can read',
       !afterAtt.includes('father is unwell'));
-    ok('H3 …and it did not become group evidence',
-      !JSON.stringify(groupCandidates[C] || {}).includes('father is unwell'));
+    ok('H3 …and attaching it minted no group candidate for them',
+      candidatesFrom('p1') === p1Before);
 
     /* ══ I — NAVIGATION CANNOT CHANGE IT ═══════════════════════════════════════════════════
        The composer is in the shell now and is reachable from every page, so "which page was I on"
        must not be a privacy input. `surface` is the only thing the client sends that names one. */
     console.log('\n  I — WHICH PAGE THEY WERE ON IS NOT A PRIVACY INPUT');
     const surfaces = ['home', 'notes', 'settings', 'people', 'inquiry'];
+    const p4Before = candidatesFrom('p4');
     const results = [];
     for (const s of surfaces) {
       const r = await call('POST', '/api/assistant/turn',
@@ -286,8 +320,8 @@ const server = app.listen(0, async () => {
     const afterNav = await everythingVisibleTo('coach');
     ok('I2 …and none of them reached the coach, whichever page it was sent from',
       !afterNav.includes('still my own business'));
-    ok('I3 …and none became group evidence',
-      !JSON.stringify(groupCandidates[C] || {}).includes('still my own business'));
+    ok('I3 …and none of the five minted a group candidate, from any page',
+      candidatesFrom('p4') === p4Before);
 
     /* ══ J — AND NONE OF THIS DEPENDED ON A MODEL ══════════════════════════════════════════
        The whole file ran with IQ_DETERMINISTIC_ONLY, which is the pilot's state. This section
