@@ -710,6 +710,44 @@ _rebuildEmailIndex();
       Math.abs(await coach.page.evaluate(() =>
         Math.round(document.querySelector('.iq-composer-wrap').getBoundingClientRect().height)) - rest.wrap) <= 2);
 
+    /* ══ P — THE ORG TREE'S FIRST JOB IS "WHERE DO I SIT" ═════════════════════════════════
+       Its first purpose is understanding the organisation you belong to; management is second. On
+       a phone a member got the second one's shape: the tree rendered COLLAPSED to the root, so the
+       whole page read "Alma College / 2 in subtree" and the person's own team, their coach, and
+       the fact that they are in any of it were all behind a chevron. Driven at 390px before it was
+       changed -- a member could not see their own team's name on the page at all.
+
+       The path from the root to the viewer's own node is now opened once on first render.
+       Presentation only: `_expanded` decides what is DRAWN, never what may be read, and every node
+       in that path had already passed the server's audience rules to reach this client.
+
+       AND THE ROW COUNTS PEOPLE ONCE. `memberIds` and `leaderIds` overlap -- leading a team you
+       are in is the ordinary case -- and adding the two lengths counted that person twice, so a
+       squad of two whose coach also plays read "3 people · 1 leader · 2 in subtree", a line
+       contradicting itself in its own last clause. `_subtreeMemberCount` twelve lines above had
+       always done it properly with a Set. */
+    console.log('\n  P — A COACH LANDS ON THE TREE AND CAN SEE WHERE THEY SIT');
+    await coach.page.evaluate(() => navigate('people'));
+    await coach.page.waitForTimeout(2200);
+    const tree = await coach.page.evaluate(() => {
+      const el = document.getElementById('page-people');
+      const txt = el ? el.innerText : '';
+      return { txt, ownNode: /First Team/.test(txt),
+        contradiction: /(\d+) people[^|]*?·\s*(\d+) in subtree/.test(txt) };
+    });
+    ok('PC-P1 their own node is on the screen without anybody tapping a chevron', tree.ownNode);
+    /* THE COUNT IS CONSISTENT WITH ITSELF. A row saying more people than its own subtree holds is
+       the double-count, and it is the version a reader notices without being able to explain. */
+    ok('PC-P2 …and no row claims more people than the subtree it sits in', await coach.page.evaluate(() => {
+      const txt = (document.getElementById('page-people') || {}).innerText || '';
+      for (const line of txt.split('\n')) {
+        const p = line.match(/(\d+)\s+(?:person|people)/);
+        const s = line.match(/(\d+)\s+in subtree/);
+        if (p && s && Number(p[1]) > Number(s[1])) return false;
+      }
+      return true;
+    }));
+
     /* ══ M — AND THE OTHER PHONE ═══════════════════════════════════════════════════════════
        Everything above ran at 390px, which is the narrow end of the device class and the right
        place to find clipping. 430px is the other end — a Pro Max — and it finds the opposite

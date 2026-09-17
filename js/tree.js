@@ -13,6 +13,35 @@ const OrgTree = {
 
   _nodes:    {},   // nodeId → OrgNode
   _expanded: new Set(),
+  _autoOpened: false,
+
+  /* The viewer's own nodes, from the session -- the same two fields the server assigns and the
+     org-tree authority laws already read. Leadership counts as belonging: a coach who leads the
+     First Team should land looking at the First Team. */
+  _viewerNodeIds() {
+    try {
+      const u = (Auth && Auth.currentUser) || {};
+      return [].concat(u.assignedNodeIds || [], u.leadershipNodeIds || []).filter(Boolean).map(String);
+    } catch (_) { return []; }
+  },
+
+  /* Open the ancestors of every node the viewer belongs to, so the branch they are in is on
+     screen when the page opens. Walks upward through `parentId`, which is the shape the tree
+     already holds, and is bounded by the tree's own depth. */
+  _openToViewer() {
+    if (this._autoOpened) return;
+    this._autoOpened = true;
+    const mine = this._viewerNodeIds();
+    if (!mine.length) return;
+    for (const id of mine) {
+      let cur = this._nodes[id];
+      let guard = 0;
+      while (cur && cur.parentId && guard++ < 50) {
+        this._expanded.add(cur.parentId);
+        cur = this._nodes[cur.parentId];
+      }
+    }
+  },
 
   /* ── Load from server ───────────────────────────────────── */
   async load() {
@@ -113,6 +142,29 @@ const OrgTree = {
       return;
     }
 
+    /* ── WHERE YOU SIT, WITHOUT HAVING TO GO LOOKING FOR IT ───────────────────────────────────
+       The Org Tree's first purpose is "understand the organisation I belong to", and its second
+       is management. On a phone a member got the second one's shape: the tree rendered COLLAPSED
+       to the root, so the whole page read
+
+           Alma College
+           2 in subtree
+
+       and the person's own team, their coach, and the fact that they are in any of it were all
+       behind a chevron. Driven at 390px before changing it -- a member could not see "First Team"
+       on the page at all.
+
+       So the path from the root down to the viewer's own node is opened once, on first render.
+       This is PRESENTATION ONLY: `_expanded` decides what is drawn, never what may be read, and
+       every node in the path was already being sent to this client and already had to pass the
+       server's own audience rules to get here. Somebody who belongs nowhere, or a tree with no
+       match, is left exactly as it was.
+
+       Once, and only once: `_autoOpened` means a person who deliberately collapses their branch
+       does not have it reopened under them on the next render, which would be the product
+       arguing with them. */
+    this._openToViewer();
+
     const canManage = Auth.canDo('manage_tree');
     el.innerHTML = `
       <div style="padding:1rem 0.5rem">
@@ -135,7 +187,17 @@ const OrgTree = {
     const children    = this._getChildren(node.nodeId);
     const hasKids     = children.length > 0;
     const expanded    = this._expanded.has(node.nodeId);
-    const memberCount = (node.memberIds || []).length;
+    /* ── A COACH IS ONE PERSON, NOT TWO ───────────────────────────────────────────────────────
+       `memberIds` and `leaderIds` OVERLAP: leading a team you are in is the ordinary case, and
+       adding the two lengths counted that person twice. A squad of two whose coach also plays
+       read "3 people · 1 leader · 2 in subtree" -- a line that contradicts itself in its own
+       last clause, because `_subtreeMemberCount` twelve lines above already does this properly
+       with a Set and says so in its comment: "Total unique member+leader count".
+
+       So the same file counted one way in the row and another way in the subtree. It counts the
+       people now, in both places. `leaderCount` stays a count of the leader LIST, because "1
+       leader" is a statement about the role rather than about how many humans are on the row. */
+    const peopleCount = new Set([].concat(node.memberIds || [], node.leaderIds || [])).size;
     const leaderCount = (node.leaderIds || []).length;
     const descIds     = this._getDescendantIds(node.nodeId);
     const subtotal    = this._subtreeMemberCount(node.nodeId);
@@ -166,7 +228,7 @@ const OrgTree = {
 
     // Stats line
     const statParts = [];
-    if (memberCount > 0 || leaderCount > 0) statParts.push(`${memberCount + leaderCount} ${(memberCount + leaderCount) === 1 ? 'person' : 'people'}`);
+    if (peopleCount > 0) statParts.push(`${peopleCount} ${peopleCount === 1 ? 'person' : 'people'}`);
     if (leaderCount > 0) statParts.push(`${leaderCount} ${leaderCount === 1 ? 'leader' : 'leaders'}`);
     if (descIds.size > 0) statParts.push(`${subtotal} in subtree`);
     const statsLine = statParts.join(' · ');
