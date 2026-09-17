@@ -207,7 +207,22 @@ const server = app.listen(0, async () => {
     ok('AT-C6 …and the second upload still moved nothing',
       fingerprint(await theInquiry('coach')) === fingerprint(afterSix));
 
-    /* ══ D — AND IT IS THIS COACH'S, NOT THE ORGANISATION'S ════════════════════════════════ */
+    /* ══ D — AND IT IS THIS COACH'S, NOT THE ORGANISATION'S ════════════════════════════════
+       EVERY ASSERTION HERE IS OVER-DETERMINED, AND SAYING SO IS THE POINT. Mutation found that no
+       single removed check takes any of them out:
+
+         · D1 is held by `_resolveConversation`, which looks a requested id up in the REQUESTER'S
+           OWN list — so a foreign conversation id does not fail, it silently starts a new thread
+           with no material on it. Conversation ids are scoped per person by construction, and the
+           two visibility checks downstream of it are defence in depth that is currently masked.
+         · D2 needed BOTH the `_materialFor` private-visibility gate and the ownership half of its
+           own-conversation branch removed together before it went red. Either alone leaves it
+           green, because the other still answers 404.
+
+       That is PROTOCOL lie #3 — masked by an outer gate — and it is recorded rather than dressed
+       up, because "this mutation proved D2" would be false. What is true is that the property
+       holds through two independent gates, which is the shape you want for a privacy rule and the
+       shape that makes a single mutation prove nothing. */
     console.log('\n  D — ANOTHER LEADER IN THE SAME TENANT CANNOT REACH IT');
     const theirs = await say('What does this say?', conv, 'other');
     ok('AT-D1 a leader of another squad, handed the conversation id, is told nothing about it',
