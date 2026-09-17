@@ -7772,7 +7772,19 @@ app.get('/api/health', (req, res) => {
       openai:  !!process.env.OPENAI_API_KEY,
     },
     voice:     ai.canTranscribe(),   // OpenAI Whisper for voice notes
-    readsFiles: ai.canUnderstand(),  // vision / PDF understanding
+    /* ── CAPABILITY MEANS WHAT A PERSON CAN DO, NOT WHAT A MODEL COULD ────────────────────────
+       This reported `ai.canUnderstand()` -- "the configured model is capable of reading things" --
+       and an operator reasonably read it as "this build reads files". Those were different facts
+       for as long as `ai.understand` had no caller: with a Claude key configured, this said yes
+       while the Composer could not receive a picture at all.
+
+       They are now the same fact, because the attachment door calls it. Reported as two fields
+       rather than one, because documents and images fail for different reasons: a text document is
+       extracted in the browser and needs no model, so it keeps working on a host with no key at
+       all, and only the image path is gated on vision. Saying that separately is the difference
+       between an operator knowing what is wrong and an operator knowing something is. */
+    readsFiles: true,                 // text documents are extracted client-side; no model needed
+    readsImages: ai.canUnderstand('image'),
     reasoning: ai.enabled()
       ? 'connected — replies are grounded and reasoned'
       : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
@@ -19006,10 +19018,78 @@ function _materialChecksum(text) {
 /* The universal composer attachment door. Files are material, not evidence about the person or
    organisation. They are anchored either to the currently authorised object or to the caller's
    private conversation, and later turns receive only the bounded material context. */
-app.post('/api/assistant/attachments', requireAuth, (req, res) => {
+/* ── AND THE SAME DOOR TAKES A PHOTOGRAPH ─────────────────────────────────────────────────────
+   What one image may weigh on the way in. A phone photo is a couple of megabytes and base64 adds a
+   third, so this is generous for a whiteboard and refuses a video frame grab somebody dragged in
+   by accident. Refused with a size, because "too large" without a number is a dead end. */
+const IMAGE_B64_CAP = 6 * 1024 * 1024;
+const IMAGE_TYPES = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+/* WHAT THE MODEL IS ASKED, and the whole reason this is one sentence rather than a paragraph of
+   instructions: it is asked to DESCRIBE, never to conclude. "What is visually present" is a
+   question about the picture; "what does this tell us about the team" is a question about the
+   organisation, and the second one is not a model's to answer from an image. The epistemic work
+   happens afterwards, in the composer, against governed memory. */
+const IMAGE_READ_PROMPT = [
+  'Describe what is visually present in this image, plainly and specifically.',
+  'Say what you can see: text, diagrams, arrangements, labels, what kind of thing it appears to be.',
+  'Do not interpret motives, quality, causes or outcomes, and do not draw conclusions about any',
+  'person or organisation. If something is unclear or unreadable, say that rather than guessing.',
+].join(' ');
+
+app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const b = req.body || {};
-  const text = String(b.text || '');
+  let text = String(b.text || '');
+  let kind = 'text';
+  let readFrom = null;
+
+  /* AN IMAGE IS READ AT THE DOOR, ONCE, THROUGH THE GATEWAY THAT COULD ALREADY DO IT.
+     `ai.understand` has built Claude image blocks and OpenAI `image_url` since it was written and
+     had no production caller -- the gateway's own comment says so. This is that caller. What is
+     stored afterwards is the DESCRIPTION, and from that point the image is an ordinary material:
+     same segmentation, same context builder, same class, same laws, no second path.
+
+     IT FAILS HONESTLY WHEN IT CANNOT. With models off -- the pilot's own state -- there is nothing
+     that can read a picture, and the refusal says which thing is missing rather than pretending
+     the file was unreadable. Never advertise a capability the person cannot actually use. */
+  if (b.image && typeof b.image === 'object') {
+    const mimetype = String(b.image.mimetype || '').toLowerCase();
+    const data = String(b.image.data || '');
+    if (!IMAGE_TYPES.includes(mimetype)) {
+      return res.status(415).json({ error: 'That kind of image cannot be read yet.',
+        readable: IMAGE_TYPES, note: 'JPEG, PNG, WebP and GIF can be read. An iPhone HEIC photo cannot.' });
+    }
+    if (!data) return res.status(400).json({ error: 'image data required' });
+    if (data.length > IMAGE_B64_CAP) {
+      return res.status(413).json({ error: 'That image is larger than IntelliQ will read.',
+        limitMB: Math.round(IMAGE_B64_CAP / (1024 * 1024)) });
+    }
+    if (!ai.canUnderstand('image')) {
+      return res.status(503).json({ error: 'I cannot look at a picture right now.',
+        because: 'no_vision_model',
+        note: 'Reading an image needs the reasoning engine, which is not available on this host. '
+            + 'Nothing was saved. A document with text in it still works.' });
+    }
+    let described = '';
+    try {
+      described = String(await ai.understand({ org: code, taskType: 'read_image',
+        media: { type: 'image', mimetype, data }, prompt: IMAGE_READ_PROMPT, maxTokens: 700 }) || '').trim();
+    } catch (e) {
+      return res.status(502).json({ error: 'I could not read that image.',
+        note: 'Nothing was saved. It is worth trying again.' });
+    }
+    if (!described) {
+      return res.status(422).json({ error: 'I could not make anything out in that image.',
+        note: 'Nothing was saved.' });
+    }
+    /* THE DESCRIPTION SAYS WHAT IT IS. A reader coming to this material later -- or a model being
+       handed it as context -- must not mistake an account of a picture for an account of the
+       world, so the material's own first line says where it came from. */
+    text = 'What this image appears to show (read from the picture, not observed by anyone):\n\n' + described;
+    kind = 'image';
+    readFrom = { mimetype, bytes: Math.round(data.length * 0.75) };
+  }
+
   if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
   const key = _wsKey(code, userId);
@@ -19076,14 +19156,29 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
     const id = 'mat_' + generateId();
     row = { materialId: id, byId: userId, orgCode: code,
       title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
-      kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text', sections: material.segment(text, { kind: String(b.kind || 'text') }),
+      /* THE KIND IS THE SERVER'S, not the client's, when the server is the one that read it. An
+         image's kind is decided by the branch above having actually gone through the vision path;
+         a caller claiming `kind: 'image'` for a block of text it typed does not get to say so. */
+      kind: kind === 'image' ? 'image'
+        : (material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text'),
+      sections: material.segment(text, { kind: kind === 'image' ? 'image' : String(b.kind || 'text') }),
       refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
       checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
     _materials(code)[id] = row;
   }
   scheduleSave();
+  /* WHAT THE RECEIPT SAYS ABOUT A PICTURE IS DIFFERENT, and has to be. A document's note can say
+     "available as external material"; an image's has to say the additional thing a person cannot
+     otherwise know -- that what is held is a reading of the picture rather than the picture, and
+     that the reading came from a model rather than from anybody who was there. */
   res.json({ ok: true, materialId: row.materialId, conversationId: conv.id, attachedTo: { kind: ref.kind, id: ref.id },
-    parts: row.sections.length, epistemicEffect: 'none', note: 'Available to this conversation as external material. It is not evidence about you or the organisation.' });
+    parts: row.sections.length, kind: row.kind, epistemicEffect: 'none',
+    ...(row.kind === 'image' ? { readFrom, imageRetained: false } : {}),
+    note: row.kind === 'image'
+      ? 'I have read what the picture appears to show and kept that as context for this '
+        + 'conversation. The image itself is not stored, and what it appears to show is not '
+        + 'evidence about you or the organisation.'
+      : 'Available to this conversation as external material. It is not evidence about you or the organisation.' });
 });
 /* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
    existing reader keeps working while the shape moves underneath them. */

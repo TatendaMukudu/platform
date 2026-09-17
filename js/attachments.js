@@ -70,6 +70,21 @@ const AttachmentHandler = {
   /* Derived, never typed twice — the picker and the parser table cannot drift apart. */
   materialAcceptAttr() { return Object.keys(this.MATERIAL_EXTENSIONS).join(','); },
 
+  /* ── WHAT THE COMPOSER'S PICKER MAY OFFER, NOW THAT A PICTURE GOES SOMEWHERE ──────────────
+     The Material list above is what this handler can turn into WORDS in the browser. An image
+     cannot be turned into words here and is read by the server through the vision gateway, so it
+     belongs on the picker and not on that list -- two capabilities, two lists, which is the rule
+     this file already states.
+
+     ONLY THE TYPES THE SERVER WILL ACTUALLY READ. `image/*` would let a phone offer HEIC, which
+     is what an iPhone produces by default and which nothing here can read; the picker would accept
+     it and the upload would refuse it, which is the hollow-control shape this codebase keeps
+     finding. Named explicitly so the file chooser itself does the refusing, before anybody waits. */
+  READABLE_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  composerAcceptAttr() {
+    return this.READABLE_IMAGE_TYPES.concat(Object.keys(this.MATERIAL_EXTENSIONS)).join(',');
+  },
+
   /* ── Main entry point ─────────────────────────────────── */
   async process(file) {
     const kind = this.ACCEPTED[file.type];

@@ -2615,7 +2615,11 @@ async function _renderRealCapabilities() {
   const rows = [
     ['Conversation written by the model', !!comp.effective, compReason],
     ['Voice notes transcribed on the server', !!h.voice, 'Needs an OpenAI key on the host. This is not the microphone in your browser.'],
-    ['Documents read for you', !!h.readsFiles, 'Needs a model that can read files.'],
+    /* Two rows, because they fail for different reasons and one row saying "files" left a person
+       unable to tell which half was missing. A text document is extracted in this browser and
+       needs no model at all; a photograph is read by one. */
+    ['Documents read for you', !!h.readsFiles, 'Text is pulled out of the file in your browser.'],
+    ['Photos read for you', !!h.readsImages, 'Reading a picture needs the reasoning engine on this host.'],
     ['The one composer surface', !!comp.on, 'IQ_COMPOSER is not switched on for this host.'],
   ];
   box.innerHTML = rows.map(([label, on, why]) => `
@@ -13909,7 +13913,10 @@ const MemberApp = {
                  which are the formats the whole material feature was built for. This composer
                  sends TEXT to the server, so the list it may offer is the Material list, and the
                  one owner beside the processors is the only place it is written down. -->
-            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}" onchange="MemberApp.wsAttach(this)">
+            <!-- The COMPOSER list, which is the Material list plus the image types the server
+                 will actually read. Named types rather than image/*, so an iPhone cannot offer a
+                 HEIC the upload would then refuse. -->
+            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.composerAcceptAttr() : '')}" onchange="MemberApp.wsAttach(this)">
           </label>` : ''}
           <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"${dis}
             placeholder="${esc(placeholder)}"
@@ -14716,8 +14723,14 @@ const MemberApp = {
     try {
       if (typeof AttachmentHandler === 'undefined') throw new Error('The uploader isn’t available right now.');
       const parsed = await AttachmentHandler.process(file);
-      const content = parsed.content || parsed.summary || '';
-      if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
+      /* A PICTURE HAS NO TEXT TO EXTRACT, AND THAT IS NOT A FAILURE. Everything else this handler
+         produces is words pulled out in the browser; an image produces BYTES, and the reading is
+         done by the server through the vision gateway. So the "no text in that file" refusal below
+         is right for a document and would be wrong here -- an image with no `content` is the
+         ordinary case, not a broken upload. */
+      const isImage = parsed && parsed.kind === 'image' && parsed.data;
+      const content = isImage ? '' : (parsed.content || parsed.summary || '');
+      if (!isImage && !String(content).trim()) throw new Error('I couldn’t read any text from that file.');
 
       /* BOUNDED, like every other write in this file. An upload with no ceiling leaves
          "Reading that file…" on the screen for as long as the person is willing to wait, which
@@ -14731,8 +14744,14 @@ const MemberApp = {
         r = await fetch('/api/assistant/attachments', {
           method: 'POST', signal: ctrl.signal,
           headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-          body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
-            conversationId, about }),
+          /* ONE DOOR, TWO SHAPES. A document sends the text it extracted; a picture sends the
+             bytes and lets the server read them. Same route, same conversation binding, same
+             material laws afterwards -- which is the whole point of not building a second path. */
+          body: JSON.stringify(isImage
+            ? { image: { data: parsed.data, mimetype: parsed.mediaType, name: file.name },
+                title: file.name, filename: file.name, conversationId, about }
+            : { kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
+                conversationId, about }),
         });
         raw = await r.text();
       } catch (err) {

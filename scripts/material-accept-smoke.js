@@ -113,21 +113,50 @@ ok('M6b …and no guard anywhere in the client reaches for the handler through w
    And wsAttach sends TEXT to /api/assistant/attachments, so this IS the Material path — the same
    path the Material picker uses, advertising a different set of files. */
 const composerInput = (appJs.match(/<input type="file" class="iq-attach-input"[^>]*>/) || [''])[0];
-ok('M7 the shared composer\'s paperclip asks the same owner the Material picker asks',
-  /materialAcceptAttr\(\)/.test(composerInput));
+/* ── AND THEN THE COMPOSER GREW A SECOND CAPABILITY ────────────────────────────────────────
+   The law here was never "call materialAcceptAttr". It is that the picker is DERIVED from the
+   owner beside the processors and is never a hand-written list, because a hand-written list
+   drifts and then advertises files the product refuses.
+
+   The composer now also takes a PHOTOGRAPH, which the Material list cannot describe: a picture is
+   not turned into words in the browser, it is read by the server through the vision gateway. So
+   the composer asks `composerAcceptAttr` -- the Material list PLUS the image types the server will
+   actually read -- and `composerAcceptAttr` is itself derived from the same two owners. The
+   derivation law is intact; what changed is that there are two capabilities behind one paperclip.
+
+   The Material picker elsewhere (iqt-mat-file) still asks for the Material list alone, because
+   that path really does only take text. */
+ok('M7 the shared composer\'s paperclip is DERIVED from the handler, never hand-written',
+  /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(composerInput)
+  && !/accept="\.[a-z]/.test(composerInput));
 ok('M7b …and no longer advertises a format the parser would refuse or throw on',
   !/\.json/.test(composerInput) && !/\.markdown/.test(composerInput)
   && !/\.doc[,"]/.test(composerInput) && !/\.pdf/.test(composerInput));
 ok('M7c …and it offers the two formats the capability was built for, which the hand-written list left out',
-  (() => { const attr = A && A.materialAcceptAttr ? A.materialAcceptAttr() : '';
-    return attr.includes('.pptx') && attr.includes('.xlsx') && /materialAcceptAttr/.test(composerInput); })());
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return attr.includes('.pptx') && attr.includes('.xlsx') && /composerAcceptAttr/.test(composerInput); })());
+/* THE IMAGE HALF, AND THE ONE THING IT MUST NOT DO. `image/*` would let an iPhone offer a HEIC,
+   which is what it produces by default and which nothing in this product can read -- the picker
+   would accept it and the upload would refuse it, which is the hollow-control shape this codebase
+   has been caught by before. The readable types are named, so the file chooser does the refusing
+   before anybody waits. */
+ok('M7c2 …and the composer additionally offers the image types the SERVER can read',
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return attr.includes('image/jpeg') && attr.includes('image/png') && attr.includes('image/webp'); })());
+ok('M7c3 …and never the wildcard, which would offer an iPhone HEIC nothing here can read',
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return !attr.includes('image/*') && !/heic|heif/i.test(attr); })());
+ok('M7c4 …while the Material-only picker still asks for the Material list alone',
+  (() => { const mat = (appJs.match(/<input type="file" id="iqt-mat-file"[^>]*>/) || [''])[0];
+    return /materialAcceptAttr\(\)/.test(mat) && !/composerAcceptAttr/.test(mat); })());
 ok('M7d …through the same `typeof` guard, since the window form renders an EMPTY accept that offers every file on the phone',
-  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.materialAcceptAttr\(\)/.test(composerInput));
+  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.(materialAcceptAttr|composerAcceptAttr)\(\)/.test(composerInput));
 ok('M7e NO hand-written accept list survives on a path that sends text to the server',
   (() => {
     const inputs = appJs.match(/<input type="file"[^>]*>/g) || [];
     const textPath = inputs.filter(t => /wsAttach|iqt-mat-file/.test(t));
-    return textPath.length >= 2 && textPath.every(t => /materialAcceptAttr\(\)/.test(t));
+    return textPath.length >= 2
+      && textPath.every(t => /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(t));
   })());
 
 /* ── M8 — AN UPLOAD IS A WRITE, AND EVERY OTHER WRITE IN THIS FILE IS BOUNDED ──────────────

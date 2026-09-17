@@ -176,7 +176,24 @@ function classifyRequest({ requested = '', mayAttest = false, provenance = '', c
 
 /* The file shapes whose structure this module knows how to follow. Anything else is treated as
    plain prose, which is honest — an unknown format has no structure we can claim to read. */
-const KINDS = Object.freeze(['pptx', 'docx', 'xlsx', 'text', 'csv', 'pdf']);
+/* ── AND A PHOTOGRAPH, WHICH IS READ BEFORE IT IS STORED ──────────────────────────────────────
+   Everything else in this list arrives as text the client extracted. An image cannot: the bytes
+   mean nothing to `segment`, and `hasReadableText` would correctly refuse them as binary. So an
+   image is READ at the door -- once, through `ai.gateway.understand`, which has spoken Claude
+   image blocks and OpenAI `image_url` since it was written and had no caller in the tree -- and
+   what is stored is the description that came back.
+
+   That has a consequence worth stating rather than discovering: the BYTES ARE NOT KEPT. A later
+   turn reasons over the description, not over the picture, so "look at it again and tell me
+   something else" is not a thing this can do. Keeping the bytes would need a storage, privacy and
+   provenance model for binary that this product does not have, and inventing one quietly is how
+   an attachment feature comes to exist without anybody agreeing what it means.
+
+   Its class is `external_context` like any other material: something to read from, which says
+   nothing about anybody here and changes nothing IntelliQ believes. A description is a model's
+   account of a picture, and a model's account of a picture is the weakest kind of material in the
+   product -- not an observation, and never an origin. */
+const KINDS = Object.freeze(['pptx', 'docx', 'xlsx', 'text', 'csv', 'pdf', 'image']);
 
 const _s = (v, n = 200) => String(v == null ? '' : v).slice(0, n);
 const _arr = v => (Array.isArray(v) ? v : []);
