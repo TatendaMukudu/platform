@@ -469,6 +469,68 @@ _rebuildEmailIndex();
         return !!t && !t.disabled && !t.readOnly;
       }));
 
+    /* ══ K — SAYING IT, ON THE PHONE, WITH NO MODEL ═════════════════════════════════════════
+       The founder's rule for this pass, applied to the newest path in the product:
+
+         "The previous outcome bug survived because tests called the route correctly while the UI
+          sent the wrong value. Do not repeat that mistake."
+
+       `readCommand` is covered hermetically. What is NOT covered by that is the thing that bug
+       was made of: whether the RENDERED composer, on a 390px screen, with every model off, sends
+       what the coach typed and then shows them what happened. So this types into the real field,
+       sends with the real control, and checks the emitted body, the store and the next screen. */
+    console.log('\n  K — A COACH TYPES AN INSTRUCTION INTO THE COMPOSER ON A PHONE');
+    posts.length = 0;
+    await coach.page.evaluate(() => navigate('home'));
+    await coach.page.waitForTimeout(1200);
+    await coach.page.fill('#iq-composer-input', 'Create an inquiry into why substitutes feel disconnected');
+    await coach.page.evaluate(() => MemberApp.wsSend());
+    await coach.page.waitForTimeout(2600);
+    const madeTurn = posts.find(p => /assistant\/turn/.test(p.url));
+    ok('PC-K1 the rendered control sends the coach\'s sentence unchanged, with no model anywhere',
+      !!madeTurn && madeTurn.body.text === 'Create an inquiry into why substitutes feel disconnected');
+    const afterSay = await textOf(coach.page, null);
+    /* THE ACTION IS NAMED ON THE SCREEN. Not "I have created it" — that would be false until they
+       approve — and not silence, which is what the coach used to get. */
+    /* NOT A WORD MATCH. The first version of this looked for /inquiry/ in the page text, which
+       the coach's own echoed sentence supplies — it passed with `readCommand` stubbed to return
+       null, so it was asserting that the coach can type, not that the product understood. What
+       makes this real is the RENDERED APPROVAL CONTROL: a proposal card with a Confirm button
+       that exists only because an action was named. */
+    const approve = await coach.page.evaluate(() => {
+      const card = document.querySelector('.iq-proposal[data-proposal], .tdy-prop[id^="today-prop-"]');
+      if (!card) return null;
+      const btn = [...card.querySelectorAll('button')].find(b => /confirm/i.test(b.textContent || ''));
+      return { label: (card.innerText || '').trim(), confirm: !!btn };
+    });
+    ok('PC-K2 …and the screen offers it back as an approvable control rather than announcing it done',
+      !!approve && approve.confirm === true
+      && /inquir/i.test(approve.label)
+      && !/I have created|I have opened|created for you/i.test(afterSay));
+    ok('PC-K3 …and nothing was written before they approved it',
+      !posts.some(p => /\/confirm/.test(p.url)));
+    /* AND THE HALF THAT IS NOT AN ACTION AT ALL. A High and a Low are not created by asking; they
+       appear when people in a group have offered the same observation and said which way it
+       points. The product must say that plainly rather than failing silently or pretending. */
+    posts.length = 0;
+    await coach.page.fill('#iq-composer-input', 'Create a Low about our set pieces');
+    await coach.page.evaluate(() => MemberApp.wsSend());
+    await coach.page.waitForTimeout(2600);
+    const afterLow = await textOf(coach.page, null);
+    ok('PC-K4 asking for a Low is answered with what a Low actually is, in a coach\'s words',
+      /not something I create|is what appears|people in a group|offered the same/i.test(afterLow));
+    ok('PC-K5 …and it says outright that nothing was saved or shared, which is the coach\'s real question',
+      /nothing was saved or shared/i.test(afterLow));
+    ok('PC-K6 …and it uses none of the words a coach should never need — no inquiry ids, no bands, no packets',
+      !/inquiryId|nodeId|subjectRef|candidateId|packet|cross-evidence|Priority Office|canonicalConcept/i.test(afterLow));
+    ok('PC-K7 …and no High or Low was conjured by asking for one',
+      !posts.some(p => /\/contribute|\/confirm/.test(p.url)));
+    /* AND IT ALL FITS THE DEVICE. A reply a coach has to scroll sideways to read is a reply they
+       do not read, and this one is the longest sentence the product says. */
+    ok('PC-K8 …and the whole exchange fits a 390px screen with no sideways scrolling',
+      await coach.page.evaluate(() =>
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+
     /* ══ I — PROVIDER DOWN ══════════════════════════════════════════════════════════════════ */
     console.log('\n  I — AND EVERY LINE ABOVE WAS WRITTEN WITH NO MODEL REACHABLE');
     ok('PC-I1 the whole walkthrough ran with models switched off',
