@@ -20,7 +20,15 @@ const ACTIONS = Object.freeze({
     description: 'Record the user declared outcome of the current focus.' },
   inspect_inquiry: { contexts: ['inquiry'], confirmation: false,
     description: 'Open or explain the current inquiry and its governed evidence.' },
-  create_inquiry: { contexts: [null, 'focus', 'high', 'low'], confirmation: true,
+  /* `'conversation'` WAS MISSING, AND IT IS THE ONLY CONTEXT AN UNBOUND TURN EVER HAS.
+     `contexts: [null, …]` reads as "offered when nothing is bound", but `_composerActionContext`
+     never produces a null object: with no object ref it sets `{ kind: 'conversation' }`. So the
+     one action for opening a question was unavailable on every turn where somebody would ask for
+     one, model or no model — a capability declared for a context the product does not produce.
+     `create_focus` has carried `'conversation'` since it was written; this is the same list with
+     the same meaning. `'inquiry'` stays off it deliberately: you do not open an inquiry from
+     inside one. */
+  create_inquiry: { contexts: [null, 'conversation', 'focus', 'high', 'low'], confirmation: true,
     description: 'Open a private inquiry on a topic stated by the user; it starts unsettled.' },
   show_evidence: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false,
     description: 'Open the governed evidence view for the current object.' },
@@ -86,6 +94,72 @@ const ACTIONS = Object.freeze({
   navigate_to_object: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: false,
     description: 'Return a safe address for the current object.' },
 });
+
+/* ── A COMMAND SHAPE, WHICH IS NOT AN INTENT ENGINE ───────────────────────────────────────────
+   FOUNDER ADJUDICATION, September 2026. The action vocabulary above is complete, and the pipeline
+   behind it — ground, propose, confirm, canonical owner — is provider-independent. Only the
+   INTERPRETATION step is model-gated: `_composerActionInterpret` selects nothing when no model is
+   configured. So in the pilot's actual running state, where the provider is off, a person could
+   not start an Inquiry or a Focus by saying so, and the reply talked about a reasoning engine.
+
+   THIS IS SYNTAX. It reads the shape of a sentence — a leading imperative verb, immediately
+   naming one of the product's own object words — and returns which ACTION that names. It does
+   not classify mood, infer what somebody meant, resolve an object, choose an audience, or decide
+   anything is true. Given a sentence it does not match, it returns null and the turn proceeds
+   exactly as it did before.
+
+   WHAT IT DELIBERATELY DOES NOT DO, and each of these is the difference between a parser and an
+   engine:
+
+     · it does not set `requested`. A pressed control IS a declaration of intent, which is why
+       that flag exists; a regex is not, so the reading it produces goes through the SAME
+       grounding every model-proposed action gets. TODAY that changes no outcome, and saying so
+       is more honest than implying a guard that is currently doing no work: this parser already
+       refuses a question and already requires a payload, so the grounding's own question and
+       stated-intent tests find nothing left to catch. It matters the day somebody widens the
+       shape — `requested: true` would silently exempt the wider version from the tests that stop
+       a question becoming a commitment.
+     · it never supplies an argument the person did not write. The payload is the remainder of
+       their own sentence, and if that is empty there is nothing to propose.
+     · it names only actions that ALREADY EXIST. There is no create_high and no create_low here,
+       because High and Low are PROJECTIONS of contributed observations rather than records, and
+       inventing an action for them would be inventing a second canonical owner. A sentence that
+       asks for one is reported by name so the caller can say where that actually happens.
+     · it writes nothing and confirms nothing. Everything after it is the governed path.
+
+   PURE: no IO, no model, deterministic. */
+const _COMMAND_RE = new RegExp(
+  '^\\s*(?:please\\s+|can\\s+you\\s+|could\\s+you\\s+)?'
+  + '(?:create|start|open|make|set\\s+up|add)\\s+'
+  + '(?:a|an|the|my|our)?\\s*'
+  + '(focus|inquiry|enquiry|high|low)\\b'
+  + '\\s*(?::|,|-|\u2014)?\\s*'
+  + '(?:about|on|into|for|to|that|regarding)?\\s*'
+  + '(.*)$', 'i');
+
+/* Object word -> the action that already owns it. High and Low are absent on purpose. */
+const _COMMAND_ACTION = Object.freeze({
+  focus: 'create_focus', inquiry: 'create_inquiry', enquiry: 'create_inquiry',
+});
+
+function readCommand(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return null;
+  // A QUESTION IS NOT A COMMAND. "Should I create a focus for this?" is somebody thinking aloud.
+  if (/\?\s*$/.test(raw)) return null;
+  const m = _COMMAND_RE.exec(raw);
+  if (!m) return null;
+  const word = String(m[1] || '').toLowerCase();
+  const rest = String(m[2] || '').trim().replace(/[.!]+$/, '').trim();
+  const type = _COMMAND_ACTION[word];
+  if (!type) {
+    /* A High or a Low. Named, not acted on: the caller says where an observation becomes one,
+       which is a contribution to a group, and nothing is created here. */
+    return { kind: word === 'high' ? 'high' : 'low', type: null, text: rest };
+  }
+  if (!rest) return null;                 // "create a focus" with nothing after it names nothing
+  return { kind: word === 'focus' ? 'focus' : 'inquiry', type, text: rest.slice(0, 300) };
+}
 
 const MODEL_SCHEMA = Object.freeze({
   actions: [{ type: 'one ACTION name', arguments: 'object containing only values stated by the user', reason: 'short explanation' }],
@@ -401,4 +475,4 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
   return { actions, needsClarification };
 }
 
-module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground };
+module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground, readCommand };

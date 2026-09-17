@@ -15273,7 +15273,36 @@ async function _composerActionInterpret(code, text, context, priorMessages, requ
        there, intent is exactly what is in doubt. */
     return composerActions.ground(reading, { text, priorMessages, context, requested: true });
   }
-  if (!ai.enabled() || ai.deterministicOnly()) return { actions: [], needsClarification: null, unavailable: true };
+  if (!ai.enabled() || ai.deterministicOnly()) {
+    /* ── THE DETERMINISTIC COMMAND SHAPE ───────────────────────────────────────────────────
+       FOUNDER ADJUDICATION, September 2026. With no provider this returned nothing, so a person
+       could not start an Inquiry or a Focus by saying so — in the pilot's actual running state.
+       `composerActions.readCommand` reads the SHAPE of an explicit imperative and returns which
+       already-existing action it names. It is a parser, not an engine: it resolves no object,
+       chooses no audience, supplies no argument the person did not write, and names no action
+       that does not already exist.
+
+       IT IS NOT `requested`. A pressed control is a declaration of intent, which is what that
+       flag is for; a regex is not. So the reading goes through the SAME grounding a
+       model-proposed action gets — the question test, the stated-intent test and the
+       literal-value rule all still run and can still refuse it. The parser earns nothing except
+       the chance to be judged by the existing gates.
+
+       A HIGH OR A LOW NAMES NO ACTION, because there is none: both are PROJECTIONS of contributed
+       observations rather than records, and inventing one would be inventing a second canonical
+       owner. `commandKind` travels so the turn can say where an observation actually becomes one
+       instead of failing silently. */
+    const cmd = composerActions.readCommand(text);
+    if (cmd && cmd.type) {
+      const reading = composerActions.normalize(
+        { actions: [{ type: cmd.type, arguments: { text: cmd.text }, reason: 'they said so in as many words' }] },
+        context);
+      const grounded = composerActions.ground(reading, { text, priorMessages, context });
+      if ((grounded.actions || []).length) return { ...grounded, commandKind: cmd.kind };
+    }
+    return { actions: [], needsClarification: null, unavailable: true,
+      commandKind: cmd ? cmd.kind : null, commandText: cmd ? cmd.text : '' };
+  }
   try {
     const proposed = await ai.completeJSON({ org: code, taskType: 'composer_action_interpret', tier: 'micro',
       system: 'Return only the requested JSON. You interpret intent and propose an allow-listed action. You do not decide permission, visibility, confidence or state.',
@@ -15749,12 +15778,23 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
 
      Provider-down must never silently perform a consequential action. It must also not pretend
      the capability is gone. */
-  if (actionReading.unavailable && /^\s*(?:please\s+)?(?:create|start|open|make|add|record|log)\b[^]{0,80}?\b(focus|inquiry|high|low)\b/i.test(String(text || ''))) {
-    const _signpost = 'I cannot read that as an action while the language model is unavailable, '
-      + 'so I have not created anything. You can still do it yourself: open the thing it is about '
-      + 'and choose "Work on this", or use the group screen. What you typed is in this private '
-      + 'conversation and nothing was saved or shared.';
-    if (!parts.some(x => String(x).includes('have not created anything'))) parts.push(_signpost);
+  if (actionReading.unavailable && actionReading.commandKind) {
+    /* IT SAYS WHICH THING IT COULD NOT DO, AND WHERE THAT THING ACTUALLY HAPPENS.
+
+       A High or a Low is the one case that is not a provider problem at all: neither is a record,
+       so there is no action to fail. Both are PROJECTIONS of observations people contributed to a
+       group, and the honest answer names that rather than apologising for a missing model. */
+    const _k = actionReading.commandKind;
+    const _signpost = (_k === 'high' || _k === 'low')
+      ? 'A ' + (_k === 'high' ? 'high' : 'low') + ' is not something I create — it is what appears '
+        + 'when people in a group have offered the same observation and said which way it points. '
+        + 'Open your group and offer it there; if others have seen it too, it becomes one. '
+        + 'What you typed is in this private conversation and nothing was saved or shared.'
+      : 'I cannot read that as an action while the language model is unavailable, so I have not '
+        + 'created anything. You can still do it yourself: open the thing it is about and choose '
+        + '"Work on this", or use the group screen. What you typed is in this private '
+        + 'conversation and nothing was saved or shared.';
+    if (!parts.some(x => String(x).includes('nothing was saved or shared'))) parts.push(_signpost);
   }
   let responseText = parts.join(' ');
   /* ── THE DETERMINISTIC COPY IS ENGLISH, AND SAYS SO ────────────────────────────────────────

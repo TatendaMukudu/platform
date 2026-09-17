@@ -178,47 +178,129 @@ const server = app.listen(0, async () => {
     ok('CQ-G1 the answer is about their position, not about a shortage of evidence',
       /not on a group yet/i.test(none.text) && !/enough authorised evidence/i.test(none.text));
 
-    /* ══ H — PROVIDER DOWN SAYS WHICH THING IS MISSING, AND WHERE THE DOOR IS ════════════════
-       With no model the action interpreter is unavailable, so "Create a Focus to try player-led
-       debriefs" selected no action and fell through to a generic capture card — under a reply
-       about the REASONING ENGINE being switched off, which is a different subsystem. A coach
-       reading that learns nothing true: the product can still start a focus, and the control is
-       two taps away on the question's own screen.
+    /* ══ H — WITH NO MODEL, THE FOUR REQUESTS ARE ANSWERED HONESTLY AND DIFFERENTLY ══════════
+       FOUNDER ADJUDICATION, September 2026. The action vocabulary and the governed pipeline
+       behind it are provider-independent; only the INTERPRETATION step was model-gated, so with
+       no provider "Create a Focus to try player-led debriefs" selected nothing and fell through
+       to a generic capture card, under a reply about the REASONING ENGINE — a different subsystem.
 
-       The signpost chooses no action, binds no object, proposes nothing and writes nothing. It
-       fires only when the interpreter is unavailable, so it can never pre-empt the governed path
-       or disagree with it. */
-    console.log('\n  H — WITH NO MODEL, AN ACTION REQUEST IS ANSWERED HONESTLY');
+       `composerActions.readCommand` is a SYNTAX parser, not an intent engine. It reads the shape
+       of an explicit imperative and returns which ALREADY-EXISTING action it names. It does not
+       set `requested`, so the reading goes through the same grounding a model-proposed action
+       gets and can still be refused. It names no action that does not exist.
+
+       So the four requests get three different honest answers, and this section asserts all of
+       them — including that the two which CAN be created still write nothing until a human
+       confirms, which is the property the parser must not be allowed to erode. */
+    console.log('\n  H — WITH NO MODEL, THE FOUR REQUESTS ARE ANSWERED HONESTLY AND DIFFERENTLY');
+    const propose = async (utterance) => {
+      const r = await call('POST', '/api/assistant/turn', { text: utterance }, 'coach');
+      const resp = (r.j || {}).response || {};
+      return { turnId: (r.j || {}).turnId, actions: resp.proposedActions || [],
+        text: String(resp.responseText || '') };
+    };
+    const countFocuses = async () =>
+      (((await call('GET', '/api/objects?kind=focus&scope=all', undefined, 'coach')).j || {}).objects || []).length;
+    const countInquiries = async () =>
+      (((await call('GET', '/api/objects?kind=inquiry&scope=all', undefined, 'coach')).j || {}).objects || []).length;
+
+    const focusesBefore = await countFocuses(), inquiriesBefore = await countInquiries();
+
+    const askFocus = await propose('Create a Focus to try player-led debriefs.');
+    const fProp = askFocus.actions.find(a => a.actionType === 'create_focus');
+    ok('CQ-H1 "Create a Focus …" names the existing action, with NO model configured',
+      !!fProp);
+    ok('CQ-H1b …carrying the PERSON\'S own remaining words, sourced as theirs',
+      !!fProp && fProp.effect && fProp.effect.text === 'try player-led debriefs'
+      && fProp.effect.textSource === 'user_stated');
+    ok('CQ-H1c …needing a human confirmation, and saying so',
+      !!fProp && fProp.requiredApproval === true && /nothing happens until you confirm/i.test(askFocus.text));
+    ok('CQ-H1d …and writing NOTHING on its own',
+      (await countFocuses()) === focusesBefore);
+
+    const askInq = await propose('Create an Inquiry into why substitutes feel disconnected.');
+    const iProp = askInq.actions.find(a => a.actionType === 'create_inquiry');
+    ok('CQ-H2 "Create an Inquiry …" names the existing action too',
+      !!iProp);
+    ok('CQ-H2b …and writes nothing on its own either',
+      (await countInquiries()) === inquiriesBefore);
+
+    /* A HIGH AND A LOW ARE NOT A PROVIDER PROBLEM. Neither is a record: both are PROJECTIONS of
+       observations people contributed to a group. There is no action to fail, and inventing one
+       would be inventing a second canonical owner. The answer names where it actually happens. */
     for (const [what, utterance] of [
-      ['Focus',   'Create a Focus to try player-led debriefs.'],
-      ['Inquiry', 'Create an Inquiry into why substitutes feel disconnected.'],
-      ['High',    'Create a High about our pressing being much more coordinated today.'],
-      ['Low',     'Create a Low about substitute role clarity.'],
+      ['High', 'Create a High about our pressing being much more coordinated today.'],
+      ['Low',  'Create a Low about substitute role clarity.'],
     ]) {
-      const r = await ask(utterance);
-      ok(`CQ-H1 "${what}": it says plainly that it has created nothing`,
-        /have not created anything/i.test(r.text));
-      ok(`CQ-H1b "${what}": …and names the reason as the language model, not as a reasoning engine`,
-        /language model is unavailable/i.test(r.text));
-      ok(`CQ-H1c "${what}": …and points at the control that still works with no provider`,
-        /Work on this|group screen/i.test(r.text));
-      ok(`CQ-H1d "${what}": …and confirms the words are kept privately rather than lost`,
+      const r = await propose(utterance);
+      ok(`CQ-H3 "${what}": no action is invented for it`,
+        !r.actions.some(a => /^create_(high|low)$/.test(String(a.actionType))));
+      ok(`CQ-H3b "${what}": …and the answer says it is what APPEARS when a group has offered it`,
+        /is not something I create/i.test(r.text) && /offered the same observation/i.test(r.text));
+      ok(`CQ-H3c "${what}": …and points at the group, which is where that happens`,
+        /open your group and offer it there/i.test(r.text));
+      ok(`CQ-H3d "${what}": …and confirms the words are kept privately rather than lost`,
         /nothing was saved or shared/i.test(r.text));
+      ok(`CQ-H3e "${what}": …and never claims it has been created`,
+        !/created it|I have created|added a (?:high|low)/i.test(r.text));
     }
-    /* AND IT IS A SIGNPOST, NOT A SECOND INTENT ENGINE. It must not fire on an ordinary sentence,
-       and it must never be the thing that acts. */
-    const ordinary = await ask('Nobody talks after we lose.');
-    ok('CQ-H2 an ordinary observation gets no signpost, because there was no action to read',
-      !/have not created anything/i.test(ordinary.text));
-    const question = await ask('What have we tried?');
-    ok('CQ-H2b …and neither does a question the product can actually answer',
-      !/have not created anything/i.test(question.text));
-    /* CQ-H3 WAS `async () => true` FOR ONE EDIT — an assertion that cannot fail, which is the
-       vacuous kind this repository keeps catching in its own tests. Removed rather than left in
-       beside the real one. What follows counts. */
-    const focusCount = ((await call('GET', '/api/objects?kind=focus&scope=all', undefined, 'coach')).j || {}).objects || [];
-    ok('CQ-H3 the signpost writes nothing — counted, after four separate requests to create something',
-      focusCount.length === 1);
+
+    /* AND THE PARSER IS A PARSER. It must stay silent on anything that is not an explicit
+       imperative naming one of the product's own object words. */
+    const ordinary = await propose('Nobody talks after we lose.');
+    ok('CQ-H4 an ordinary observation names no creation action',
+      !ordinary.actions.some(a => /^create_/.test(String(a.actionType))));
+    const wondering = await propose('Should I create a focus for this?');
+    ok('CQ-H4b …and a QUESTION about creating one is not a command to create one',
+      !wondering.actions.some(a => /^create_/.test(String(a.actionType))));
+    const bare = await propose('Create a focus');
+    ok('CQ-H4c …and "create a focus" with nothing after it proposes nothing, because it names nothing',
+      !bare.actions.some(a => a.actionType === 'create_focus'));
+    /* ── A CLAIM I MADE AND HAD NOT TESTED ──────────────────────────────────────────────────
+       The parser's comment says it does not set `requested`, so the reading goes through the same
+       grounding a model-proposed action gets. Mutating the call site to pass `requested: true`
+       produced ZERO failures — the property was asserted in prose and nowhere else.
+
+       It is also weaker than it first sounds, and that is recorded rather than dressed up: today
+       no parsed command reaches a case where the two differ, because `readCommand` already
+       refuses a question and already requires a payload, so the grounding's own question and
+       stated-intent tests have nothing left to catch. What the flag would change is the FUTURE —
+       the day the parser is widened, `requested: true` would silently exempt it from the tests
+       that stop a question becoming a commitment.
+
+       So the assertion is on the call site, which is the thing that would actually regress. */
+    ok('CQ-H4d the command shape does not claim to be a pressed control, so the grounding still judges it',
+      () => {
+        const fs = require('fs'), path = require('path');
+        const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+        const i = src.indexOf('const cmd = composerActions.readCommand(text);');
+        const body = src.slice(i, i + 700);
+        return i > 0 && /composerActions\.ground\(reading, \{ text, priorMessages, context \}\)/.test(body)
+          && !/requested:\s*true/.test(body);
+      });
+
+    ok('CQ-H5 after every one of those, the record is exactly where it was',
+      (await countFocuses()) === focusesBefore && (await countInquiries()) === inquiriesBefore);
+
+    /* ══ H2 — AND THEN A HUMAN CONFIRMS, WITH NO MODEL, AND THE CANONICAL OWNER WRITES ═══════
+       The whole point of the adjudication: the pilot runs with the provider off, and a coach must
+       be able to start something and have it be real. Everything after the parser is the path a
+       pressed control already takes. */
+    console.log('\n  H2 — AND CONFIRMING IT, STILL WITH NO MODEL, WRITES THROUGH THE CANONICAL OWNER');
+    const conf = await call('POST', `/api/assistant/turn/${askFocus.turnId}/confirm`,
+      { proposalId: fProp.id }, 'coach');
+    ok('CQ-H6 confirmation succeeds with no provider anywhere in the path',
+      conf.status === 200 && conf.j.ok === true && conf.j.confirmed === 'create_focus'
+      && conf.j.outcome === 'created');
+    ok('CQ-H6b …with the person\'s words unchanged and nothing invented beside them',
+      conf.j.focus.text === 'try player-led debriefs'
+      && conf.j.focus.target === null && conf.j.focus.reviewAt === null);
+    ok('CQ-H6c …private by default, because a commitment\'s audience is a separate decision',
+      conf.j.focus.visibility === 'private');
+    ok('CQ-H6d …and it is readable afterwards through the ordinary object path',
+      (await countFocuses()) === focusesBefore + 1);
+    ok('CQ-H6e …and it was models-off throughout, which is the state the pilot runs in',
+      process.env.IQ_DETERMINISTIC_ONLY === '1');
 
   } catch (e) { fail++; console.error('  FAIL composer-coach-questions threw:', e && e.stack); }
 
