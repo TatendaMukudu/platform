@@ -1,7 +1,7 @@
 # Conversation-first correction — round 1 report
 
 **STARTING SHA** `b6dfaaa5c18cabd10687366305b961847500d3e1` (fetched from the remote and pinned;
-matched the frozen family-test candidate) · **ENDING SHA** _(filled at the end)_
+matched the frozen family-test candidate) · **THE WORK** landed at `1d6d7cd`; this report and the index note follow it
 **Branch** `gpt/ab-decision-spine-r1` · **Not merged.**
 
 ## 0 · Scope — read this first
