@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `159c05a4a141b831932d963ab8759509c1f20eff`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10).
+**Written against:** `4ac288c3ce39c2fd3bbceda543b77e57cfaf5c17`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -346,6 +346,43 @@ the daily check-in was retired** — six of the seven detectors read the mood se
 produced — so the app reported *"Nothing needs your attention right now, you're in a steady
 place"* to a person it could not see at all. Zero highs and zero lows across 28 seeded players
 who had real evidence in the system. Guard: `highs-lows-smoke`.
+
+## 11 · September 2026 — the A-to-B spine, creation, and the final product pass
+
+The line from `159c05a` to `4ac288c` on `gpt/ab-decision-spine-r1`. Not merged; the founder
+decides what lands. The class that links these rounds is the same one §8 and §10 name, arrived at from
+a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
+or something false on a real screen.**
+
+**The A-to-B spine.** The loop already ran end to end; three of eight coach-facing sections were
+structurally empty and the loop's last arrow did not close. `AB_SPINE_TRUTH_MAP_R1.md` is the record,
+including where Part I turned out to be wrong. A human may now propose a candidate explanation for a
+group inquiry through the existing governed boundary (founder adjudication, option b), and
+`hypothesisStanding` travels with the projection so an unevidenced theory can never be rendered at the
+band the OBSERVATION earned.
+
+**Creation.** The intent machinery was never missing -- `ai/composer-actions.js` has held an
+eighteen-action vocabulary all along, and only the INTERPRETATION step is model-gated. A narrow
+deterministic command parser (`readCommand`) routes a typed instruction through the existing
+`requestedAction` branch. `CREATION_OWNER_MAP_R1.md` has the owner table; a High and a Low have no
+creator because they are projections, and the product now says so in a coach's words.
+
+**The final product pass.** Two connections, both through owners that already existed:
+
+| Correction | Canonical owner |
+|---|---|
+| The Composer received no org values, no success definition, no language directive and no member goals -- `_domainDirective` was built and used as a truthiness test | `_composeTurn` system prompt, assembled like the other nine AI entry points |
+| A document attached to a chat reached no turn: `_materialFor` requires an OBJECT in `_allObjectsFor`, and a conversation is not one | `_conversationMaterialContext` |
+
+**The boundary that used to be an absence.** Declared context -- org goals, values, metrics, node
+descriptions, onboarding self-descriptions -- may now steer relevance, interpretation, question
+selection and language, and may never touch origin counts, evidence, confidence or causal standing.
+That held before only because the kernel never received these fields, which is not a boundary but an
+accident waiting for someone with a good reason. `scripts/org-context-boundary-http-smoke.js` asserts
+it, and its own shape was corrected by mutation: re-reading after a context change proves there is no
+READ-time contamination and misses admission-time contamination entirely.
+
+---
 
 ## 10 · September 10-11, 2026 — the pilot passes
 

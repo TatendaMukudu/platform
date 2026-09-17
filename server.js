@@ -12392,7 +12392,7 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
   } catch (_) { return null; }
 }
 
-function _assistantAnswer(code, userId, question) {
+function _assistantAnswer(code, userId, question, opts = {}) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
   const workScoped = /\b(team|org|organisation|organization|project|shared|everyone|department|colleague)\b/.test(q);
@@ -12548,6 +12548,46 @@ function _assistantAnswer(code, userId, question) {
         // was actually asked. Mark it so the caller never mistakes it for a real answer and
         // lets the governed reasoner take the question instead (see _assistantTurn).
         standingRead = true;
+      }
+      else if (opts.material && opts.material.title) {
+        /* ── THE DOCUMENT THEY JUST ATTACHED IS NOT "NO AUTHORISED EVIDENCE" ──────────────────
+           A coach uploads a debrief review, asks "what does this say?", and was told "I don't
+           have enough authorised evidence to answer that yet" -- the same true-about-the-index
+           and false-about-the-product sentence the coach-questions pass already removed from five
+           other places. The document is as authorised as anything gets: it is theirs, it is
+           private to them, they attached it thirty seconds ago, and `ai/material.js` has already
+           segmented it into named parts with no model involved.
+
+           So the dead end is replaced with what CAN be said deterministically -- the document's
+           own structure, not a reading of it. Naming the parts is the document describing itself;
+           summarising them would be a claim, and a claim needs the reasoning engine. The reply
+           says which of the two it is giving, so nobody mistakes a table of contents for an
+           analysis, and it repeats the epistemic status the upload already returned: external
+           material, not evidence about anyone. */
+        const _m = opts.material;
+        /* THE PARTS, NAMED, AND NOT ALL OF THEM. `material.segment` splits prose on blank lines
+           and derives a heading per part, so a six-paragraph review is six "parts" whose headings
+           are their own opening lines. Reading all six back is a wall of text on a phone and is
+           the opposite of what this repair is for. Three, clipped, and the count for the rest. */
+        const _heads = String(_m.text || '').split('\n\n')
+          .map(b => (b.match(/^\[[^\]]*\]\s*(.+)$/m) || [])[1])
+          .filter(Boolean)
+          .map(h => h.length > 60 ? h.slice(0, 57).trim() + '...' : h);
+        const _shown = _heads.slice(0, 3);
+        const _rest = _heads.length - _shown.length;
+        const _what = _heads.length
+          ? ' It is in ' + (_heads.length === 1 ? 'one part' : _heads.length + ' parts')
+            + (_shown.length ? ', starting with ' + _shown.map(h => '"' + h + '"').join(', ') : '')
+            + (_rest > 0 ? ' and ' + _rest + ' more' : '') + '.'
+          : '';
+        answer = 'I have "' + _m.title + '" here.' + _what
+          + (_m.partial ? ' I am holding part of it rather than all of it.' : '')
+          + ' That is the document describing itself, not my reading of it -'
+          + ' going through what it means needs the reasoning engine, which is off right now.'
+          + ' It is external material either way, so nothing in it counts as evidence about anyone here.';
+        confidence = 'confirmed';   // about WHAT IS HELD, which is the only claim being made
+        limitations = ['the document is held and named, not interpreted',
+          'external material is not evidence about a person or the organisation'];
       }
       else {
         answer = `I don't have enough authorised evidence to answer that yet.`;
@@ -15510,7 +15550,16 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const strongCue = /\b(why|how (?:do|does|to|should|can|would)|should (?:i|we|you|they)|better than|worse than|vs\.?|versus|explain|define|difference between|pros and cons|trade-?offs?|best (?:way|approach|formation|method|strategy|option)|help me (?:build|plan|create|design|draft|work|figure|prepare|think)|build|create|draft|design|outline|plan a|come up with|walk me through|is it (?:better|worth|good)|when should|tell me (?:more )?about|what do you know about)\b/i.test(_rt);
   const reasoningWanted = reasoningRegister.wantsReasoning(reg0) && requestCue && !(cls.command && cls.command.payload);
   let qa = null;
-  if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  /* THE MATERIAL BOUND TO THIS CONVERSATION travels with the question, through the SAME
+     resolver the composer uses, so a document the reader could not open is not one this answer
+     can speak about either. Without it the deterministic path dead-ends on a file the person is
+     looking at while they are looking at it. */
+  if (cls.isQuestion || infoRequest) {
+    try {
+      qa = _assistantAnswer(code, userId, cls.questionText || text,
+        { material: _conversationMaterialContext(code, userId, _conv) });
+    } catch (_) { qa = null; }
+  }
   // ── RECALL ───────────────────────────────────────────────────────────────────
   // "What did I just tell you?" is about THIS conversation, not the org's records. Answer it
   // from the thread itself — deterministic, no model, no egress, and it cannot fabricate.
@@ -18749,11 +18798,28 @@ function _materialContext(code, userId, about) {
   } catch (_) { return null; }
 }
 
+/* ── A DOCUMENT ATTACHED TO A CHAT, WHICH NO TURN COULD SEE ───────────────────────────────────
+   `POST /api/assistant/attachments` says what this is for: "the universal composer attachment
+   door ... later turns receive only the bounded material context." They did not. This function
+   gated on `_materialFor`, which resolved a material through the OBJECT it hangs on, and a
+   conversation is not in `_allObjectsFor`. So for the ordinary case this function exists to serve
+   -- a document attached to a chat with no object bound -- `_materialFor` answered 404, this
+   returned null, and the composer's `material:` slot was empty on every turn. Reproduced: attach a
+   review, ask "what does this say?", and the deterministic path reached its dead end and said "I
+   don't have enough authorised evidence to answer that yet" about a file the person was looking at.
+
+   `_materialFor` now takes `requireObject`, so the object rule stays exactly as it was for
+   anything hanging on a High, a Low, an Inquiry or a Focus. The visibility half is repeated here
+   rather than assumed, because this is the function that decides what reaches a model. */
 function _conversationMaterialContext(code, userId, conversation) {
   if (!conversation || !(assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === conversation.id)) return null;
   const latest = Object.values(_materials(code)).filter(m => _materialOn(m, 'conversation', conversation.id))
     .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return latest && _materialFor(code, userId, latest.materialId).ok ? material.contextFor(latest) : null;
+  if (!latest) return null;
+  // A private material belongs to its owner, and being in a conversation it was attached to is
+  // not a way around that.
+  if (latest.visibility === 'private' && String(latest.byId) !== String(userId)) return null;
+  return material.contextFor(latest);
 }
 
 /* A leader's READ becomes evidence about the person; a leader's HANDOFF never does (L-ES4).
@@ -19031,7 +19097,9 @@ const _engageOf  = (code, id) => {
 /* Resolve a material AND the object it hangs on, through the reader's own view. Returns the
    object too, because every question about a material ("may I read it", "may I see the report",
    "who is the cohort") is answered by the object rather than by the file. */
-function _materialFor(code, userId, materialId) {
+/* `requireObject: false` is for the routes that ask only "may this reader see this document",
+   as opposed to the ones that ask "who is the cohort for it" — see the note below. */
+function _materialFor(code, userId, materialId, { requireObject = true } = {}) {
   const m = _materials(code)[String(materialId)];
   if (!m) return { ok: false, status: 404, error: 'not found' };
   if (m.visibility === 'private' && String(m.byId) !== String(userId)) {
@@ -19039,9 +19107,26 @@ function _materialFor(code, userId, materialId) {
   }
   const obj = _allObjectsFor(code, userId)
     .find(o => _materialRefs(m).some(r => r.kind === o.kind && String(r.id) === String(o.id)));
-  // A material whose object the reader cannot see is a material that does not exist for them.
-  // 404 rather than 403: a 403 confirms the thing is there, which is a leak on its own.
-  if (!obj) return { ok: false, status: 404, error: 'not found' };
+  /* ── A DOCUMENT ATTACHED TO A CHAT HANGS ON NO OBJECT, AND ITS OWNER IS NOT A STRANGER ──────
+     This required an object unconditionally, and a conversation is not in `_allObjectsFor`. So a
+     coach who attached a review to their own thread and then asked to open it got 404 — about
+     their own private document, on the route whose entire question is "may I read this". The
+     composer had the same defect through `_conversationMaterialContext`, from the same line.
+
+     The object test is kept and is still the rule for anything hanging on a High, a Low, an
+     Inquiry or a Focus: a material whose object the reader cannot see does not exist for them,
+     and 404 rather than 403 because a 403 confirms the thing is there. What is added is the only
+     other way a material can be legitimately reachable — the reader OWNS it and it is attached to
+     one of their own conversations — and callers that genuinely need the object (the cohort and
+     engagement routes, which answer "who was this for" rather than "may I read it") keep
+     `requireObject: true` and are unaffected. */
+  if (!obj) {
+    const ownConversation = String(m.byId) === String(userId)
+      && _materialRefs(m).some(r => r && r.kind === 'conversation'
+        && (assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === String(r.id)));
+    if (requireObject || !ownConversation) return { ok: false, status: 404, error: 'not found' };
+    return { ok: true, material: m, object: null };
+  }
   return { ok: true, material: m, object: obj };
 }
 
@@ -19256,7 +19341,8 @@ app.post('/api/materials/:id/classification', requireAuth, (req, res) => {
 
 app.get('/api/materials/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const r = _materialFor(code, userId, req.params.id);
+  // "May I read it" — so a document on the reader's own conversation qualifies, object or not.
+  const r = _materialFor(code, userId, req.params.id, { requireObject: false });
   if (!r.ok) return res.status(r.status).json({ error: r.error });
   const m = r.material;
   const mine = _engageOf(code, m.materialId).filter(e => e.personId === userId);
