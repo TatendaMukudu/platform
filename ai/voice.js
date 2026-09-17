@@ -233,7 +233,15 @@ function explainObject(obj = {}) {
        nothing to be confident ABOUT", which is exactly what a focus already returns and what
        every consumer of this field therefore already handles. The provenance line stays: "five
        people, five independent sources" is a fact about the record that remains true and is the
-       right thing to show when there is no read yet. */
+       right thing to show when there is no read yet.
+
+       AND WHAT THIS CHANGE IS NOT. The badge a person actually saw came from `ai/present.js`
+       `summary.standing`; mutation confirmed that reverting THIS line alone leaves the rendered
+       screens correct, because no surface I could find renders `explained.confidence`. So this
+       is the consistency half -- the same law stated at the second owner so the next renderer to
+       reach for this field gets the right answer -- and not a repair whose effect can be shown on
+       a screen. Recorded rather than implied, because a comment claiming a visible fix that
+       cannot be demonstrated is how the comment three lines above this one went wrong. */
     confidence: claim ? sure : null,
     provenance: prov,
     whyIThinkThat: why,
