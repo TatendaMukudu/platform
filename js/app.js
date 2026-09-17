@@ -661,6 +661,19 @@ const NAV_ALIASES = {
   // named individuals with their mood numbers (a per-member leak) and duplicated the
   // privacy-safe briefing. Retired → the briefing is the one intelligence surface.
   'intelliq':     'leader-home',
+  /* THE ACCOUNT MENU OFFERED A DESTINATION THAT DID NOT EXIST. `ACCOUNT_LINKS` builds a
+     permission-gated button with `data-page="organisation"`, and `organisation` had a PAGE_TITLE
+     but no route and no alias -- so `navigate` fell through its own "never blank, never a retired
+     identity" guard to Home. A person with `view_team` tapped Organisation and arrived at Home,
+     with the title reading Home, every time, and nothing logged.
+
+     Reproduced in a browser at 390px before it was changed: hasRoute false, hasAlias false,
+     landedOn "home". The fallback is doing exactly what it was written to do; the defect is a
+     menu offering a page nobody had built.
+
+     Folded rather than built. "Organisation" and the nav's "Org tree" are the same thing said
+     twice -- `people` renders the tree -- and this pass does not add a surface to fix a surface. */
+  'organisation': 'people',
 };
 // destination → its ONE renderer (arrow-wrapped so declaration order/TDZ is never an issue).
 const NAV_ROUTES = {
@@ -719,12 +732,21 @@ function navigate(dest){
      told it stopped rather than left announcing "Reading aloud…" on a page nobody is on. */
   try { if (typeof MemberApp !== 'undefined' && MemberApp._voiceStop) MemberApp._voiceStop('stopped'); } catch (_) {}
 
-  // 4. Activate the canonical surface + one-authority nav/title/active state.
+  /* 4. Activate the canonical surface.
+
+     THE TWO `.nav-item` LINES THAT USED TO LIVE HERE MATCHED NOTHING. The nav drawer renders its
+     buttons with class `iq-nav-item` and marks the current one `is-active` itself from its own
+     `_navActive`; no element in this product carries class `nav-item` or a static `data-page`
+     attribute. So one selector cleared an active state nobody set and the other set an active
+     state nobody read, on every navigation, since the drawer replaced the old sidebar.
+
+     Removed rather than repaired: the drawer already owns its own active state, and a second
+     owner for "which nav item is lit" is the duplicate-authority shape this file keeps folding
+     away. The account menu's `data-page` buttons are a different thing and are live -- they are
+     built in `ACCOUNT_LINKS` and read by `navigate(btn.dataset.page)`. */
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const pg = document.getElementById('page-'+page) || (['focus', 'high', 'low'].includes(page) ? document.getElementById('page-inquiry') : null);
   if(pg) pg.classList.add('active');
-  document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
   // Close the mobile sidebar drawer on navigation (and clear its outside-click handler).
   document.getElementById('sidebar')?.classList.remove('open');
   if (typeof _detachSidebarClose === 'function') _detachSidebarClose();

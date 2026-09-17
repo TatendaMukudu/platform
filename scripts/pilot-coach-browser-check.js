@@ -531,6 +531,52 @@ _rebuildEmailIndex();
       await coach.page.evaluate(() =>
         document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
 
+    /* ══ L — EVERY DOOR THE PRODUCT OFFERS ACTUALLY OPENS ══════════════════════════════════
+       `navigate` fails SAFE to Home for an unknown destination, which is right and is also how a
+       menu item pointing at a page nobody built becomes invisible. "Organisation" was in
+       PAGE_TITLES with no route and no alias, so a person with `view_team` tapped it and arrived
+       at Home, with the title reading Home, every time, and nothing logged.
+
+       The guard is not the bug; a menu offering a destination the router does not have is. So
+       this asserts the two halves separately: every id the product OFFERS resolves to itself, and
+       the fallback still works for an id it does not offer. */
+    console.log('\n  L — EVERY DESTINATION THE PRODUCT OFFERS RESOLVES TO ITSELF');
+    const doors = await coach.page.evaluate(() => {
+      const ids = new Set();
+      // The nav drawer's own list, whatever it currently holds.
+      for (const n of (MemberApp._NAV || [])) ids.add(n.id);
+      for (const n of (MemberApp._NAV_EXTRA || [])) ids.add(n.id);
+      // And every destination the account menu can emit.
+      for (const b of document.querySelectorAll('.topbar-account-link[data-page]')) ids.add(b.dataset.page);
+      return [...ids];
+    });
+    ok('PC-L1 the product offers destinations at all, so this is not measuring an empty list',
+      doors.length >= 8);
+    /* AN ALIAS IS NOT A STRAY. `organisation` deliberately folds to `people`, and half a dozen
+       retired identities fold to `leader-home`; landing somewhere else on purpose is the whole
+       point of NAV_ALIASES. What must not happen is falling THROUGH the alias table and the route
+       table into the safety net, which is indistinguishable on screen from arriving somewhere.
+       So the expected destination is resolved the way `navigate` resolves it, and the assertion is
+       that the app got there. */
+    const strays = [];
+    for (const id of doors) {
+      const r = await coach.page.evaluate(async (d) => {
+        const want = (typeof NAV_ALIASES !== 'undefined' && NAV_ALIASES[d]) || d;
+        navigate(d); await new Promise(r => setTimeout(r, 200));
+        return { want, got: AppState.currentPage };
+      }, id);
+      if (r.got !== r.want) strays.push(`${id} -> ${r.got} (wanted ${r.want})`);
+    }
+    ok('PC-L2 …and every one of them reaches the destination it resolves to rather than the safety net: '
+      + (strays.length ? strays.join(', ') : 'all resolve'), strays.length === 0);
+    /* AND THE FALLBACK IS STILL THERE. Removing the stray is not the same as removing the guard,
+       and a product that hard-fails on a stale bookmark is worse than one that goes Home. */
+    ok('PC-L3 …while an id the product does not offer still fails safe to Home',
+      await coach.page.evaluate(async () => {
+        navigate('a-page-that-was-never-built'); await new Promise(r => setTimeout(r, 200));
+        return AppState.currentPage === 'home';
+      }));
+
     /* ══ I — PROVIDER DOWN ══════════════════════════════════════════════════════════════════ */
     console.log('\n  I — AND EVERY LINE ABOVE WAS WRITTEN WITH NO MODEL REACHABLE');
     ok('PC-I1 the whole walkthrough ran with models switched off',
