@@ -13850,18 +13850,14 @@ const MemberApp = {
   },
 
 
-  /* WHO THIS IS FOR, decided before it is said. The choice lives next to the composer so it is
-     visible while a person types, rather than arriving as a confirmation card after the words
-     are already out. Private is the default and stays the default — the toggle can only ever be
-     an explicit act, never a state something else left behind. */
-  toggleVisibility() {
-    this._wsShare = !this._wsShare;
-    const b = document.getElementById('iq-vis');
-    if (!b) return;
-    b.textContent = this._wsShare ? 'Public' : 'Private';
-    b.setAttribute('aria-pressed', this._wsShare ? 'true' : 'false');
-    b.classList.toggle('is-shared', this._wsShare);
-  },
+  /* `toggleVisibility` AND `_wsShare` ARE GONE, and this note is here so nobody reinstates them.
+     The comment that used to sit above them said the choice was "visible while a person types,
+     rather than arriving as a confirmation card after the words are already out" — and a
+     confirmation card naming the audience, after the words exist and while they can still be
+     edited, is exactly what the product should do instead. `share_to_forum` already does it.
+
+     The toggle also never reached the server. It set a flag nothing read, which made it a promise
+     about privacy that the product had no way to keep. See the note in _renderShellComposer. */
 
   /* ONE COMPOSER. Founder: "make sure all chats look the same as the composer one — I don't
      want the inquiry one looking different. Uniformity. Typography the same."
@@ -13951,11 +13947,10 @@ const MemberApp = {
       if (st && st.textContent) { st.textContent = ''; st.className = 'iq-voice-state'; }
       return;
     }
-    /* A REBUILT COMPOSER RENDERS `#iq-vis` READING "Private" WITH aria-pressed=false, so the flag
-       behind it has to say the same thing or the button and its state disagree — and the next tap
-       would show "Public" while the flag went false. Private is the default and stays the default;
-       resetting to it is never the unsafe direction. */
-    this._wsShare = false;
+    /* There is no visibility flag to reset here any more. A rebuilt composer used to need
+       `_wsShare = false` so the button and the state behind it agreed; with the mode gone there is
+       no state, which is the point — nothing about this composer can be left in a condition that
+       changes who reads the next thing somebody types. */
     host.innerHTML = this._composerHTML({ id: 'iq-composer-input',
       /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
          "Type anything" describes the INPUT rather than inviting the person to use it, and an
@@ -13965,9 +13960,28 @@ const MemberApp = {
          people. Short, because on a phone a long one truncates and an instruction cut off halfway
          is worse than no instruction at all. */
       placeholder: this._PLACEHOLDER.home,
+      /* ── NO PRIVATE/PUBLIC MODE HERE, BY LAW ──────────────────────────────────────────────
+         A "Private | Public" toggle used to sit on this row. It set `_wsShare`, which reached
+         nothing: it was not in the turn body and no other code read it. A control that appears to
+         choose who can see what you say, and does not, is the worst kind of privacy defect —
+         somebody trusts it and says something they would not otherwise have said.
+
+         It was removed rather than wired up, and the founder's reason is the product law rather
+         than the bug: TALKING TO INTELLIQ IS NOT CONTRIBUTING TO THE ORGANISATION. This composer
+         is the person's own conversation — asking, exploring, attaching a photo, thinking aloud —
+         and that is private under the existing privacy rules, always, with no mode to get wrong.
+
+         Wiring it up would have been worse than leaving it dead. A global public MODE means
+         somebody who shares one sentence has silently changed the audience of every sentence
+         after it, and the moment they forget is the moment it matters.
+
+         Contributing is a separate deliberate act, and the machinery for it already exists: the
+         `share_to_forum` action names the audience, shows the exact words, lets them be edited,
+         and requires confirmation; a High, Low, Inquiry or Focus has its own audience control on
+         its own thread. Those are untouched. What is gone is only the mode that pretended to be
+         one of them. */
       send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
-        <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
-          title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
+        <span class="iq-hint-note">Private to you</span>
         <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
       </div>` });
     this._watchShellComposerHeight();

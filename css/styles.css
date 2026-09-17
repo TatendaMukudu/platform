@@ -3302,14 +3302,17 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-msg-user{background:var(--accent);color:#fff;align-self:flex-end;max-width:85%}
 .iqt-turns{align-items:stretch}
 
-/* WHO THIS IS FOR — chosen before speaking, visible while typing. Private is the resting state
-   and looks like it; shared is deliberately the one that draws the eye, because widening an
-   audience is the act worth noticing. */
+/* WHAT THIS ROW SAYS NOW. `.iq-vis` was a Private/Public pill here, styled so that "shared" drew
+   the eye — the right styling for the wrong control. It set a flag that reached nothing, and a
+   mode is the wrong shape for this decision anyway: talking to IntelliQ is private conversation,
+   and contributing to other people is a separate deliberate act with its own audience, its own
+   words and its own confirmation.
+
+   What replaces it is a statement rather than a control, because there is nothing here to choose.
+   Deliberately quiet — it is a standing fact about this surface, not a thing to act on, and the
+   link beside it is where somebody goes to read the whole rule. */
 .iq-composer-hint{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
-.iq-vis{min-height:36px;padding:.22rem .7rem;border-radius:999px;cursor:pointer;font-size:var(--fs-sm);
-  letter-spacing:.02em;color:var(--text-secondary);background:transparent;border:1px solid var(--border)}
-.iq-vis.is-shared{color:var(--accent);border-color:var(--accent)}
-.iq-vis:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iq-hint-note{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:.02em}
 
 .iq-make-row{display:flex;gap:.45rem;flex-wrap:wrap;margin:.7rem 0 0}
 .iq-make-chip{min-height:40px;padding:.4rem .85rem;border-radius:999px;cursor:pointer;font-size:var(--fs);
