@@ -825,8 +825,13 @@ _rebuildEmailIndex();
       seen.every(([, s]) => s.there));
     ok('PC-S2 …within the screen rather than below the fold',
       seen.every(([, s]) => s.onScreen));
-    ok('PC-S3 …asking the same question in the same words everywhere',
-      seen.every(([, s]) => /What.s on your mind\?/.test(s.placeholder)));
+    /* THIS ASSERTED THE OPPOSITE LAW UNTIL THIS PASS, and correctly so at the time: there was one
+       invitation and it was Home's, everywhere. The founder's correction is that the page a person
+       is standing on should ask in its own words — the same intelligence, a different door — so
+       what survives here is the part that was always the point: every page offers one, and it
+       invites them to SPEAK rather than to query. PC-U asserts the exact wording room by room. */
+    ok('PC-S3 …each with a real invitation to say something, not an empty box',
+      seen.every(([, s]) => typeof s.placeholder === 'string' && s.placeholder.trim().length > 8));
     ok('PC-S4 …and no page scrolls sideways because of it',
       seen.every(([, s]) => !s.overflow));
     if (!seen.every(([, s]) => s.there && s.onScreen)) {
@@ -957,6 +962,68 @@ _rebuildEmailIndex();
     ok('PC-T5 the object a person owns still carries its own audience control, on its own thread',
       onThread.hasAudience);
     ok('PC-T6 …and it is still reachable with a thumb', onThread.tap >= 36);
+
+    /* ══ PC-U — ONE COMPOSER, AND THE ROOM IT IS STANDING IN ═══════════════════════════════════
+       Founder's law: the invitation is an urge to start talking, not an input schema. The page
+       gives the Composer context — it is how "this" and "that" get resolved — and must not narrow
+       what a person may say. Somebody on Focuses can still ask why the last one failed.
+
+       It was one line everywhere. The bar is deliberately NOT rebuilt on navigation, because that
+       is what protects a half-typed sentence, and the consequence was that the placeholder was
+       whatever the first page to render it had asked for: measured at 390px, Highs, Lows,
+       Inquiries, Focuses and Library all still read "What's on your mind?".
+
+       Asserted as exact strings because these are the founder's own words for each room, and an
+       approximate match would let them drift back into one generic line. */
+    console.log('\n  PC-U THE INVITATION FITS THE ROOM, AND THE DRAFT SURVIVES THE WALK');
+    const WANT = {
+      home:    'What’s on your mind?',
+      high:    'Tell me what you’ve noticed…',
+      low:     'Tell me what you’ve noticed…',
+      inquiry: 'What are you wondering about?',
+      focus:   'What do you want to work on?',
+      notes:   'Ask about what you’ve kept…',
+    };
+    const seenPh = {};
+    for (const r of Object.keys(WANT)) {
+      await coach.page.evaluate(x => navigate(x), r);
+      await coach.page.waitForTimeout(950);
+      seenPh[r] = await coach.page.evaluate(() => {
+        const e = document.getElementById('iq-composer-input');
+        return e ? e.placeholder : '(absent)';
+      });
+    }
+    const wrong = Object.keys(WANT).filter(r => seenPh[r] !== WANT[r]);
+    ok('PC-U1 every page asks in its own words', wrong.length === 0);
+    if (wrong.length) console.error('    ', JSON.stringify(wrong.map(r => [r, seenPh[r], WANT[r]])));
+    /* THE HALF THAT STOPS THIS PASSING ON ONE SHARED STRING. Six identical placeholders would
+       satisfy "every page has one"; four distinct ones is what makes them the room's own. */
+    /* FIVE, NOT SIX: Highs and Lows deliberately share "Tell me what you've noticed…", because
+       noticing something good and noticing something wrong are the same act of telling IntelliQ
+       what you saw. Counted rather than assumed — the first version of this said four and failed
+       against a correct product. */
+    ok('PC-U2 …and those words are genuinely different room to room',
+      new Set(Object.values(seenPh)).size === 5);
+    /* NOT A SEARCH BOX. Founder: "What do you want to know?" turns IntelliQ into one. */
+    ok('PC-U3 …and none of them asks what the person wants to KNOW',
+      !Object.values(seenPh).some(p => /what do you want to know/i.test(p)));
+
+    /* THE COST OF GETTING THIS WRONG. Retargeting the placeholder must not rebuild the bar, or
+       navigating away from a half-written sentence throws it away. */
+    await coach.page.evaluate(() => navigate('focus'));
+    await coach.page.waitForTimeout(900);
+    await coach.page.fill('#iq-composer-input', 'a sentence I have not finished');
+    await coach.page.evaluate(() => navigate('notes'));
+    await coach.page.waitForTimeout(950);
+    const carried = await coach.page.evaluate(() => {
+      const e = document.getElementById('iq-composer-input');
+      return { v: e ? e.value : null, ph: e ? e.placeholder : null };
+    });
+    ok('PC-U4 a half-typed sentence survives walking to another page',
+      carried.v === 'a sentence I have not finished');
+    ok('PC-U5 …while the invitation underneath it has still changed',
+      carried.ph === WANT.notes);
+    await coach.page.evaluate(() => { const e = document.getElementById('iq-composer-input'); if (e) e.value = ''; });
     if (!onThread.hasAudience) console.error('    ', onThread.barHTML);
 
   } catch (e) {

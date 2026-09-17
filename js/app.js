@@ -764,7 +764,7 @@ function navigate(dest){
      not a re-render — it is the one moment that can decide whether this page brought its own
      composer, which is a question only the rendered page can answer. It runs AFTER step 5 for
      that reason. */
-  try { if (typeof MemberApp !== 'undefined' && MemberApp._renderShellComposer) MemberApp._renderShellComposer(); } catch (_) {}
+  try { if (typeof MemberApp !== 'undefined' && MemberApp._renderShellComposer) MemberApp._renderShellComposer(page); } catch (_) {}
 }
 
 const PAGE_TITLES = {
@@ -13876,18 +13876,48 @@ const MemberApp = {
      thing to say about one is what happened. `inquiry`, `high` and `low` ask what they are
      thinking, because those are questions the product is still working out and the person may
      know something it does not. */
+  /* \u2500\u2500 THE INVITATION IS AN URGE TO START TALKING, NOT AN INPUT SCHEMA \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+     The page a person is on gives the Composer useful context \u2014 it is how "this", "that" and
+     "the thing we were discussing" get resolved. It must not narrow what they are allowed to
+     SAY. Somebody on Focuses can still ask why the last one failed; somebody on Highs can still
+     disagree with one; somebody on Home can still say "we won 3-0".
+
+     TWO TABLES, BECAUSE A BUCKET AND ONE OF ITS OBJECTS ARE DIFFERENT ROOMS. `_PLACEHOLDER.high`
+     used to serve both the Highs page and the inside of a single High, which is why the page
+     asked "What are you thinking?" \u2014 a question that belongs to a thread about one thing, on a
+     screen that is a list of many.
+
+     NOT "What do you want to know?" ANYWHERE. Founder: that turns IntelliQ into a search box.
+     It was the prompt shown after an attachment, which is the exact moment the product should
+     look least like a search engine \u2014 attaching is another way of speaking. */
   _PLACEHOLDER: {
     home:    'What\u2019s on your mind?',
-    inquiry: 'What are you thinking?',
-    high:    'What are you thinking?',
-    low:     'What are you thinking?',
-    focus:   'How\u2019s this going?',
+    high:    'Tell me what you\u2019ve noticed\u2026',
+    low:     'Tell me what you\u2019ve noticed\u2026',
+    inquiry: 'What are you wondering about?',
+    focus:   'What do you want to work on?',
+    notes:   'Ask about what you\u2019ve kept\u2026',
     forum:   'Add to the conversation',
-    attached: 'What do you want to know?',
   },
 
-  /* An object thread asks about the thing it is about; an unknown kind falls back to the
-     universal line rather than to a guess. */
+  /* INSIDE an existing High, Low, Inquiry, Focus or other conversational object. One line for all
+     of them, deliberately: the founder's law is one intelligence in several human-facing forms,
+     and four different invitations would make them read as four applications. */
+  _OBJECT_PLACEHOLDER: 'Talk to IntelliQ about this\u2026',
+
+  /* An object thread asks about the thing it is about, whatever kind it is. The `kind` argument
+     is kept because every call site passes one and a future form may want to vary — but it does
+     not vary today, and pretending otherwise with four identical strings would be a lie about how
+     much the product distinguishes them. */
+  _placeholderFor() { return this._OBJECT_PLACEHOLDER; },
+
+  /* WHICH INVITATION THIS SCREEN SHOWS. Asked of the route rather than stored, so the shell
+     composer cannot drift out of step with the page under it, and an unknown route falls back to
+     the universal line rather than to a guess. */
+  _placeholderForRoute(route) {
+    return this._PLACEHOLDER[String(route || '')] || this._PLACEHOLDER.home;
+  },
+
   /* Retarget whichever composer is on screen. There is one at a time, and it is whichever of the
      three ids exists — so this asks rather than being told, and a screen with none is a no-op
      rather than an error. `aria-label` moves with it, because a placeholder a screen reader does
@@ -13923,7 +13953,19 @@ const MemberApp = {
      with its own composer is handled without anybody remembering to update a list here. */
   _OWN_COMPOSER_IDS: ['iq-object-input', 'iq-forum-input'],
 
-  _renderShellComposer() {
+  /* `route` IS PASSED IN by navigate, which is the only caller that knows where we have just
+     arrived. The first version read `window.AppState.currentPage` and silently got undefined on
+     every page: AppState is declared at the top level of js/data.js, which makes it script-scoped
+     rather than a property of window — the same thing that made an earlier assertion read
+     undefined and fail against a correct product. Falling back to the bare identifier, which IS
+     in scope here, so a caller that does not know the route still gets the right answer. */
+  _currentRoute(route) {
+    if (route) return route;
+    try { return (typeof AppState !== 'undefined' && AppState.currentPage) || 'home'; }
+    catch (_) { return 'home'; }
+  },
+
+  _renderShellComposer(route) {
     const host = document.getElementById('iq-shell-composer');
     if (!host) return;
     const yielded = this._OWN_COMPOSER_IDS.some(id => {
@@ -13942,9 +13984,21 @@ const MemberApp = {
        the microphone prompt once would have carried that line on every screen for the rest of the
        session, and there is no _sessionEnded case to protect here because that hides the whole
        composer above. */
-    if (document.getElementById('iq-composer-input')) {
+    const standing = document.getElementById('iq-composer-input');
+    if (standing) {
       const st = host.querySelector('.iq-voice-state');
       if (st && st.textContent) { st.textContent = ''; st.className = 'iq-voice-state'; }
+      /* AND THE INVITATION FOLLOWS THE PAGE. The bar is deliberately not rebuilt on navigation —
+         that is what protects a half-typed sentence — but the consequence was that the placeholder
+         was whatever the FIRST page to render it had asked for. Driven at 390px: Highs, Lows,
+         Inquiries, Focuses and Library all still read "What's on your mind?", because Home had
+         rendered the bar and nothing ever changed the word. Retargeted rather than re-rendered, so
+         the draft survives. */
+      const want = this._placeholderForRoute(this._currentRoute(route));
+      if (standing.placeholder !== want) {
+        standing.placeholder = want;
+        standing.setAttribute('aria-label', want);
+      }
       return;
     }
     /* There is no visibility flag to reset here any more. A rebuilt composer used to need
@@ -13959,7 +14013,11 @@ const MemberApp = {
          read as one product asking in different rooms rather than boxes labelled by different
          people. Short, because on a phone a long one truncates and an instruction cut off halfway
          is worse than no instruction at all. */
-      placeholder: this._PLACEHOLDER.home,
+      /* THE PAGE UNDER IT CHOOSES THE WORDS. The shell composer was hard-wired to Home's
+         invitation, so Library, Focuses, Highs, Lows and Inquiries all asked "What's on your
+         mind?" — true, but it wastes the one line on each page that could say what this room is
+         for. The intelligence is identical on all of them; only the invitation changes. */
+      placeholder: this._placeholderForRoute(this._currentRoute(route)),
       /* ── NO PRIVATE/PUBLIC MODE HERE, BY LAW ──────────────────────────────────────────────
          A "Private | Public" toggle used to sit on this row. It set `_wsShare`, which reached
          nothing: it was not in the turn body and no other code read it. A control that appears to
@@ -14012,9 +14070,10 @@ const MemberApp = {
     } catch (_) { /* the fallback height stands */ }
   },
 
-  _placeholderFor(kind) {
-    return this._PLACEHOLDER[String(kind || '').toLowerCase()] || this._PLACEHOLDER.home;
-  },
+  /* `_placeholderFor` LIVES BESIDE THE TABLES, above. A second copy stood here, and because a
+     later key wins in an object literal it was the one that ran — so an object thread would have
+     been given the BUCKET PAGE's invitation ("Tell me what you've noticed…") the moment those
+     keys changed meaning. Two owners for one answer is the shape this file keeps folding away. */
 
   _composerHTML({ id, placeholder, send, mic, state, attach = true, hint = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
@@ -14921,11 +14980,26 @@ const MemberApp = {
       if (d.conversationId && !about) this._rememberChat(d.conversationId);
       if (objectThread && d.conversationId && JSON.stringify(objectThread.about || null) === JSON.stringify(about)) objectThread.conversationId = d.conversationId;
       this._pendingAttachment = { id: d.materialId, name: file.name };
-      /* AND THE COMPOSER ASKS THE QUESTION THE ATTACHMENT RAISES. With a document in hand the
-         useful invitation is not "what's on your mind" — it is the one the person is about to
-         ask anyway. Presentation only: the same composer, the same send path, one word changed. */
-      this._composerAsk(this._PLACEHOLDER.attached);
-      done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
+      /* ATTACHING IS ANOTHER WAY OF SPEAKING, so the composer keeps inviting them to speak. It
+         used to switch to "What do you want to know?", which is the moment the product should
+         look LEAST like a search box: they have just shown IntelliQ something. */
+      this._composerAsk(this._OBJECT_PLACEHOLDER);
+      /* AND THE RECEIPT GOES. It read:
+             "Read 10 parts from IMG_1918.png. It is context for this conversation, not evidence
+              about you or your organisation."
+         Two things wrong with it, both named by the founder from a real phone.
+
+         "Read 10 parts" is the parser talking. How a file was segmented is machinery; a person
+         who attaches a screenshot wants to know it arrived and then wants to talk about it.
+
+         And "not evidence" had quietly become FALSE as a flat claim. It is not evidence YET —
+         but the person may say "use this as evidence", and the governed path for that exists.
+         A sentence that forecloses something the product supports teaches people not to ask.
+
+         The law itself is untouched and is not weakened by removing a sentence about it: material
+         still never reaches applyProposals, which is asserted behaviourally in
+         attachment-boundary-http-smoke rather than claimed in a receipt. */
+      done(`I can see ${esc(file.name)}.`);
     } catch (e) {
       /* AND A WAY BACK. An error card with no control is a dead end on the one surface where a
          person has already done the work of finding the file — the picker has been cleared, so
