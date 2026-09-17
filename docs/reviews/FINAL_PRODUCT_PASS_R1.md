@@ -153,19 +153,47 @@ those commits. They were **not** re-driven at this SHA.
 
 ```
 npm test                                  279 suites, 0 failed        EXIT 0
-pilot-coach-browser-check.js              94 passed, 0 failed         390px + 430px
 org-context-boundary-http-smoke.js        16 passed, 0 failed
 attachment-boundary-http-smoke.js         23 passed, 0 failed
 org-tree-authority-nested-smoke.js        30 passed, 0 failed
 onboarding-intelligence-http-smoke.js     21 passed, 0 failed
 ```
 
+All ten browser checks, run individually (they are not part of `npm test` — the truth layer is
+hermetic and must run with no browser binary):
+
+```
+pilot-coach-browser-check.js              94 passed,  0 failed     390px + 430px
+stack-browser-check.js                   114 passed,  0 failed
+settings-tiers-browser-check.js           41 passed,  0 failed
+priority-surface-browser-check.js         39 passed,  0 failed
+onboard-browser-check.js                  34 passed,  0 failed
+library-browser-check.js                  24 passed,  0 failed
+voice-output-browser-check.js             19 passed,  0 failed
+forum-share-browser-check.js              13 passed,  0 failed     see below
+chart-shape-browser-check.js              39 passed,  1 failed     pre-existing
+group-loop-browser-check.js               13 passed,  4 failed     pre-existing
+```
+
 Mobile: 390px and 430px, both clean across home, inquiry, focus, high, low, library, org tree and
 settings. No horizontal overflow at either width; the composer stays on screen and usable at both.
 
-**One pre-existing failure.** `chart-shape-browser-check.js` CS-R1b fails — and fails identically
-at the pinned starting SHA `2cdedd9`, verified in a clean worktree. It is not caused by this pass
-and is not part of `npm test`.
+**A check that could not run here at all, now fixed.** `forum-share-browser-check.js` was the only
+one of the ten not to pin its Chromium, falling back to `chromium.executablePath()` — which
+resolves to `chromium-1228` while this container has `chromium-1194`. The launch failed inside an
+unhandled rejection, so the process did not exit: it printed the error and **hung**. That is worse
+than failing, because a harness looping over the checks stops there and never reaches the rest —
+which is exactly what happened twice while running this gate. Pinned the way its nine siblings
+are, with `CHROMIUM_PATH` still winning when set. It passes 13/13.
+
+**Two pre-existing failures, both verified identical at the pinned starting SHA `2cdedd9`** in a
+clean worktree, and neither part of `npm test`:
+
+- `chart-shape-browser-check.js` CS-R1b — an empty chart space says nothing.
+- `group-loop-browser-check.js` GB-C1b / C2 / C2b, then a 30s click timeout that ends the run.
+
+Neither is caused by this pass. Both are real and both are worth somebody's time; `group-loop`'s
+is the more interesting of the two, because a panel that never opens is a coach-facing path.
 
 **And one red I pushed.** Commit `33baecb` went out with `npm test` failing: I chained
 `npm test | tail -3 && git commit`, which tests the exit status of `tail`. The failing guard was
@@ -197,6 +225,13 @@ others.
 
 **None that I found.** The defects this pass fixed were real and user-facing, and they are fixed.
 The items in §8 are unstarted work, not blockers: a coach can complete the full journey today.
+
+Two things a tester should have on their list, neither a blocker and neither mine:
+
+1. **`group-loop-browser-check` GB-C2** — the panel asking what the group will actually do does not
+   open, and the run ends on a click timeout. Pre-existing at `2cdedd9`. It is coach-facing, so it
+   is the first thing I would look at after this pass.
+2. **`chart-shape-browser-check` CS-R1b** — an empty chart space says nothing. Pre-existing.
 
 The one thing a tester should know going in: **the pilot runs models-off**, so the Composer's
 newly-connected org and language context only changes behaviour when a provider is reachable. Its

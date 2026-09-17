@@ -100,8 +100,17 @@ Object.assign(ai, {
       .find(x => x.actionType === 'share_to_forum');
     return { envelope: r.j, prop: p };
   };
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || chromium.executablePath(),
-    args: ['--no-sandbox'] });
+  /* PINNED, THE WAY ITS NINE SIBLINGS ARE. This alone fell back to
+     `chromium.executablePath()`, which resolves against the playwright package's expected build
+     rather than what is on the machine — here it asked for `chromium-1228` and the container has
+     `chromium-1194`. The launch then failed inside an unhandled rejection, so the process did not
+     exit: it printed the error and HUNG, which is worse than failing, because a harness that runs
+     the checks in a loop stops at this one and never reaches the rest.
+
+     `CHROMIUM_PATH` still wins when it is set, so a machine with a different build overrides it
+     the same way it always could. What changes is the fallback: the known path, not a guess. */
+  const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+  const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
