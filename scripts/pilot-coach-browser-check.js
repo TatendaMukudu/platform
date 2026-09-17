@@ -882,6 +882,83 @@ _rebuildEmailIndex();
       landed.visible);
     ok('PC-S8 …carrying the question that was actually asked', landed.carries);
 
+    /* ══ PC-T — NO PRIVACY CONTROL THAT DOES NOT WORK ══════════════════════════════════════════
+       The composer used to show a "Private | Public" pill next to every message. It set a flag
+       that reached nothing — not the request body, not any other reader — so it was a promise
+       about who could read you that the product had no way to keep.
+
+       Founder's law, and the reason it was removed rather than wired up: talking to IntelliQ is
+       private conversation; contributing to other people is a separate deliberate act with its own
+       audience, its own words and its own confirmation. A global public MODE is the wrong shape
+       even when it works, because sharing one sentence would silently change the audience of every
+       sentence after it.
+
+       The hermetic half of this lives in composer-privacy-law-http-smoke. This is the half that
+       can only be seen: what a person's eyes actually find on the row beneath the composer, on
+       every page it now appears on. */
+    console.log('\n  PC-T THE COMPOSER PROMISES NOTHING IT CANNOT KEEP');
+    const hintOn = async (route) => {
+      await coach.page.evaluate(r => navigate(r), route);
+      await coach.page.waitForTimeout(1000);
+      return coach.page.evaluate(() => {
+        const vis = el => { if (!el) return false; const c = getComputedStyle(el);
+          const b = el.getBoundingClientRect();
+          return b.height > 0 && b.width > 0 && c.display !== 'none' && c.visibility !== 'hidden'; };
+        const hint = document.querySelector('#iq-shell-composer .iq-composer-hint');
+        return {
+          toggle: !!document.getElementById('iq-vis'),
+          // Any control at all on this row that offers a public/share choice, however it is built.
+          publicWord: !!hint && /\bpublic\b|\bshare\b/i.test(hint.innerText || ''),
+          text: hint ? (hint.innerText || '').replace(/\s+/g, ' ').trim() : '(no hint row)',
+          hintVisible: vis(hint),
+        };
+      });
+    };
+    const hints = [];
+    for (const r of ['home', 'focus', 'notes', 'settings']) hints.push([r, await hintOn(r)]);
+    ok('PC-T1 no page offers a Private/Public toggle beside the composer',
+      hints.every(([, h]) => !h.toggle));
+    ok('PC-T2 …and nothing on that row offers to make a message public or shared',
+      hints.every(([, h]) => !h.publicWord));
+    /* AND IT DID NOT GO SILENT. Deleting the pill and saying nothing leaves a person guessing,
+       which is its own small dishonesty on a surface whose whole subject is who can read you. */
+    ok('PC-T3 …while the row still says plainly that this is private to them',
+      hints.every(([, h]) => h.hintVisible && /private to you/i.test(h.text)));
+    ok('PC-T4 …and still offers the explanation of who can see what',
+      hints.every(([, h]) => /who can see what i say here/i.test(h.text)));
+    if (!hints.every(([, h]) => !h.toggle && !h.publicWord && /private to you/i.test(h.text))) {
+      console.error('    ', JSON.stringify(hints));
+    }
+
+    /* THE OTHER HALF, AND THE ONE THAT MAKES THE REMOVAL SAFE RATHER THAN MERELY TIDY. A person
+       must still be able to contribute deliberately, so the object's own audience control has to
+       be on its own thread, where the thing being shared is in front of them. */
+    console.log('\n  PC-T5 AND THE DELIBERATE WAY TO SHARE IS STILL THERE');
+    const shareable = await coach.page.evaluate(async () => {
+      const r = await fetch('/api/me/focus', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + (JSON.parse(localStorage.getItem('iq_auth') || '{}').token || ''),
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'say something on the bus home after a loss' }) });
+      const j = await r.json().catch(() => null);
+      return j && j.focus && j.focus.id;
+    });
+    await coach.page.evaluate(i => MemberApp.openObjectThread('focus', i), String(shareable)).catch(() => {});
+    await coach.page.waitForTimeout(1800);
+    const onThread = await coach.page.evaluate(() => {
+      const bar = document.querySelector('.iqt-bar');
+      const aud = document.querySelector('.iqt-forum[onclick*="openAudience"]');
+      const vis = el => { if (!el) return false; const c = getComputedStyle(el);
+        const b = el.getBoundingClientRect();
+        return b.height > 0 && b.width > 0 && c.display !== 'none' && c.visibility !== 'hidden'; };
+      return { hasAudience: !!aud && vis(aud),
+        tap: aud ? Math.round(aud.getBoundingClientRect().height) : 0,
+        barHTML: bar ? (bar.innerHTML || '').slice(0, 400) : '(no bar)' };
+    });
+    ok('PC-T5 the object a person owns still carries its own audience control, on its own thread',
+      onThread.hasAudience);
+    ok('PC-T6 …and it is still reachable with a thumb', onThread.tap >= 36);
+    if (!onThread.hasAudience) console.error('    ', onThread.barHTML);
+
   } catch (e) {
     fail++; console.error('  FAIL pilot walkthrough threw:', e && e.stack);
   }
