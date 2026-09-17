@@ -214,6 +214,24 @@ ok('M9 attaching uploads and does no more — the client contributes nothing on 
   && !/\/evidence/.test(wsAttachFn));
 ok('M9a …and the card it shows makes no claim about what the file proves',
   !/is evidence/i.test(wsAttachFn) && !/proves/i.test(wsAttachFn));
+
+/* ── M10 — A SUCCESSFUL ATTACHMENT SAYS NOTHING AT ALL ─────────────────────────────────────
+   The file is already in the thread as the PERSON'S OWN message, because attaching is another way
+   of speaking. A second bubble from IntelliQ confirming it arrived is the product narrating its
+   own plumbing — first "Read 10 parts from IMG_1918.png", then "I can see IMG_1918.png". Both are
+   receipts. Somebody who attaches a screenshot and writes "look at all those draws" should get an
+   answer about the draws.
+
+   The waiting bubble is NOT removed: a phone on a stadium connection needs to see that something
+   is happening, and on failure the error and its retry are the only way back. Asserting both
+   halves, because "say nothing" is only right for the case where there is nothing to say. */
+ok('M10 a successful attachment removes the waiting bubble rather than replacing it with a receipt',
+  /const quietly = \(\) =>/.test(wsAttachFn) && /p\.remove\(\)/.test(wsAttachFn)
+  && !/I can see \$\{/.test(wsAttachFn));
+ok('M10b …while the waiting state still exists, because an upload in flight must be visible',
+  /iq-attach-pending/.test(wsAttachFn) && /Reading \$\{esc\(file\.name\)\}/.test(wsAttachFn));
+ok('M10c …and a FAILED attachment still speaks, because an error with no words is a dead end',
+  /done\(/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
   /\/classification/.test(appJs));
 

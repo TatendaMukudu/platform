@@ -14928,6 +14928,24 @@ const MemberApp = {
     if (thread) thread.scrollTop = thread.scrollHeight;
     fileInput.value = '';
     const done = (html) => { const p = document.getElementById('iq-attach-pending'); if (p) { p.removeAttribute('id'); p.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
+    /* ── AND ON SUCCESS, NOTHING IS SAID AT ALL ────────────────────────────────────────────────
+       The file is already in the thread as the PERSON'S OWN message, which is what attaching is:
+       another way of speaking. A second bubble from IntelliQ announcing that the file arrived is
+       the product narrating its own plumbing — first as "Read 10 parts from IMG_1918.png", then,
+       after that was cut back, as "I can see IMG_1918.png". Both are the same shape: a receipt.
+
+       Somebody who attaches a screenshot and writes "look at all those draws" should get an answer
+       about the draws, not an acknowledgement followed by an answer.
+
+       The waiting bubble stays while the upload is in flight, because a phone on a stadium
+       connection needs to see that something is happening — and it stays on FAILURE, where the
+       error and its retry are the only way back. It is removed only when there is nothing left to
+       say. */
+    const quietly = () => {
+      const p = document.getElementById('iq-attach-pending');
+      if (p) p.remove();
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    };
     try {
       if (typeof AttachmentHandler === 'undefined') throw new Error('The uploader isn’t available right now.');
       const parsed = await AttachmentHandler.process(file);
@@ -15009,7 +15027,7 @@ const MemberApp = {
          The law itself is untouched and is not weakened by removing a sentence about it: material
          still never reaches applyProposals, which is asserted behaviourally in
          attachment-boundary-http-smoke rather than claimed in a receipt. */
-      done(`I can see ${esc(file.name)}.`);
+      quietly();
     } catch (e) {
       /* AND A WAY BACK. An error card with no control is a dead end on the one surface where a
          person has already done the work of finding the file — the picker has been cleared, so
