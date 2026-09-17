@@ -955,6 +955,32 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    home indicator. */
 .iq-composer-wrap{padding-bottom:calc(.35rem + env(safe-area-inset-bottom))}
 
+/* ── THE SHELL COMPOSER IS PINNED TO THE VIEWPORT, NOT TO THE PAGE ────────────────────────────
+   The composer in an object thread or the Forum is `position:sticky` and belongs inside that
+   thread's own scroll flow, which is right: it follows the conversation it is part of.
+
+   The shell one is not part of any page, and sticky does not hold it. `.page-content` declares
+   `overflow-y:auto` but `.main-wrap` is `min-height:100vh` rather than a fixed height, so the
+   page-content box grows with its content and the BODY does the scrolling. A sticky element then
+   pins to the bottom of a container that is itself taller than the screen. Measured on Settings
+   at 390x844: bottom = 934, ninety pixels below the fold, present in the DOM and unreachable
+   without scrolling to the end of the page.
+
+   Fixed rather than restructuring the scroll model: giving `.main-wrap` a fixed height would
+   change how every page in the app scrolls, which is not a change to make for a bar. The gutter
+   matches `.page-content`'s 1.5rem so it lines up with the content above it.
+
+   `--iq-shell-composer-h` is the room reserved below the page so the last card is never hidden
+   behind the bar. It is a generous constant rather than a measured height, because measuring
+   would make the page depend on the bar's rendering and reflow whenever it grows a line. */
+:root{--iq-shell-composer-h:104px}
+#iq-shell-composer .iq-composer-wrap{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  padding:0.5rem 1.5rem calc(.35rem + env(safe-area-inset-bottom));
+}
+/* The room. Applied to the scroll box rather than to each page, so a page cannot forget it. */
+.page-content{padding-bottom:calc(1.5rem + var(--iq-shell-composer-h))}
+
 /* ── ONE-TIME TECHNICAL SETUP, COLLAPSED ──────────────────────────────────────────────────────
    Settings held its integration wiring open in the tab an administrator opens to change the
    organisation's name — data URLs, auth headers, JSON paths, OAuth client secrets, a redirect

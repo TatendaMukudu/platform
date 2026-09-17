@@ -759,6 +759,12 @@ function navigate(dest){
 
   // Hydrate any line-icon slots the page just rendered.
   if (typeof hydrateIcons === 'function') hydrateIcons(pg || document);
+
+  /* 6. AND THE COMPOSER IS STILL THERE. It lives in the shell rather than in a page, so this is
+     not a re-render — it is the one moment that can decide whether this page brought its own
+     composer, which is a question only the rendered page can answer. It runs AFTER step 5 for
+     that reason. */
+  try { if (typeof MemberApp !== 'undefined' && MemberApp._renderShellComposer) MemberApp._renderShellComposer(); } catch (_) {}
 }
 
 const PAGE_TITLES = {
@@ -11263,26 +11269,12 @@ const MemberApp = {
       <!-- THE THING YOU AGREED TO TRY, asked when you come back. Placed INSIDE the conversation
            area's flow rather than in a sidebar, because it is IntelliQ speaking, not a widget. -->
       <div id="iq-continuity" aria-live="polite"></div>
-      <div id="iq-brief" aria-live="polite"></div>
-      ${/* THE BAR IS THE LAST THING ON THE PAGE. It used to sit inside the chat box, which put
-            it ABOVE the card — so the one control a person always needs was in the middle of
-            the screen with content underneath it. Founder: "that composer can sit at the very
-            bottom of the page". It is sticky, so it stays at the bottom of the viewport
-            whatever is above it, which is where a thumb already is. */ ''}
-      ${this._composerHTML({ id: 'iq-composer-input',
-        /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
-           "Type anything" describes the INPUT rather than inviting the person to use it, and an
-           instruction about a text box is the least interesting thing a blank composer could say.
-           The placeholders are held together in `_PLACEHOLDER` so the four screens that offer a
-           composer read as one product asking in different rooms rather than four boxes that were
-           labelled by four different people. Short, because on a phone a long one truncates and an
-           instruction cut off halfway is worse than no instruction at all. */
-        placeholder: this._PLACEHOLDER.home,
-        send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
-        <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
-          title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
-        <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
-      </div>` })}`;
+      <div id="iq-brief" aria-live="polite"></div>`;
+    /* THE BAR IS NOT PART OF THIS PAGE ANY MORE. It was the last thing in this template, which
+       made it Home's — and a person on Focus, Inquiries, Highs, Lows, Library, People or Settings
+       had nothing to type into and no sign that IntelliQ was still there. It lives in the shell
+       now; see _renderShellComposer. */
+    this._renderShellComposer();
     // HOME IS ONE QUESTION. Founder decision, September 2026: greeting, the single
     // highest-priority thing IntelliQ wants to know, the logo, and the bar. Nothing else may
     // ever appear here. Everything the old home crowded in — the attention feed, the inquiry
@@ -11328,6 +11320,17 @@ const MemberApp = {
       const j = await r.json();
       const msgs = (j && j.messages) || [];
       if (!msgs.length) return;
+      /* AND THE THREAD IS STILL EMPTY NOW, not just when this started. The guard above runs
+         BEFORE the fetch, so anything written while the request was in flight was overwritten by
+         the line below — a restore of the same conversation, minus whatever the person had just
+         said. Reachable by typing quickly on a freshly opened Home, and much easier to hit since
+         asking from another page navigates Home and writes immediately.
+
+         Re-checking the live element rather than the captured `box`: a navigation during the
+         fetch replaces the container, and writing into the detached one would silently do
+         nothing. */
+      const live = document.getElementById('iq-conversation');
+      if (!live || live !== box || box.children.length) return;
       const esc = s => this._escape(String(s == null ? '' : s));
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
@@ -11562,6 +11565,9 @@ const MemberApp = {
         : '') +
       (parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(i => this._objectCard(i, kind)).join('')}</div>` : '');
     if (kind === 'low') this._renderWaiting();
+    // Coming BACK from a thread to the list: the thread's own composer has just been replaced by
+    // this list, so the shell composer takes the surface again.
+    this._renderShellComposer();
   },
 
   /* ── WAITING ON YOU ───────────────────────────────────────────────────────────────────────
@@ -12618,6 +12624,9 @@ const MemberApp = {
       this._renderMaterial(kind, objectId);
       this._renderReading(kind, objectId, scope);
       this._renderRelated(kind, objectId);
+      // This page has just grown its OWN composer, asking about this object and sending to this
+      // thread. The shell one stands down — it renders after navigation, which is before this.
+      this._renderShellComposer();
     } catch (e) {
       /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
          answered for itself. Saying so, and still offering both a retry and a way back, is what
@@ -13798,6 +13807,10 @@ const MemberApp = {
         ${this._composerHTML({ id: 'iq-forum-input', placeholder: this._PLACEHOLDER.forum,
           send: 'MemberApp.forumSend()', mic: 'iqf-mic', state: 'iqf-voice-state', attach: false })}
       </div>`;
+    /* The room has its own composer, and it sends to the room. The shell one is private to
+       IntelliQ — two boxes on this screen would be the single most costly ambiguity in the
+       product, because the difference between them is who reads what you type. */
+    this._renderShellComposer();
   },
 
   async forumSend() {
@@ -13888,6 +13901,70 @@ const MemberApp = {
       const el = document.getElementById(id);
       if (el) { el.placeholder = text; el.setAttribute('aria-label', text); return; }
     }
+  },
+
+  /* ── THE COMPOSER THAT NAVIGATION CANNOT TAKE AWAY ──────────────────────────────────────────
+     Founder's law: ever-present, not ever-dominant. Driven as a new member at 390px it was
+     neither — it was rendered inside #page-home's template, so it was the main event on Home and
+     did not exist on the other seven pages. Nothing was broken; the bar simply belonged to a page
+     instead of to the product, and leaving a page took it with you.
+
+     It renders into #iq-shell-composer, a sibling of <main>, so it survives navigation. Two rules
+     decide whether it is on screen, and both are about not asking a question twice:
+
+       · a page that brought its OWN composer wins. An object thread and the Forum each render one
+         (iq-object-input, iq-forum-input) and each sends somewhere different, so two inputs on one
+         screen is a genuine question about which is listening. The shell one stands down.
+       · a session that has ended stands it down, because _sessionEnded's job is to stop a person
+         writing something nothing will carry.
+
+     SIGNED OUT IS NOT CHECKED HERE, deliberately. The first version of this asked
+     `Auth.currentUser` and the composer then failed to render on every page including Home —
+     that property is falsy in the ordinary signed-in case, so the guard was simply wrong. It was
+     also unnecessary: the sign-in screen hides #app outright, and this lives inside it.
+
+     It ASKS the DOM rather than being told the route, the same way _composerAsk does. A new page
+     with its own composer is handled without anybody remembering to update a list here. */
+  _OWN_COMPOSER_IDS: ['iq-object-input', 'iq-forum-input'],
+
+  _renderShellComposer() {
+    const host = document.getElementById('iq-shell-composer');
+    if (!host) return;
+    const yielded = this._OWN_COMPOSER_IDS.some(id => {
+      const el = document.getElementById(id);
+      return !!(el && el.offsetParent !== null);
+    });
+    if (yielded || this._sessionOver) { host.innerHTML = ''; return; }
+    /* Already up: re-rendering would throw away whatever is half-typed in it. But the composer
+       used to be rebuilt by every navigation, and one thing depended on that — the voice status
+       line, which describes a MICROPHONE SESSION rather than the page. Navigation cancels every
+       live session (see navigate step 3b), so the sentence about it has to go at the same moment.
+
+       Caught by PC-O2 measuring 31px where an empty line should reserve nothing: "Microphone
+       access was declined. You can allow it in your browser settings, or just type." was still
+       sitting under the composer several pages later. Not a test artifact — a person who declines
+       the microphone prompt once would have carried that line on every screen for the rest of the
+       session, and there is no _sessionEnded case to protect here because that hides the whole
+       composer above. */
+    if (document.getElementById('iq-composer-input')) {
+      const st = host.querySelector('.iq-voice-state');
+      if (st && st.textContent) { st.textContent = ''; st.className = 'iq-voice-state'; }
+      return;
+    }
+    host.innerHTML = this._composerHTML({ id: 'iq-composer-input',
+      /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
+         "Type anything" describes the INPUT rather than inviting the person to use it, and an
+         instruction about a text box is the least interesting thing a blank composer could say.
+         The placeholders are held together in `_PLACEHOLDER` so the screens that offer a composer
+         read as one product asking in different rooms rather than boxes labelled by different
+         people. Short, because on a phone a long one truncates and an instruction cut off halfway
+         is worse than no instruction at all. */
+      placeholder: this._PLACEHOLDER.home,
+      send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
+        <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
+          title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
+        <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
+      </div>` });
   },
 
   _placeholderFor(kind) {
@@ -14554,6 +14631,22 @@ const MemberApp = {
     const isRetry = retryText != null;
     const text = isRetry ? String(retryText) : (input?.value || '').trim();
     if (!text || this._wsSending) return;                 // guard: no empty send, no double-submit
+
+    /* THE ANSWER HAS TO LAND WHERE THEY CAN SEE IT. The composer is in the shell now, so it can be
+       used from Library, Settings, the Org Tree or any bucket page — but the conversation it
+       writes into (#iq-conversation) lives on Home. Driven from Library: the turn reached the
+       server, the reply rendered correctly, and the person saw nothing at all, because it was
+       rendered into a page that was not on screen. A send that appears to do nothing is worse
+       than a composer that was never offered.
+
+       So asking takes you to the conversation. Only when it is actually off screen — on Home this
+       is a no-op — and only for a real send, never a retry, which is already in the thread. */
+    if (!isRetry) {
+      const convo = document.getElementById('iq-conversation');
+      if (!convo || convo.offsetParent === null) {
+        try { navigate('home'); } catch (_) {}
+      }
+    }
     this._wsSending = true;
     const sendBtn = document.getElementById('iq-send');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('is-loading'); }

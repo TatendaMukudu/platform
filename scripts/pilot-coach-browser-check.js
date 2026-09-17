@@ -735,10 +735,10 @@ _rebuildEmailIndex();
       return { txt, ownNode: /First Team/.test(txt),
         contradiction: /(\d+) people[^|]*?·\s*(\d+) in subtree/.test(txt) };
     });
-    ok('PC-P1 their own node is on the screen without anybody tapping a chevron', tree.ownNode);
+    ok('PC-S1 their own node is on the screen without anybody tapping a chevron', tree.ownNode);
     /* THE COUNT IS CONSISTENT WITH ITSELF. A row saying more people than its own subtree holds is
        the double-count, and it is the version a reader notices without being able to explain. */
-    ok('PC-P2 …and no row claims more people than the subtree it sits in', await coach.page.evaluate(() => {
+    ok('PC-S2 …and no row claims more people than the subtree it sits in', await coach.page.evaluate(() => {
       const txt = (document.getElementById('page-people') || {}).innerText || '';
       for (const line of txt.split('\n')) {
         const p = line.match(/(\d+)\s+(?:person|people)/);
@@ -790,6 +790,97 @@ _rebuildEmailIndex();
     ok('PC-M3 …and going back to 390px still does not scroll sideways',
       await coach.page.evaluate(() =>
         document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+
+    /* ══ PC-P — THE COMPOSER IS THE PRODUCT'S DOOR, ON EVERY PAGE ═══════════════════════════════
+       Founder's law: ever-present, not ever-dominant. Driven as a new member at 390px it was
+       neither. It was rendered inside #page-home's own template, so it was the main event on Home
+       and did not exist on Focus, Inquiries, Highs, Lows, Library, People or Settings — seven
+       pages on which the way back to IntelliQ was to notice the menu and navigate Home.
+
+       Measured rather than asserted about markup: an element in the DOM is not a composer a thumb
+       can reach, and the first version of this fix put one on every page ninety pixels below the
+       fold. */
+    console.log('\n  PC-S THE COMPOSER, ON EVERY PAGE A MEMBER CAN OPEN');
+    const composerOn = async (route) => {
+      await coach.page.evaluate(r => navigate(r), route);
+      await coach.page.waitForTimeout(1100);
+      return coach.page.evaluate(() => {
+        const el = document.getElementById('iq-composer-input');
+        if (!el) return { there: false };
+        const c = getComputedStyle(el); const b = el.getBoundingClientRect();
+        return {
+          there: b.height > 0 && b.width > 0 && c.display !== 'none' && c.visibility !== 'hidden',
+          // ON SCREEN, not merely in the layout. Sticky inside a container taller than the
+          // viewport puts it past the fold, which is how the first attempt failed.
+          onScreen: b.bottom <= window.innerHeight + 1 && b.top >= 0,
+          placeholder: el.placeholder || '',
+          overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        };
+      });
+    };
+    const ROUTES = ['home', 'focus', 'inquiry', 'high', 'low', 'notes', 'people', 'settings'];
+    const seen = [];
+    for (const r of ROUTES) seen.push([r, await composerOn(r)]);
+    ok('PC-S1 every page a member can open offers the composer',
+      seen.every(([, s]) => s.there));
+    ok('PC-S2 …within the screen rather than below the fold',
+      seen.every(([, s]) => s.onScreen));
+    ok('PC-S3 …asking the same question in the same words everywhere',
+      seen.every(([, s]) => /What.s on your mind\?/.test(s.placeholder)));
+    ok('PC-S4 …and no page scrolls sideways because of it',
+      seen.every(([, s]) => !s.overflow));
+    if (!seen.every(([, s]) => s.there && s.onScreen)) {
+      console.error('    ', JSON.stringify(seen.filter(([, s]) => !(s.there && s.onScreen))));
+    }
+
+    /* THE OTHER HALF, AND THE ONE THAT MAKES THIS SAFE. Two composers on one screen is a question
+       about which one is listening, and on the Forum the answer decides who reads what you type.
+       A page that brought its own wins; the shell one stands down and comes back afterwards. */
+    const fid = await coach.page.evaluate(async () => {
+      const r = await fetch('/api/me/focus', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + (JSON.parse(localStorage.getItem('iq_auth') || '{}').token || ''),
+          'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Talk earlier in the build-up' }) });
+      const j = await r.json().catch(() => null);
+      return j && j.focus && j.focus.id;
+    });
+    const composerCount = () => coach.page.evaluate(() => {
+      const vis = el => { if (!el) return false; const c = getComputedStyle(el); const b = el.getBoundingClientRect();
+        return b.height > 0 && b.width > 0 && c.display !== 'none' && c.visibility !== 'hidden'; };
+      return ['iq-composer-input', 'iq-object-input', 'iq-forum-input']
+        .filter(id => vis(document.getElementById(id)));
+    });
+    await coach.page.evaluate(i => MemberApp.openObjectThread('focus', i), String(fid)).catch(() => {});
+    await coach.page.waitForTimeout(1800);
+    const inThread = await composerCount();
+    ok('PC-S5 inside an object thread there is exactly one composer, and it is the thread\'s own',
+      inThread.length === 1 && inThread[0] === 'iq-object-input');
+    await coach.page.evaluate(() => MemberApp._renderBucketPage('focus')).catch(() => {});
+    await coach.page.waitForTimeout(1500);
+    const backOut = await composerCount();
+    ok('PC-S6 …and coming back out, the shell composer takes the surface again',
+      backOut.length === 1 && backOut[0] === 'iq-composer-input');
+
+    /* AND ASKING FROM ANOTHER PAGE PUTS THE ANSWER WHERE THEY CAN SEE IT. The conversation lives
+       on Home, so the first version of this sent the turn, rendered the reply correctly, and
+       showed the person nothing — the reply went into a page that was not on screen. */
+    await coach.page.evaluate(() => navigate('notes'));
+    await coach.page.waitForTimeout(1100);
+    await coach.page.fill('#iq-composer-input', 'What should I be paying attention to?');
+    await coach.page.click('#iq-shell-composer .iq-send');
+    await coach.page.waitForTimeout(2600);
+    const landed = await coach.page.evaluate(() => {
+      const c = document.getElementById('iq-conversation');
+      /* WHAT MATTERS IS THAT THEY CAN SEE IT, not which route name the app is on. The first
+         version of this also asserted AppState.currentPage === 'home' and failed while the
+         product was correct -- AppState is not reachable as a window property here, so the check
+         was reading undefined. The visible conversation IS the law. */
+      return { visible: !!(c && c.offsetParent !== null),
+        carries: !!(c && /paying attention to/.test(c.innerText || '')) };
+    });
+    ok('PC-S7 asking from another page lands on the visible conversation rather than nowhere',
+      landed.visible);
+    ok('PC-S8 …carrying the question that was actually asked', landed.carries);
 
   } catch (e) {
     fail++; console.error('  FAIL pilot walkthrough threw:', e && e.stack);
