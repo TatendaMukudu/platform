@@ -192,7 +192,21 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
       !/o_p1|ev_o_p1|turnId/.test(groupText));
 
     console.log('\n  C — A LEADER SETS A FOCUS OUT OF ONE OF THEM');
-    const startBtn = await page.$('.iqg-inq-row button');
+    /* NAMED BY WHAT IT DOES, NOT BY WHERE IT SITS. This was `.iqg-inq-row button` — "the first
+       button in the row" — and it worked until the row gained one. A later pass made the question's
+       own title a door to its thread (the fourth-inquiry reachability work), so the first button in
+       the row became the title, and this grabbed that instead: C1 still passed because A button
+       existed, C1b failed because the title is not "Work on this as a group", the click opened the
+       inquiry thread rather than the start panel, and C2/C2b then failed against a panel that was
+       never going to appear. The run ended on a 30-second click timeout.
+
+       So the product was right and the selector was stale — and the stale selector is the
+       interesting part, because a POSITIONAL selector does not fail when the UI changes, it
+       silently retargets and then reports something false about a control nobody touched. Naming
+       the handler is strictly stronger than counting buttons: `startGroupFocus` is the capability
+       under test, and if that button stops existing this goes red immediately instead of quietly
+       testing whatever moved into first place. */
+    const startBtn = await page.$('.iqg-inq-row button[onclick*="startGroupFocus"]');
     ok('GB-C1 a leader is offered the control that starts one', !!startBtn);
     ok('GB-C1b …and it says what it does, in the group\'s language',
       /Work on this as a group/i.test(await startBtn.evaluate(el => el.textContent)));
@@ -233,8 +247,21 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
     ok('GB-C6b …and says it came from an open inquiry', /from an open inquiry/i.test(groupAfterSet));
 
     console.log('\n  D — AND WHAT CAME OF IT IS RECORDED');
+    /* FOUR WORDS, NOT THREE, AND THE CHANGE WAS THE PRODUCT GETTING MORE HONEST. This asserted
+       three and clicked index 2 for "too tangled to tell". The group vocabulary was corrected
+       earlier on this branch: it had been `helped, no_change, unclear` — where `helped` is the
+       PERSONAL focus vocabulary, so `ai/team-state.js` coerced it to `unclear` and every coach
+       who pressed "It helped" recorded "too tangled to tell". And `worse` was never offered at
+       all, so a group could record good news or no news and never that something made things
+       worse.
+
+       So the row is now better / no_change / worse / unclear, index 2 is `worse`, and a test
+       clicking by POSITION would have recorded the opposite of what it claimed to record while
+       still reporting green on the assertions after it. Selected by handler below, for the same
+       reason the start button now is. */
     const outBtns = await page.$$('.iqg-outcome-btns button');
-    ok('GB-D1 three outcome words are offered', outBtns.length === 3);
+    ok('GB-D1 all four outcome words are offered, including the one that says it got worse',
+      outBtns.length === 4);
     const outLabels = await Promise.all(outBtns.map(b => b.evaluate(el => el.textContent.trim())));
     ok('GB-D1b …including "too tangled to tell", which is a first-class answer rather than a failure to answer',
       outLabels.some(l => /tangled/i.test(l)));
@@ -243,7 +270,11 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
       return true;
     })());
     const focusId = afterSet.j.focus.focusId;
-    await outBtns[2].click();                                   // "Too tangled to tell"
+    // The one that MEANS unclear, named by the value it records rather than by where it sits.
+    const unclearBtn = await page.$('.iqg-outcome-btns button[onclick*="\'unclear\'"]');
+    ok('GB-D2b the "too tangled" control records `unclear` and is found by what it records',
+      !!unclearBtn);
+    await unclearBtn.click();
     await page.waitForTimeout(1600);
     const afterOutcome = await api('GET', '/api/group/first/state');
     ok('GB-D3 recording it reaches the server',
@@ -264,7 +295,10 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
       !/because of this focus|the focus worked|caused by|led to the improvement|proved/i.test(closedText));
 
     console.log('\n  E — AND THE LOOP RUNS AGAIN');
-    const rows2 = await page.$$('.iqg-inq-row button');
+    // Same correction as C1: the row holds a title-door AND a work-on-this control, so counting
+    // buttons counts two. What "still there to work on" means is that the control that starts one
+    // is still offered, for exactly one inquiry.
+    const rows2 = await page.$$('.iqg-inq-row button[onclick*="startGroupFocus"]');
     ok('GB-E1 the inquiry is still there to work on again', rows2.length === 1);
     await rows2[0].click();
     await page.waitForTimeout(400);
@@ -308,7 +342,21 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
       ((document.querySelector('.iq-group-thread') || {}).innerText || '').trim());
     ok('GB-F1 a member of the group can open it and read the same loop',
       /Press shape/.test(memberText) && /Press higher instead/.test(memberText));
-    ok('GB-F2 …and is offered no control to set a focus', (await mpage.$$('.iqg-inq-row button')).length === 0);
+    /* THE AUTHORITY HALF, AND IT NEEDED SPLITTING IN TWO. This asserted that a member sees NO
+       button in the row, which was true when the row held exactly one control and that control
+       was the leader's. It is not the law. The law is that a member may not SET A FOCUS — and
+       reading the question is something every member of the group is entitled to do, so the
+       title-door that a later pass added is correct and this assertion was wrong the moment it
+       appeared.
+
+       Counting buttons cannot tell those apart. Both halves are now asserted separately: the
+       leader-only control is absent, and the read affordance everybody gets is present. The
+       second half is what stops this passing again by the product accidentally hiding the whole
+       row from members, which would look identical to a count of zero. */
+    ok('GB-F2 …and is offered no control to set a focus, which is the leader\'s alone',
+      (await mpage.$$('.iqg-inq-row button[onclick*="startGroupFocus"]')).length === 0);
+    ok('GB-F2b …while still being able to open the question itself, which is everybody\'s',
+      (await mpage.$$('.iqg-inq-row button[onclick*="openObjectThread"]')).length >= 1);
     ok('GB-F3 …nor to record an outcome', (await mpage.$$('.iqg-outcome-btns button')).length === 0);
     ok('GB-F4 …and is told who does, rather than shown a dead control or nothing at all',
       /A leader of this group records what came of it/i.test(memberText));
