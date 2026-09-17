@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `b8d2c9e0e66cfdad9ecee5fe32cbd7286955092b`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
+**Written against:** `4da5140` (see the note in §11; restamped by the privacy correction). **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -366,10 +366,21 @@ decides what lands.
 >   filing refusal must be identical for an id that never existed and a real id belonging to
 >   another team, or the refusal enumerates their shelf one guess at a time.
 >
-> It also leaves **one open question for the founder**, in §4 of that report: the composer's
-> Private/Public button does not reach the turn. `_wsShare` is set by `toggleVisibility` and read
-> nowhere else. Giving it an effect is a privacy-law decision, so it was reported rather than
-> changed. The class that links these rounds is the same one §8 and §10 name, arrived at from
+> That report left one open question — the composer's Private/Public button reached nothing — and
+> the founder has since **decided it**, in `docs/reviews/COMPOSER_PRIVACY_CORRECTION_R1.md`:
+>
+> - **Talking to IntelliQ is not contributing to the organisation.** The generic Composer is the
+>   person's own private conversation, always, with no visibility mode to get wrong. The
+>   Private/Public pill, `toggleVisibility` and `_wsShare` are **gone** — removed rather than wired
+>   up, because a global public mode means sharing one sentence silently changes the audience of
+>   every sentence after it.
+> - **Contributing is a separate deliberate act.** `share_to_forum` (audience, exact words,
+>   confirmation), `openAudience` on an object's own thread, `POST /api/me/focus/:id/visibility`
+>   and `/api/me/audiences` are all untouched and all asserted.
+>
+> `composer-privacy-law-http-smoke.js` holds the law, including the injection test: a turn that
+> asserts `visibility: 'public'` is read as the ordinary private turn it is, so the mode cannot be
+> reintroduced from a client. The class that links these rounds is the same one §8 and §10 name, arrived at from
 a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
 or something false on a real screen.**
 

@@ -1,7 +1,7 @@
 # Composer privacy correction — report
 
 **STARTING SHA** `4995d788b9be6a59bfc7cd9a060d34ffacf9c94e` (fetched from the remote and pinned;
-matched the expected `4995d78`) · **ENDING SHA** _(filled at the end)_
+matched the expected `4995d78`) · **ENDING SHA** `4da5140`
 **Branch** `gpt/ab-decision-spine-r1` · **Not merged.**
 
 One correction, not a pass. Nothing was designed, added or reorganised.
