@@ -91,6 +91,30 @@ const server = app.listen(0, async () => {
     ok('A6 …nor the Ndebele speaker as Shona', decided('nd1') !== 'sn');
     ok('A7 …and neither is told to reply in the other\'s language',
       !/Reply in Ndebele/.test(tellsModel('sn1')) && !/Reply in Shona/.test(tellsModel('nd1')));
+    /* A1-A7 TURN ON TWO SENTENCES, AND TWO SENTENCES ARE NOT A PROPERTY. Moving one Shona word
+       into the Ndebele list left all of them green, because the remaining words still carried the
+       fixture — so the discrimination was asserted only as far as this fixture happened to
+       exercise it. Two sharper checks below: the lists may not overlap at all, and a battery of
+       sentences in each language must each land on their own. */
+    const { STOPWORDS } = language;
+    const shared = STOPWORDS.sn.filter(w => STOPWORDS.nd.includes(w));
+    ok('A7b the two word lists share no word at all, so neither can score for the other',
+      shared.length === 0);
+    if (shared.length) console.error('     shared:', shared.join(', '));
+    const SN_BATTERY = [
+      'Ndinofunga kuti vanhu vedu havasi kutaura zvakanaka pamwe',
+      'Hapana chinhu chakanaka asi ini ndinoda kuti tigadzirise izvi zvino',
+      'Tinofanira kutaura zvakare nokuti izvi zvakaoma kwazvo kwete',
+    ];
+    const ND_BATTERY = [
+      'Ngicabanga ukuthi abantu bethu kabakhulumi kuhle njalo lapho',
+      'Akula lutho oluhle kodwa mina ngithi sithi silungise lokhu manje',
+      'Kumele sikhulume njalo ngoba lokhu kunzima kakhulu hatshi',
+    ];
+    ok('A7c three different Shona sentences each land on Shona',
+      SN_BATTERY.every(t => (language.detect(t) || {}).code === 'sn'));
+    ok('A7d …and three different Ndebele sentences each land on Ndebele',
+      ND_BATTERY.every(t => (language.detect(t) || {}).code === 'nd'));
     /* THE CONTROL. Everything above would pass against a detector that answers "Shona" to
        everything, so English must still be English and still add nothing. */
     await turn(ENGLISH, 'en1');
