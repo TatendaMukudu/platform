@@ -652,6 +652,64 @@ _rebuildEmailIndex();
     ok('PC-N3 …with what the record DOES establish still said plainly where there is a record',
       sawProvenance);
 
+    /* ══ O — THE COMPOSER IS EVER-PRESENT, NOT EVER-DOMINANT ══════════════════════════════
+       The founder's report was that it looked enormous, and measurement agreed: at rest the wrap
+       was 154px on a 390px screen -- 18% of the viewport -- of which the INPUT was 61px and the
+       furniture around it was 93px. Most of what a person saw before typing a word was chrome.
+
+       The empty `.iq-voice-state` was reserving ~20px under every composer in the app for a status
+       line that only fills while the microphone is live. It now collapses when empty and restores
+       the instant it has something to say, so nothing is hidden -- there was nothing to hide.
+
+       WHAT IS NOT REDUCED, AND WHY. The remaining band is the audience row, and it is 44px because
+       `@media (max-width:640px)` sets `min-height:44px` on every tap target on a phone. That rule
+       was added deliberately and shrinking a control to make a screen look tidier is trading a
+       real accessibility property for a visual one. So the floor here is the input plus one
+       accessible row, and this asserts the product stays at that floor rather than drifting back
+       above it. */
+    console.log('\n  O — THE COMPOSER AT REST, AND WHEN IT GROWS');
+    await coach.page.evaluate(() => navigate('home'));
+    await coach.page.waitForTimeout(1600);
+    const rest = await coach.page.evaluate(() => {
+      const w = document.querySelector('.iq-composer-wrap');
+      const ta = document.getElementById('iq-composer-input');
+      const st = document.querySelector('.iq-voice-state');
+      return { vh: window.innerHeight, wrap: Math.round(w.getBoundingClientRect().height),
+        state: Math.round(st.getBoundingClientRect().height), ph: ta.placeholder };
+    });
+    ok('PC-O1 at rest it takes under a fifth of the screen (' + rest.wrap + 'px of ' + rest.vh + ')',
+      rest.wrap > 0 && rest.wrap / rest.vh < 0.20);
+    ok('PC-O2 …and the empty status line reserves nothing (' + rest.state + 'px)', rest.state <= 1);
+    /* THE INVITATION, NOT A DESCRIPTION OF THE INPUT. "Type anything" describes the text box;
+       this asks the person something. */
+    ok('PC-O3 …and it asks rather than labelling itself: ' + JSON.stringify(rest.ph),
+      /what.s on your mind/i.test(rest.ph));
+
+    console.log('\n  O2 — AND IT GROWS WITH THE TEXT, THEN STOPS AND SCROLLS');
+    await coach.page.fill('#iq-composer-input', 'One line');
+    await coach.page.waitForTimeout(250);
+    const one = await coach.page.evaluate(() =>
+      Math.round(document.querySelector('.iq-composer-wrap').getBoundingClientRect().height));
+    ok('PC-O4 one line is still the resting size', Math.abs(one - rest.wrap) <= 2);
+    await coach.page.fill('#iq-composer-input',
+      Array.from({ length: 14 }, (_, i) => 'Line ' + (i + 1) + ' of something long a coach might write').join('\n'));
+    await coach.page.waitForTimeout(350);
+    const many = await coach.page.evaluate(() => {
+      const w = document.querySelector('.iq-composer-wrap');
+      const ta = document.getElementById('iq-composer-input');
+      return { wrap: Math.round(w.getBoundingClientRect().height),
+        scrolls: ta.scrollHeight > ta.clientHeight + 2 };
+    });
+    ok('PC-O5 fourteen lines grows it, but not past a third of the screen (' + many.wrap + 'px)',
+      many.wrap > rest.wrap && many.wrap / rest.vh < 0.34);
+    ok('PC-O6 …and past its maximum the text scrolls inside it rather than pushing the object away',
+      many.scrolls === true);
+    await coach.page.fill('#iq-composer-input', '');
+    await coach.page.waitForTimeout(250);
+    ok('PC-O7 …and clearing it returns to the resting size',
+      Math.abs(await coach.page.evaluate(() =>
+        Math.round(document.querySelector('.iq-composer-wrap').getBoundingClientRect().height)) - rest.wrap) <= 2);
+
     /* ══ M — AND THE OTHER PHONE ═══════════════════════════════════════════════════════════
        Everything above ran at 390px, which is the narrow end of the device class and the right
        place to find clipping. 430px is the other end — a Pro Max — and it finds the opposite

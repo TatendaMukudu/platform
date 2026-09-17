@@ -11265,9 +11265,14 @@ const MemberApp = {
             bottom of the page". It is sticky, so it stays at the bottom of the viewport
             whatever is above it, which is where a thumb already is. */ ''}
       ${this._composerHTML({ id: 'iq-composer-input',
-        // Short, because on a phone the long one truncated to "Ask, capture a thought, or drop"
-        // and then stopped — an instruction cut off halfway is worse than no instruction.
-        placeholder: 'Type anything…',
+        /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
+           "Type anything" describes the INPUT rather than inviting the person to use it, and an
+           instruction about a text box is the least interesting thing a blank composer could say.
+           The placeholders are held together in `_PLACEHOLDER` so the four screens that offer a
+           composer read as one product asking in different rooms rather than four boxes that were
+           labelled by four different people. Short, because on a phone a long one truncates and an
+           instruction cut off halfway is worse than no instruction at all. */
+        placeholder: this._PLACEHOLDER.home,
         send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
         <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
           title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
@@ -12600,7 +12605,7 @@ const MemberApp = {
 
           </div>
           ${body}
-          ${this._composerHTML({ id: 'iq-object-input', placeholder: 'Say what you know, or ask…',
+          ${this._composerHTML({ id: 'iq-object-input', placeholder: this._placeholderFor(kind),
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
       this._renderCallRow(objectId);
@@ -13785,7 +13790,7 @@ const MemberApp = {
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
               : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
           : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
-        ${this._composerHTML({ id: 'iq-forum-input', placeholder: 'Say something…',
+        ${this._composerHTML({ id: 'iq-forum-input', placeholder: this._PLACEHOLDER.forum,
           send: 'MemberApp.forumSend()', mic: 'iqf-mic', state: 'iqf-voice-state', attach: false })}
       </div>`;
   },
@@ -13847,6 +13852,43 @@ const MemberApp = {
      (.iqt-composer), so it inherited none of the composer's behaviour and diverged from it
      visually at the same time. One function, three surfaces — Home, an object thread, and a
      forum — so they cannot drift again. */
+  /* ── WHAT A BLANK COMPOSER SAYS ───────────────────────────────────────────────────────────
+     One table, beside the one function that renders every composer, because these are states of
+     a single surface rather than four independent boxes. A contextual line is used ONLY where the
+     context is unambiguous — the thread for a specific object, or a Forum room. Everywhere else
+     the universal one is right, and guessing would be worse than asking plainly.
+
+     `focus` asks how it is going because a Focus is a commitment somebody made and the useful
+     thing to say about one is what happened. `inquiry`, `high` and `low` ask what they are
+     thinking, because those are questions the product is still working out and the person may
+     know something it does not. */
+  _PLACEHOLDER: {
+    home:    'What\u2019s on your mind?',
+    inquiry: 'What are you thinking?',
+    high:    'What are you thinking?',
+    low:     'What are you thinking?',
+    focus:   'How\u2019s this going?',
+    forum:   'Add to the conversation',
+    attached: 'What do you want to know?',
+  },
+
+  /* An object thread asks about the thing it is about; an unknown kind falls back to the
+     universal line rather than to a guess. */
+  /* Retarget whichever composer is on screen. There is one at a time, and it is whichever of the
+     three ids exists — so this asks rather than being told, and a screen with none is a no-op
+     rather than an error. `aria-label` moves with it, because a placeholder a screen reader does
+     not get is a placeholder half the people using this never see. */
+  _composerAsk(text) {
+    for (const id of ['iq-object-input', 'iq-forum-input', 'iq-composer-input']) {
+      const el = document.getElementById(id);
+      if (el) { el.placeholder = text; el.setAttribute('aria-label', text); return; }
+    }
+  },
+
+  _placeholderFor(kind) {
+    return this._PLACEHOLDER[String(kind || '').toLowerCase()] || this._PLACEHOLDER.home;
+  },
+
   _composerHTML({ id, placeholder, send, mic, state, attach = true, hint = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
     /* A composer rendered AFTER the session ended must come out disabled. `_sessionEnded` reaches
@@ -14721,6 +14763,10 @@ const MemberApp = {
       if (d.conversationId && !about) this._rememberChat(d.conversationId);
       if (objectThread && d.conversationId && JSON.stringify(objectThread.about || null) === JSON.stringify(about)) objectThread.conversationId = d.conversationId;
       this._pendingAttachment = { id: d.materialId, name: file.name };
+      /* AND THE COMPOSER ASKS THE QUESTION THE ATTACHMENT RAISES. With a document in hand the
+         useful invitation is not "what's on your mind" — it is the one the person is about to
+         ask anyway. Presentation only: the same composer, the same send path, one word changed. */
+      this._composerAsk(this._PLACEHOLDER.attached);
       done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
     } catch (e) {
       /* AND A WAY BACK. An error card with no control is a dead end on the one surface where a

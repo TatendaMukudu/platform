@@ -2869,7 +2869,17 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
   .iq-mic.is-listening{animation:iq-mic-pulse 1.6s ease-in-out infinite}
 }
 @keyframes iq-mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.30)}50%{box-shadow:0 0 0 6px rgba(185,28,28,0)}}
+/* ── AN EMPTY LINE RESERVING SPACE FOR TEXT THAT IS NOT THERE ────────────────────────────────
+   `min-height:1rem` plus `margin-top:.35rem` held roughly 20px under every composer in the app,
+   permanently, for a status line that is EMPTY at rest and only fills while the microphone is
+   live or has something to report. Measured at 390px: the composer's own input was 61px and the
+   furniture around it was 93px, so most of what a person saw was chrome.
+
+   `:empty` collapses it to nothing and the rules below restore it the moment it has content, so
+   the live dot and the error state are unaffected. Nothing is hidden: there is nothing to hide
+   until there is something to say. */
 .iq-voice-state{font-size:var(--fs);color:var(--text-secondary);margin-top:.35rem;min-height:1rem;line-height:1.4}
+.iq-voice-state:empty{min-height:0;margin-top:0;line-height:0}
 /* The state line while listening: brighter, and with a live dot in front of it. */
 .iq-voice-state.is-live{color:var(--text-primary);display:flex;align-items:center;gap:.45rem;font-weight:600}
 .iq-voice-state.is-live::before{content:'';width:.55rem;height:.55rem;border-radius:50%;
