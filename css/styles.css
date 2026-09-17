@@ -3462,6 +3462,29 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
 .shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
 .shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+/* THE THING YOU CAME TO READ GETS THE ROW. Measured on a 390px screen: the row is 369px wide and
+   the item's own words were given 153px of it, because a folder select (86px) and Remove (60px)
+   sat beside them and never moved. Nothing was cut off — it wrapped, which is worse to read and
+   easier to miss: a one-sentence label became a four-line ribbon 126px wide, in the one place
+   whose entire job is recognising something again at a glance. 126px and four lines, against
+   321px and two once the controls step aside.
+
+   Both controls are filing machinery: you choose a folder once and remove something once, while
+   you read the label every single time you open the page. So they drop to a second line and the
+   words take the full width. Nothing is hidden and nothing is removed — this is only an argument
+   about which of them gets the space, and the answer is the one you came for.
+
+   Wrapping rather than a separate mobile layout: one row, one rule, and the wide screen keeps the
+   side-by-side arrangement it has room for. */
+@media (max-width:640px){
+  .shelf-row{flex-wrap:wrap}
+  .shelf-open{flex:1 1 100%}
+  /* Secondary, and pushed away from the text edge so the eye reaches the label first. */
+  .shelf-move{margin-left:auto}
+  /* align-self:stretch borrowed its height from the tall card next to it; on its own line it has
+     to state the tap target itself. */
+  .shelf-x{min-height:44px}
+}
 
 /* The stale-shell notice: one line, above the safe area, never covering the composer. */
 .iq-stale-build{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-wrap:wrap;
