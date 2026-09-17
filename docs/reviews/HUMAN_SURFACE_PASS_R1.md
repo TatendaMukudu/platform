@@ -188,10 +188,65 @@ Also unresolved and unchanged:
 
 ## 5 · Verification
 
-_(filled at the end)_
+```
+npm test        282 suites, 0 failed        EXIT 0
+```
+
+| Browser gate | Result | Was |
+|---|---|---|
+| pilot-coach (390px + 430px) | **114 / 0**, three consecutive runs | 97 / 0 |
+| stack | 114 / 0 | 114 / 0 |
+| group-loop | 55 / 0 | 55 / 0 |
+| settings-tiers | 45 / 0 | 45 / 0 |
+| priority-surface | 39 / 0 | 39 / 0 |
+| onboard | 34 / 0 | 34 / 0 |
+| library | **30 / 0** | 24 / 0 |
+| voice-output | 19 / 0 | 19 / 0 |
+| forum-share | 13 / 0 | 13 / 0 |
+| chart-shape | 39 / **1** | 39 / 1 — pre-existing at the starting SHA |
+
+**pilot-coach was run three times**, not once. PC-S8 failed on one run and passed on the next
+with no change between them, which is how the `_restoreChat` race was found rather than tuned
+away with a longer wait. Three consecutive green runs is the evidence that it is fixed.
+
+**Two red results during this pass, both real, both fixed:**
+
+- **`forum-share` fell to 4 / 1.** The fixed composer covered the bottom of the viewport and
+  swallowed the click on Confirm, so FB-4 timed out waiting for a POST the button never sent. It
+  exposed a defect in my own fix: `--iq-shell-composer-h` was written as a flat 104px "generous
+  constant" against a bar that measures ~148px, so **the reservation was smaller than the thing it
+  reserved for** and the last 44px of every page sat underneath it. A constant cannot be right
+  here at all, because the bar grows as somebody types. A `ResizeObserver` writes the real height
+  now: measured 142px → 147 reserved at rest, 204px → 209 reserved when grown. The harness was
+  also staging its card on `document.body`, where the product never puts one; it stages into
+  `.page-content` now, which is both the fix and the more faithful harness.
+- **`npm test` went red twice.** Once on the asset-stamp fingerprint guard, because CSS and JS
+  were edited after `stamp:record` — corrected by re-recording (`20260917m`). Once on
+  `docs-status-smoke`, which reported `docs/INDEX.md` 21 commits behind HEAD against a threshold
+  of 20. Both are guards doing their job; `docs/INDEX.md` is updated and §11 now records this pass.
+
+**390px and 430px:** no horizontal overflow on home, inquiry, focus, high, low, library, org tree
+or settings, and the composer on screen and usable at both.
+
+**Mutations this pass:** shelf keeps a copy of the wording → LR-B2/B3; a vanished object keeps its
+row → LR-E1/E2; the filing route drops its read check → LR-D2/D3; refusals differ by status →
+**LR-D4 alone**; the Library row layout reverted → B10b and B10c, with B10c only after it was
+rewritten to measure the wrap shape instead of clipping.
 
 ---
 
 ## 6 · Verdict
 
-_(filled at the end)_
+All four areas the brief named are done. Settings, Library, the Org Tree and the Composer are
+each finished and each pinned on a rendered screen rather than in source. The composer defect was
+the largest single thing wrong with the product as a person experiences it, and it was invisible
+to every hermetic suite and to the code's own documentation, both of which described the
+arrangement accurately and neither of which noticed it was wrong.
+
+**READY FOR INDEPENDENT TESTING: YES**
+
+An ordinary member can now open any page, say something, and be answered, which was not true when
+this pass started. Nothing on the list in §4 stops somebody completing a journey. The one item I
+would put in front of the founder before a pilot is the Private/Public button, because it is the
+only open item where the product's appearance and its behaviour disagree on a question about
+privacy — and that is a decision to make, not a bug to fix.

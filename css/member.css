@@ -971,9 +971,14 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    matches `.page-content`'s 1.5rem so it lines up with the content above it.
 
    `--iq-shell-composer-h` is the room reserved below the page so the last card is never hidden
-   behind the bar. It is a generous constant rather than a measured height, because measuring
-   would make the page depend on the bar's rendering and reflow whenever it grows a line. */
-:root{--iq-shell-composer-h:104px}
+   behind the bar. The value here is only the FALLBACK used before the first measurement;
+   _renderShellComposer observes the bar and writes the real height.
+
+   It was first written as a flat 104px "generous constant". It was not generous — the bar
+   measures about 148px at rest, so the reservation was SMALLER THAN THE THING IT RESERVED FOR and
+   the last 44px of every page sat underneath it. A constant cannot be right here in any case,
+   because the bar grows as somebody types and when the voice status line fills. */
+:root{--iq-shell-composer-h:160px}
 #iq-shell-composer .iq-composer-wrap{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
   padding:0.5rem 1.5rem calc(.35rem + env(safe-area-inset-bottom));

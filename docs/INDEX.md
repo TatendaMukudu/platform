@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `4ac288c3ce39c2fd3bbceda543b77e57cfaf5c17`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
+**Written against:** `b8d2c9e0e66cfdad9ecee5fe32cbd7286955092b`. **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -349,8 +349,27 @@ who had real evidence in the system. Guard: `highs-lows-smoke`.
 
 ## 11 · September 2026 — the A-to-B spine, creation, and the final product pass
 
-The line from `159c05a` to `4ac288c` on `gpt/ab-decision-spine-r1`. Not merged; the founder
-decides what lands. The class that links these rounds is the same one §8 and §10 name, arrived at from
+The line from `159c05a` to `b8d2c9e` on `gpt/ab-decision-spine-r1`. Not merged; the founder
+decides what lands.
+
+> **The human-surface pass** (`72f2ca4` → `b8d2c9e`) closes this line and is recorded in
+> `docs/reviews/HUMAN_SURFACE_PASS_R1.md`. Two things worth knowing before touching the client:
+>
+> - **The composer lives in the shell**, in `#iq-shell-composer`, a sibling of `<main>` — not
+>   inside any page. It was inside `#page-home`, so it existed on Home and on none of the other
+>   seven member pages. `MemberApp._renderShellComposer` owns it and it stands down for a page
+>   that brought its own composer (an object thread, the Forum), because on the Forum the
+>   difference between the two boxes decides who reads what you type.
+> - **A Library shelf entry is a REFERENCE, never a copy** — `(kind, id)` and nothing else, every
+>   word resolved live from the object at the moment somebody looks.
+>   `library-reference-http-smoke.js` holds that law, including the half that matters most: a
+>   filing refusal must be identical for an id that never existed and a real id belonging to
+>   another team, or the refusal enumerates their shelf one guess at a time.
+>
+> It also leaves **one open question for the founder**, in §4 of that report: the composer's
+> Private/Public button does not reach the turn. `_wsShare` is set by `toggleVisibility` and read
+> nowhere else. Giving it an effect is a privacy-law decision, so it was reported rather than
+> changed. The class that links these rounds is the same one §8 and §10 name, arrived at from
 a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
 or something false on a real screen.**
 

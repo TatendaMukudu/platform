@@ -129,10 +129,19 @@ Object.assign(ai, {
     const notice = await page.$('button:has-text("I understand")');
     if (notice) await notice.click().catch(() => {});
     await page.waitForTimeout(900);
+    /* STAGED WHERE THE PRODUCT PUTS THESE CARDS. It used to be appended to document.body, which is
+       outside the app's layout entirely — and once the composer moved into the shell as a fixed
+       bar, the bar sat over the bottom of the viewport and swallowed the click on Confirm, so
+       FB-4 timed out waiting for a POST that the button never got to send.
+
+       The product renders a proposal into the conversation, inside `.page-content`, which
+       reserves room below itself for exactly this reason. Staging it there is both the fix and
+       the more faithful harness: a card floated over the app in a place no card ever appears
+       cannot tell us whether a real one is reachable. */
     await page.evaluate(() => {
       const root = document.createElement('section');
       root.id = 'forum-browser-gate';
-      document.body.appendChild(root);
+      (document.querySelector('.page-content') || document.body).appendChild(root);
     });
     ok('FB-0 two authorized people have a real empty room', (await room()).j.messages.length === 0);
 

@@ -13951,6 +13951,11 @@ const MemberApp = {
       if (st && st.textContent) { st.textContent = ''; st.className = 'iq-voice-state'; }
       return;
     }
+    /* A REBUILT COMPOSER RENDERS `#iq-vis` READING "Private" WITH aria-pressed=false, so the flag
+       behind it has to say the same thing or the button and its state disagree — and the next tap
+       would show "Public" while the flag went false. Private is the default and stays the default;
+       resetting to it is never the unsafe direction. */
+    this._wsShare = false;
     host.innerHTML = this._composerHTML({ id: 'iq-composer-input',
       /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
          "Type anything" describes the INPUT rather than inviting the person to use it, and an
@@ -13965,6 +13970,32 @@ const MemberApp = {
           title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
         <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
       </div>` });
+    this._watchShellComposerHeight();
+  },
+
+  /* THE ROOM BELOW THE PAGE IS WHATEVER THE BAR ACTUALLY TAKES. The reservation started as a flat
+     104px against a bar that measures about 148px at rest, so it reserved less than it covered.
+     A constant cannot be right in any case: the bar grows as somebody types and when the voice
+     status line fills, and a page that reserved a fixed amount would have content slide under it
+     exactly when there is most to read.
+
+     One observer for the life of the bar, not one per render. If ResizeObserver is missing the
+     CSS fallback stands, which is why that fallback is a height the bar does not exceed at rest
+     rather than a tidy-looking number. */
+  _watchShellComposerHeight() {
+    const wrap = document.querySelector('#iq-shell-composer .iq-composer-wrap');
+    if (!wrap) return;
+    const set = h => document.documentElement.style.setProperty(
+      '--iq-shell-composer-h', Math.round(h) + 'px');
+    set(wrap.getBoundingClientRect().height);
+    if (typeof ResizeObserver !== 'function') return;
+    try {
+      if (this._shellComposerRO) this._shellComposerRO.disconnect();
+      this._shellComposerRO = new ResizeObserver(es => {
+        for (const e of es) set(e.contentRect.height + 16);   // + the wrap's own vertical padding
+      });
+      this._shellComposerRO.observe(wrap);
+    } catch (_) { /* the fallback height stands */ }
   },
 
   _placeholderFor(kind) {
