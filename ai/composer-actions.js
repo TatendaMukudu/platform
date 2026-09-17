@@ -142,6 +142,85 @@ const _COMMAND_ACTION = Object.freeze({
   focus: 'create_focus', inquiry: 'create_inquiry', enquiry: 'create_inquiry',
 });
 
+/* ── SAYING YES IN WORDS ───────────────────────────────────────────────────────────────────────
+   A consequential action is PROPOSED and then CONFIRMED. The proposal already shows the person
+   exactly what would happen — the words, the audience, the object — and confirmation has until now
+   meant pressing a button carrying that proposal's id.
+
+   So a person who reads the card and types "yeah" has done the human half of confirming, and the
+   product did nothing with it: the id lives on a button, "yeah" names no id, and the sentence fell
+   through to the ordinary answering path. That is the machinery showing through at the exact moment
+   the founder's law says it should not — "the person talks, IntelliQ handles the machinery".
+
+   THIS READS THE WORDS AND NOTHING ELSE. It resolves no object, executes nothing, and grants no
+   authority; the caller matches what it returns against proposals it already made and then goes
+   through the SAME confirm path, with the same frozen payload and the same re-checked authority.
+   There is no second mutation path, which is the only reason this is safe to add at all.
+
+   THE WHOLE MESSAGE MUST BE THE ACCEPTANCE. "yes" inside a sentence is a person talking, not a
+   person confirming — "yes, I was worried about that, and I think we go quiet after we concede" is
+   an account, and treating it as a confirmation would execute something they were still discussing.
+   So these patterns are anchored at both ends and deliberately short.
+
+   DECLINE IS READ TOO, and is not the absence of acceptance. "no" must stop a pending proposal
+   rather than fall through to be answered as a new remark. */
+const _ACCEPT_RE = /^\s*(?:ok(?:ay)?|yes|yeah|yep|yup|sure|please\s+do|go\s+ahead|do\s+(?:it|that)|let'?s\s+do\s+(?:it|that)|make\s+it\s+so|sounds\s+good|agreed|i\s+agree|that\s+one)\s*[.!]*\s*$/i;
+const _DECLINE_RE = /^\s*(?:no|nope|not\s+(?:now|that|yet)|don'?t|cancel|leave\s+it|never\s+mind|nevermind|forget\s+it)\s*[.!]*\s*$/i;
+
+/* Which one of several, in the words people actually use. "the first one", "number 2", "the second".
+   Anchored the same way, and ordinals only — there is no "the big one" or "the communication one",
+   because choosing by description is an interpretation and this file does not interpret. */
+const _ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth'];
+const _ORDINAL_RE = new RegExp(
+  '^\\s*(?:(?:let\'?s\\s+)?(?:do|try|use|take|go\\s+with)\\s+)?'
+  + '(?:the\\s+)?(?:(' + _ORDINALS.join('|') + ')|(?:number\\s*|#)?([1-5]))'
+  + '(?:\\s+one)?\\s*[.!]*\\s*$', 'i');
+
+/* Returns { kind: 'accept'|'decline', ordinal: 1-based index or null } or null for anything else.
+   Null is the common answer and means "this is not an acceptance", which leaves every existing
+   path exactly as it was. */
+function readAcceptance(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw || raw.length > 40) return null;     // a long sentence is talking, not confirming
+  if (/\?\s*$/.test(raw)) return null;           // "yes?" is a question, not an answer
+  if (_DECLINE_RE.test(raw)) return { kind: 'decline', ordinal: null };
+  if (_ACCEPT_RE.test(raw)) return { kind: 'accept', ordinal: null };
+  const m = _ORDINAL_RE.exec(raw);
+  if (m) {
+    const word = m[1] ? _ORDINALS.indexOf(String(m[1]).toLowerCase()) + 1 : Number(m[2]);
+    if (word >= 1 && word <= 5) return { kind: 'accept', ordinal: word };
+  }
+  return null;
+}
+
+/* ── AND WHAT THAT ACCEPTANCE REFERS TO ────────────────────────────────────────────────────────
+   Given what the person said and the proposals they were lastShown, which one did they mean?
+
+   THE ONLY TWO SAFE ANSWERS ARE "exactly this one" AND "ask them". One pending proposal and a bare
+   "yeah" is unambiguous. Several pending and a bare "yeah" is NOT — and guessing the first would
+   be the product choosing a consequential action on somebody's behalf, which is the one thing the
+   founder's law forbids. An ordinal picks one only when it is in range; "the fourth one" against
+   two proposals is a misunderstanding, not a selection, and saying so is better than acting.
+
+   Returns { resolved: proposal } | { ask: 'question' } | { declined: true } | null. */
+function resolveAcceptance(said, offered = []) {
+  const acc = readAcceptance(said);
+  if (!acc) return null;
+  const list = (Array.isArray(offered) ? offered : []).filter(Boolean);
+  if (!list.length) return null;                       // nothing pending: it was just a remark
+  if (acc.kind === 'decline') return { declined: true };
+  if (acc.ordinal != null) {
+    if (acc.ordinal > list.length) {
+      return { ask: list.length === 1
+        ? 'I only offered one thing there — did you mean that one?'
+        : `I offered ${list.length}. Which of them did you mean?` };
+    }
+    return { resolved: list[acc.ordinal - 1] };
+  }
+  if (list.length === 1) return { resolved: list[0] };
+  return { ask: `I offered ${list.length} things there. Which one did you mean?` };
+}
+
 function readCommand(text) {
   const raw = String(text == null ? '' : text).trim();
   if (!raw) return null;
@@ -475,4 +554,5 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
   return { actions, needsClarification };
 }
 
-module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground, readCommand };
+module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground, readCommand,
+  readAcceptance, resolveAcceptance };

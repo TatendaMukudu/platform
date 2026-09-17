@@ -15458,6 +15458,34 @@ function _composerActionEffect(candidate, context) {
 
 async function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
+  /* ── DID THEY JUST SAY YES TO WHAT WE OFFERED? ──────────────────────────────────────────────
+     A consequential action is proposed and then confirmed, and confirmation has meant pressing a
+     button that carries the proposal's id. Somebody who reads the card and types "yeah" has done
+     the human half of exactly that, and the product did nothing with it: "yeah" names no id, so it
+     fell through to be answered as a new remark. That is the machinery showing through at the one
+     moment the founder's law says it must not.
+
+     NOTHING IS EXECUTED HERE. This resolves which proposal they meant and says so; the client then
+     confirms through POST /api/assistant/turn/:turnId/confirm, which is the same single mutation
+     path with the same frozen payload and the same re-checked authority. Adding a second way to
+     execute an action would be the dangerous version of this, and there is not one.
+
+     ONLY THE TURN IMMEDIATELY BEFORE, and only proposals still unconfirmed — "yeah" is a reply to
+     what was just said, not to something from twenty minutes ago that has since been superseded. */
+  let _acceptance = null;
+  try {
+    const _prior = (assistantTurns[_wsKey(code, userId)] || []).slice(-1)[0];
+    const _pending = ((_prior && _prior._proposals) || []).filter(p => p && !p.confirmed);
+    const _r = composerActions.resolveAcceptance(text, _pending);
+    if (_r && _r.resolved) {
+      _acceptance = { resolves: _r.resolved.id, turnId: _prior.turnId,
+        label: _r.resolved.label || null, actionType: _r.resolved.actionType || null };
+    } else if (_r && _r.ask) {
+      _acceptance = { ask: _r.ask, offered: _pending.length };
+    } else if (_r && _r.declined) {
+      _acceptance = { declined: true, offered: _pending.length };
+    }
+  } catch (_) { _acceptance = null; }
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
   const interp = _assistantInterpret(code, userId, text);
   // Leader-support (Cut E): an EXPLICIT, server-validated subject routes through the SAME runtime
@@ -15917,6 +15945,10 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     composer: composerDegraded ? { degraded: true, reason: composerDegraded } : { degraded: false, reason: null },
     groundedClaims: composedReply ? [] : groundedClaims, inferred: composedReply ? [] : inferred,
     limitations: context.limitations,
+    /* WHICH PROPOSAL A SPOKEN "yeah" REFERRED TO, resolved above and carried here so the client can
+       confirm it through the one existing route. `ask` is the honest answer when several were
+       offered: the product says which it cannot tell apart rather than choosing for somebody. */
+    acceptance: _acceptance,
     proposedActions: publicProposals,
     // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
