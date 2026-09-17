@@ -121,8 +121,19 @@ const server = app.listen(0, async () => {
     const esDirective = _domainDirective(O, { userId: 'es' });
     ok('LC-C1 the shared directive every AI entry point already makes now carries the language',
       /writing in Spanish/.test(esDirective) && /Reply in Spanish/.test(esDirective));
-    ok('LC-C2 …and tells it not to switch part-way through, which is the failure people notice',
-      /not to switch|do not switch/i.test(esDirective));
+    /* THIS ASSERTION USED TO READ "tells it not to switch part-way through" and matched
+       /not to switch|do not switch/. The law changed underneath it — a conversation-level switch
+       is now FOLLOWED, because a person who moves from English to Shona has changed language
+       rather than made a mistake — and the old regex kept passing anyway, against the new
+       sentence "do not switch back to English to explain yourself". A pattern that still matches
+       while the claim above it has become false is PROTOCOL lie #1, and it survived the change
+       that falsified it. Both halves are now asserted separately, in the words that carry them. */
+    ok('LC-C2 …and tells it to hold one language for the whole of THIS REPLY',
+      /whole of this reply/i.test(esDirective) && /do not drift/i.test(esDirective));
+    ok('LC-C2b …and specifically not to fall back into English to explain itself',
+      /not switch back to English/i.test(esDirective));
+    ok('LC-C2c …while mixed languages are mirrored rather than forced into one',
+      /mix languages/i.test(esDirective) && /mirror/i.test(esDirective));
     ok('LC-C3 …and not to translate the names of people or groups',
       /[Dd]o not translate names/.test(esDirective));
     const enDirective = _domainDirective(O, { userId: 'en' });

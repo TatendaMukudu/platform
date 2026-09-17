@@ -71,11 +71,36 @@ const STOPWORDS = {
   pl: ['i', 'w', 'nie', 'to', 'jest', 'na', 'że', 'się', 'do', 'z', 'ale', 'jak', 'co', 'tak',
     'po', 'dla', 'od', 'przez', 'jego', 'być', 'mnie', 'mój', 'moja', 'przed', 'bardzo', 'już',
     'kiedy', 'bo', 'mam', 'mogę', 'jeszcze', 'tylko', 'czy', 'ten', 'ta', 'o'],
+
+  /* ── SHONA AND NDEBELE ────────────────────────────────────────────────────────────────────
+     Added because the pilot is in Zimbabwe and neither existed here. Both are Latin-script, so
+     the script table above cannot see them, and with no entry in this table `detect` returned
+     null for every Shona and Ndebele sentence — no language, therefore no directive, therefore
+     an English answer to somebody writing Shona, every single turn. Measured before the fix:
+     "Ndinofunga kuti tinonyarara kana tabayiwa zvibodzwa" detected as nothing at all.
+
+     THEY ARE LISTED SEPARATELY AND CHOSEN TO SEPARATE, which is the founder's explicit warning:
+     do not confuse closely related languages because a model can approximately understand both.
+     Shona is a Shona-group language and Ndebele is Nguni, so their FUNCTION words diverge sharply
+     even where speakers share vocabulary — the classic pair being Shona `kuti` against Ndebele
+     `ukuthi`, which are different words and never collide under whole-word matching. Words that
+     genuinely occur in both with reasonable frequency are in neither list, because a word that
+     scores for both separates nothing and only adds noise. */
+  sn: ['kuti', 'uye', 'asi', 'nokuti', 'nekuti', 'kwete', 'chete', 'saka', 'pamwe', 'hapana',
+    'zvino', 'izvi', 'izvo', 'ndiri', 'tiri', 'vari', 'ndine', 'tine', 'vane', 'handina',
+    'hazvina', 'zvakanaka', 'zvakare', 'sei', 'nei', 'chii', 'vanhu', 'munhu', 'ini', 'isu',
+    'imi', 'ivo', 'iwe', 'pane', 'kune', 'ndinofunga', 'tinofanira', 'zvose', 'kana', 'ndati'],
+  nd: ['ukuthi', 'kodwa', 'ngoba', 'njalo', 'lokhu', 'lokho', 'yebo', 'hatshi', 'khona', 'lapho',
+    'manje', 'ngakho', 'kuphela', 'abantu', 'umuntu', 'ngicabanga', 'sengathi', 'kakhulu',
+    'kanti', 'yini', 'ngani', 'njani', 'nxa', 'futhi', 'bonke', 'lami', 'lakhe', 'wami',
+    'sithi', 'bathi', 'kuhle', 'angithi', 'akula', 'siyathula', 'ngithi', 'wena', 'mina',
+    'thina', 'lina', 'bona'],
 };
 
 const NAMES = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', pt: 'Portuguese',
   it: 'Italian', nl: 'Dutch', pl: 'Polish', el: 'Greek', ru: 'Russian', he: 'Hebrew',
-  ar: 'Arabic', hi: 'Hindi', th: 'Thai', ko: 'Korean', ja: 'Japanese', zh: 'Chinese' };
+  ar: 'Arabic', hi: 'Hindi', th: 'Thai', ko: 'Korean', ja: 'Japanese', zh: 'Chinese',
+  sn: 'Shona', nd: 'Ndebele' };
 
 /* The floor. Below this many words, a guess is a coin toss dressed as a finding — "ok thanks"
    is not evidence of anything — so the honest answer is that we do not know. */
@@ -122,9 +147,19 @@ function detect(text) {
    unchanged and costs no tokens. */
 function directive(lang) {
   if (!lang || !lang.code || lang.code === 'en') return '';
+  /* THE ANTI-DRIFT CLAUSE USED TO READ "do not switch language part-way through", FULL STOP, and
+     that forbade the thing the product is supposed to do. A person who starts in English and
+     moves to Shona has not made a mistake to be corrected; they have changed language, and
+     IntelliQ follows them. What must not happen is drift WITHIN one reply, or a silent reset to
+     English at a system boundary. So the rule is scoped to the reply rather than the
+     conversation, and which language to use is decided per turn by the caller from their most
+     recent words — never by this sentence. */
   return `LANGUAGE — this person is writing in ${lang.name}. Reply in ${lang.name}. `
-    + 'Do not translate names of people, groups or organisations, and do not switch language '
-    + 'part-way through. If you are quoting something they wrote, quote it as they wrote it.';
+    + 'Stay in that language for the whole of this reply; do not drift into another language '
+    + 'part-way through it, and do not switch back to English to explain yourself. '
+    + 'If they mix languages, it is natural to mirror the way they mix rather than forcing '
+    + 'everything into one. Do not translate names of people, groups or organisations. '
+    + 'If you are quoting something they wrote, quote it as they wrote it.';
 }
 
 /* AND THE HONEST LINE WHEN THE PROSE IS NOT AVAILABLE. The deterministic copy in this product is

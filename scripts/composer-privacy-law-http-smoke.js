@@ -95,14 +95,25 @@ const server = app.listen(0, async () => {
      private sentence is anywhere in here, it has escaped. */
   const everythingVisibleTo = async (who) => {
     const parts = [];
-    for (const [m, u] of [
+    /* `/api/objects` REQUIRES A `kind`, and the first version of this asked without one — so that
+       route answered 400 on every call and contributed `{"error":"unknown kind"}` to the search
+       instead of anybody's objects. The leak checks were real (the other three routes answered,
+       and K1 proves the aggregate is not empty), but they were searching three surfaces while
+       claiming four. All four kinds are asked for by name now. */
+    const routes = [
       ['GET', '/api/group/first/state'],
       ['GET', '/api/team/readiness'],
       ['GET', '/api/leader/raises'],
-      ['GET', '/api/objects'],
-    ]) {
+    ];
+    for (const k of ['focus', 'high', 'low', 'inquiry']) {
+      routes.push(['GET', `/api/objects?kind=${k}&scope=all`]);
+    }
+    for (const [m, u] of routes) {
       const r = await call(m, u, undefined, who).catch(() => null);
       if (r) parts.push(JSON.stringify(r.j || {}));
+      /* A ROUTE THAT ERRORS CANNOT HIDE A LEAK, so an unexpected status is reported rather than
+         quietly folded into the haystack as a 400 body. */
+      if (r && r.status !== 200) parts.push(`[[route ${u} answered ${r.status}]]`);
     }
     return parts.join('\n');
   };
