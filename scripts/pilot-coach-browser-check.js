@@ -593,6 +593,49 @@ _rebuildEmailIndex();
     ok('PC-I3 …and the first screen still reads as a product rather than as a fallback',
       /First Team/.test(finalHome) && /Communication after results/i.test(finalHome));
 
+    /* ══ M — AND THE OTHER PHONE ═══════════════════════════════════════════════════════════
+       Everything above ran at 390px, which is the narrow end of the device class and the right
+       place to find clipping. 430px is the other end — a Pro Max — and it finds the opposite
+       failure: layouts that were tuned by hand for the narrow case and stretch badly, and any
+       element with a fixed width that only overflows once the viewport is wider than it.
+
+       This is a second VIEWPORT, not a second walkthrough: the same session, the same data, the
+       same screens, re-measured. The assertion that matters on both is the same one — a person
+       should never have to scroll sideways — plus the composer still being reachable, because a
+       sticky composer that leaves the viewport at one width and not the other is the defect this
+       catches and no route test ever could. */
+    console.log('\n  M — THE SAME SCREENS AT 430px, WHICH IS THE OTHER END OF THE DEVICE CLASS');
+    await coach.page.setViewportSize({ width: 430, height: 932 });
+    await coach.page.waitForTimeout(600);
+    const wideOverflow = [];
+    for (const dest of ['home', 'inquiry', 'focus', 'high', 'low', 'notes', 'people', 'settings']) {
+      await coach.page.evaluate(d => navigate(d), dest);
+      await coach.page.waitForTimeout(900);
+      const bad = await coach.page.evaluate(() =>
+        document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+      if (bad) wideOverflow.push(dest);
+    }
+    ok('PC-M1 no screen scrolls sideways at 430px: '
+      + (wideOverflow.length ? wideOverflow.join(', ') : 'none'), wideOverflow.length === 0);
+    await coach.page.evaluate(() => navigate('home'));
+    await coach.page.waitForTimeout(1400);
+    ok('PC-M2 …and the composer is still on the screen and usable at that width',
+      await coach.page.evaluate(() => {
+        const t = document.getElementById('iq-composer-input');
+        if (!t || t.disabled || t.readOnly) return false;
+        const r = t.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= window.innerWidth + 1;
+      }));
+    /* AND THE NARROW END STILL HOLDS AFTERWARDS, so this section cannot pass by having quietly
+       left the page in a state the earlier assertions were not measured against. */
+    await coach.page.setViewportSize(IPHONE);
+    await coach.page.waitForTimeout(600);
+    await coach.page.evaluate(() => navigate('home'));
+    await coach.page.waitForTimeout(1400);
+    ok('PC-M3 …and going back to 390px still does not scroll sideways',
+      await coach.page.evaluate(() =>
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+
   } catch (e) {
     fail++; console.error('  FAIL pilot walkthrough threw:', e && e.stack);
   }
