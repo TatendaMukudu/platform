@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260917f"/>
-<link rel="stylesheet" href="css/member.css?v=20260917f"/>
+<link rel="stylesheet" href="css/styles.css?v=20260917j"/>
+<link rel="stylesheet" href="css/member.css?v=20260917j"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -518,10 +518,16 @@
             </div>
             
             <div class="card">
-              <div class="card-header"><div class="card-title">Display language</div></div>
+              <!-- NOT "Display language". It does not change the LANGUAGE — ai/language.js does that,
+                   from what the person writes in, and a Spanish speaker is answered in Spanish
+                   whatever is picked here. This picks the TERMINOLOGY PACK: whether IntelliQ says
+                   player/team/match, student/class/lesson or team member/department/meeting. An
+                   admin looking for "answer my players in Spanish" would have found this, changed
+                   it, and got a different set of English nouns. -->
+              <div class="card-header"><div class="card-title">Words IntelliQ uses</div></div>
               <div class="card-body">
                 <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This only changes the <strong>words</strong> it shows your people. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
+                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This picks the <strong>words</strong> it uses for the things in your organisation. It is not the language it replies in: IntelliQ answers each person in the language they write to it in. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
                 </div>
                 <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
                 <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
@@ -541,7 +547,21 @@
                 <button class="btn btn-outline btn-sm" id="ingest-token-btn" onclick="loadIngestToken()">Show connection details</button>
               </div>
             </div>
-            <div class="card">
+            <!-- ── ENGINEERING, BEHIND A DOOR ────────────────────────────────────────────────────────
+                 Both cards below are one-time setup somebody does once and never opens again: a
+                 data URL, an auth header, a JSON path, an OAuth client ID and secret, a redirect
+                 URL to paste into a developer console. They sat open in the tab an administrator
+                 goes to in order to change the organisation's NAME, which is why that tab
+                 rendered twenty-four input fields on a phone.
+
+                 Nothing is removed and no id moves -- every handler, every control and every
+                 route is exactly where it was. They are collapsed, so the tab opens as what it
+                 says it is (details, language, and what IntelliQ may do) and the wiring is one
+                 tap away for the person who actually came to do it. -->
+            <details class="iq-adv-block">
+              <summary class="iq-adv-summary">Connections and apps &mdash; one-time technical setup</summary>
+              <div class="iq-adv-body">
+<div class="card">
               <div class="card-header"><div class="card-title">Connect anything (auto-sync)</div></div>
               <div class="card-body">
                 <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
@@ -577,6 +597,8 @@
                 <div id="oauth-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
               </div>
             </div>
+              </div>
+            </details>
             <div class="card">
               <div class="card-header"><div class="card-title">What IntelliQ may do (policies)</div></div>
               <div class="card-body">
@@ -1607,8 +1629,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260917f"></script>
-<script src="js/auth.js?v=20260917f"></script>
+<script src="js/data.js?v=20260917j"></script>
+<script src="js/auth.js?v=20260917j"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1676,15 +1698,15 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260917f"></script>
-<script src="js/ui.js?v=20260917f"></script>
-<script src="js/attachments.js?v=20260917f"></script>
-<script src="js/scenarios.js?v=20260917f"></script>
-<script src="js/chat.js?v=20260917f"></script>
-<script src="js/tree.js?v=20260917f"></script>
-<script src="js/voice.js?v=20260917f"></script>
-<script src="js/voice-output.js?v=20260917f"></script>
-<script src="js/app.js?v=20260917f"></script>
+<script src="js/charts.js?v=20260917j"></script>
+<script src="js/ui.js?v=20260917j"></script>
+<script src="js/attachments.js?v=20260917j"></script>
+<script src="js/scenarios.js?v=20260917j"></script>
+<script src="js/chat.js?v=20260917j"></script>
+<script src="js/tree.js?v=20260917j"></script>
+<script src="js/voice.js?v=20260917j"></script>
+<script src="js/voice-output.js?v=20260917j"></script>
+<script src="js/app.js?v=20260917j"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

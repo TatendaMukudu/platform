@@ -2934,7 +2934,8 @@ async function mappingReprocess(provider) {
   } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
 }
 
-/* Display language (domain pack) — the same kernel, the org's own words. Renders
+/* The TERMINOLOGY PACK — the same kernel, the org's own words. Not the language it
+   replies in, which ai/language.js decides from what each person writes. Renders
    the catalog with the current pack highlighted; picking one re-renders the whole
    app in that vocabulary. Admin-only; the server enforces manage_settings. */
 async function loadDomainCatalog() {

@@ -954,3 +954,30 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 /* The bar is the last thing on the page and stays at the bottom of the viewport, clear of the
    home indicator. */
 .iq-composer-wrap{padding-bottom:calc(.35rem + env(safe-area-inset-bottom))}
+
+/* ── ONE-TIME TECHNICAL SETUP, COLLAPSED ──────────────────────────────────────────────────────
+   Settings held its integration wiring open in the tab an administrator opens to change the
+   organisation's name — data URLs, auth headers, JSON paths, OAuth client secrets, a redirect
+   URL — so that tab rendered twenty-four input fields on a phone. The cards are unchanged and
+   every id is where it was; they are simply behind a summary now, which is the progressive
+   disclosure the rest of the product already uses.
+
+   The summary is a real tap target on a phone, because a disclosure control somebody cannot
+   reliably hit is worse than one that was never collapsed. */
+.iq-adv-block { margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-surface); }
+.iq-adv-summary { cursor: pointer; padding: 0.85rem 1rem; font-size: var(--fs-md); font-weight: 600;
+  color: var(--text-secondary); list-style: none; display: flex; align-items: center; min-height: 44px; }
+.iq-adv-summary::-webkit-details-marker { display: none; }
+.iq-adv-summary::before { content: "\203A"; margin-right: 0.6rem; font-size: var(--fs-lg); line-height: 1;
+  transition: transform .15s ease; display: inline-block; }
+.iq-adv-block[open] > .iq-adv-summary::before { transform: rotate(90deg); }
+.iq-adv-block[open] > .iq-adv-summary { color: var(--text-primary); }
+/* EXPLICIT, because the UA rule that hides a closed <details>'s children is a low-specificity
+   one and this app's cascade was beating it: with the block closed, `conn-name` still measured
+   45px and every OAuth field was on screen. Asserting it here means the collapse does not depend
+   on which other rule happens to match a card inside. */
+.iq-adv-block:not([open]) > .iq-adv-body { display: none !important; }
+.iq-adv-body { padding: 0 0.5rem 0.5rem; }
+.iq-adv-body .card { border: 0; background: transparent; }
+@media (prefers-reduced-motion: reduce) { .iq-adv-summary::before { transition: none } }

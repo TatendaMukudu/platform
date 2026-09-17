@@ -205,6 +205,46 @@ userPermissions[C] = { metricsonly: { manage_metrics: true } };
     const b = await asPerson('boss', 'Platform Owner', 'superadmin');
     ok('ST-C1 a superadmin gets every tier',
       ['you', 'org', 'metrics', 'values', 'goals', 'platform'].every(t => b.view.tabs.includes(t)));
+
+    /* ── AND THE ORGANISATION TIER IS NOT AN ENGINEERING CONSOLE ────────────────────────────
+       This is the tab an administrator opens to change the organisation's NAME. It also held,
+       open, the one-time technical setup nobody opens twice: a data URL, an auth header value, a
+       JSON path, an OAuth client id and secret for every provider in the catalog, and a redirect
+       URL to paste into a developer console. Measured at 390px on a superadmin, who is the only
+       person who sees any of it: TWENTY-FOUR input fields.
+
+       Nothing was removed and no id moved. They are behind a summary, which is the progressive
+       disclosure the rest of the product already uses. Asserted in BOTH directions, because a
+       collapse that cannot be opened is not disclosure, it is deletion -- and the person who
+       came to wire up Strava has to be able to finish. */
+    const orgFields = async (open) => b.page.evaluate((o) => {
+      switchSettingsTab('org');
+      const d = document.querySelector('#page-settings .iq-adv-block');
+      if (d) d.open = o;
+      const p = document.getElementById('page-settings');
+      return [...p.querySelectorAll('input')].filter(x => x.getBoundingClientRect().height > 0).length;
+    }, open);
+    const collapsed = await orgFields(false);
+    await b.page.waitForTimeout(400);
+    ok('ST-C1b the Organisation tier opens as itself, not as a form (' + collapsed + ' fields)',
+      collapsed > 0 && collapsed <= 6);
+    ok('ST-C1c …with the technical setup present rather than deleted',
+      await b.page.evaluate(() => !!document.querySelector('#page-settings .iq-adv-block')));
+    const expanded = await orgFields(true);
+    await b.page.waitForTimeout(400);
+    ok('ST-C1d …and one tap brings every field back (' + expanded + ' fields)',
+      expanded >= collapsed + 10);
+    /* AND THE LABEL SAYS WHAT THE CONTROL DOES. "Display language" does not change the language --
+       ai/language.js decides that from what each person writes, and a Spanish speaker is answered
+       in Spanish whatever is picked here. It picks the TERMINOLOGY PACK. An admin looking for
+       "answer my players in Spanish" would have found it, changed it, and got a different set of
+       English nouns. */
+    ok('ST-C1e …and the terminology control is not labelled as a language control',
+      await b.page.evaluate(() => {
+        switchSettingsTab('org');
+        const t = (document.getElementById('settings-tab-org') || {}).innerText || '';
+        return /Words IntelliQ uses/i.test(t) && !/Display language/i.test(t);
+      }));
     const platformText = await b.page.evaluate(() => {
       switchSettingsTab('platform');
       return (document.getElementById('settings-tab-platform') || {}).innerText || '';
