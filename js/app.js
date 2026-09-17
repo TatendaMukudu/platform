@@ -15097,6 +15097,22 @@ const MemberApp = {
     this._voiceStop('interrupted');
     const esc = s => this._escape(String(s == null ? '' : s));
     const r = j.response || {};
+    /* ── THEY SAID YES IN WORDS ────────────────────────────────────────────────────────────────
+       The server resolved which pending proposal a spoken "yeah" referred to. It executed nothing:
+       the confirmation still goes through the one governed route, which is the call below — the
+       same one the Confirm button makes, with the same frozen payload and the same re-checked
+       authority. Nothing here is a second way to write.
+
+       `ask` is the honest branch. When several things were offered, the server declines to guess
+       and says which it cannot tell apart; that sentence is the whole reply, because asking and
+       then doing something anyway would be worse than not asking. */
+    if (r.acceptance && r.acceptance.resolves) {
+      setTimeout(() => {
+        try { todayTurnConfirm(r.acceptance.turnId, r.acceptance.resolves, null); } catch (_) {}
+      }, 0);
+    } else if (r.acceptance && r.acceptance.ask) {
+      return `<div class="iq-msg-body">${esc(r.acceptance.ask)}</div>`;
+    }
     const priv = v => v === 'only_me'
       ? '<span class="iq-badge iq-badge-private">Private</span>'
       : '<span class="iq-badge iq-badge-share">Confirm to share</span>';

@@ -159,7 +159,14 @@ const server = app.listen(0, async () => {
     const staleOffer = await say('Create a focus about set-piece marking', 'me');
     const staleId = (resp(staleOffer).proposedActions || [])[0];
     ok('E1 something is offered', !!staleId);
-    await say('Actually let me think about the left side for a minute', 'me');
+    /* THE INTERVENING TURN MUST CARRY NO PROPOSALS OF ITS OWN, or this section proves nothing.
+       The first version said "Actually let me think about the left side for a minute", which the
+       capture path turned into its own proposal — so the most recent turn had something pending
+       either way and a mutation that reached back past it stayed green. A plain question produces
+       nothing, which is the only shape that exposes the reach-back. */
+    const interleave = await say('Why?', 'me');
+    ok('E1b the intervening turn offers nothing, so a reach-back would have to skip it',
+      (resp(interleave).proposedActions || []).length === 0);
     const n3 = countFocuses(await myFocuses('me'));
     const late = await say('yeah', 'me');
     const lateAcc = resp(late).acceptance;
