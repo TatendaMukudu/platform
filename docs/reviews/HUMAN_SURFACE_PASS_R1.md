@@ -1,9 +1,9 @@
 # Final human-surface + Composer + multimodal connection pass — report
 
-**STARTING SHA** `72f2ca4c2d4cd64bbf5b07082e04ab2dc2e0af36` · **ENDING SHA** _(filled at the end)_
+**STARTING SHA** `72f2ca4c2d4cd64bbf5b07082e04ab2dc2e0af36` · **ENDING SHA** `62b573d`
 **Branch** `gpt/ab-decision-spine-r1` · **Not merged.**
 
-Six commits. The brief named four areas and said that unfinished Settings, Library, Org Tree or
+Eight commits. The brief named four areas and said that unfinished Settings, Library, Org Tree or
 Composer surface work prevents YES. All four were attempted and all four landed. What follows
 separates what was **measured on a rendered screen** from what was **read in source**, because
 three of the four defects in this pass were invisible to source and two of my own claims during it
@@ -189,7 +189,7 @@ Also unresolved and unchanged:
 ## 5 · Verification
 
 ```
-npm test        282 suites, 0 failed        EXIT 0
+npm test        282 suites, 282 green, 0 failed        EXIT 0
 ```
 
 | Browser gate | Result | Was |
