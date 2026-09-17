@@ -120,7 +120,7 @@ const server = app.listen(0, async () => {
     console.log('\n  C — THE MODEL IS TOLD WHICH LANGUAGE TO WRITE IN');
     const esDirective = _domainDirective(O, { userId: 'es' });
     ok('LC-C1 the shared directive every AI entry point already makes now carries the language',
-      /writing in Spanish/.test(esDirective) && /Reply in Spanish/.test(esDirective));
+      /writing in Spanish/.test(esDirective) && /reply in Spanish/i.test(esDirective));
     /* THIS ASSERTION USED TO READ "tells it not to switch part-way through" and matched
        /not to switch|do not switch/. The law changed underneath it — a conversation-level switch
        is now FOLLOWED, because a person who moves from English to Shona has changed language
@@ -142,7 +142,7 @@ const server = app.listen(0, async () => {
        assertion was reading the vocabulary directive and would have passed whatever this one
        did. PROTOCOL lie #4: a pattern that matches something else. */
     ok('LC-C4 an English speaker adds NOTHING, so the ordinary path is unchanged and costs no tokens',
-      !/Reply in /.test(enDirective) && enDirective === _domainDirective(O, { userId: 'en' }));
+      !/reply in /i.test(enDirective) && enDirective === _domainDirective(O, { userId: 'en' }));
     const unknownDirective = _domainDirective(O, { userId: 'qq' });
     ok('LC-C5 …and so does somebody we could not read — an unknown is not a guess',
       !/Reply in /.test(unknownDirective));
@@ -185,8 +185,17 @@ const server = app.listen(0, async () => {
     ok('LC-F2 …and says nothing at all for English, in both of its outputs',
       language.directive({ code: 'en', name: 'English' }) === ''
       && language.fallbackNote({ code: 'en', name: 'English' }) === '');
-    ok('LC-F3 …and nothing at all for an unknown, which is what makes adding it safe',
-      language.directive(null) === '' && language.fallbackNote(null) === '');
+    ok('LC-F3 …and for an unknown it states the LAW instead of going silent',
+      /answer this person in the language they are writing in/.test(language.directive(null))
+      && /do not default to English/.test(language.directive(null)));
+    /* THIS ASSERTION USED TO READ "nothing at all for an unknown, which is what makes adding it
+       safe", and at the time that was right — a null meant every caller behaved exactly as it did
+       before this file existed. It was also the defect. Nothing means the model answers in
+       English, so Swahili, Xhosa, Turkish, Indonesian and Vietnamese were all silently answered in
+       English at e4d647a. Adding each of them to the word table would fix five languages and
+       leave the next one broken, which is an allowlist rather than an architecture. Deterministic
+       code now states what it owns — answer them in their language — and leaves IDENTIFYING the
+       language to the model, which does it well and which a stopword table does badly. */
 
   } catch (e) { fail++; console.error('  FAIL language-continuity suite threw:', e && e.stack); }
 

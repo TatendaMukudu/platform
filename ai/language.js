@@ -145,8 +145,48 @@ function detect(text) {
    language the prose should be in, which is a property OF prose and therefore the model's job
    under the founder's law. Empty for English and for an unknown, so the ordinary path is
    unchanged and costs no tokens. */
+/* ── THE CLAUSES EVERY LANGUAGE DIRECTIVE CARRIES ─────────────────────────────────────────────
+   Shared so the named and unnamed forms cannot drift apart — they are the same law, and the only
+   difference between them is whether deterministic code was able to put a name to the language. */
+const _COMMON =
+    'Stay in one language for the whole of this reply; do not drift part-way through it, and do '
+  + 'not switch back to English to explain yourself. If they mix languages, it is natural to '
+  + 'mirror the way they mix rather than forcing everything into one. If they ASK you to answer '
+  + 'in a particular language, do that, and keep doing it until they say otherwise. The language '
+  + 'of a document they attach, or of a source you cite, does not decide the language you answer '
+  + 'in — say what a source means in their language, and do not imply the source was written in '
+  + 'it. Do not translate names of people, groups or organisations. If you are quoting something '
+  + 'they wrote, quote it as they wrote it.';
+
+/* ── AND THE CASE THAT USED TO BE SILENT ──────────────────────────────────────────────────────
+   When deterministic code cannot NAME the language, it used to emit nothing — and nothing means
+   the model answers in English. Measured at e4d647a: Swahili, Xhosa, Turkish, Indonesian and
+   Vietnamese all produced no directive, so a person writing any of them was answered in English
+   with nothing in the system noticing. Adding each of them to the word table would fix those
+   five and leave the next language broken, which is an allowlist rather than an architecture.
+
+   THE OWNERSHIP BOUNDARY IS THE FIX. Identifying a language is something a language model does
+   well and a stopword table does badly — it read Zulu as Ndebele here, which is the same
+   close-language confusion the table was extended to avoid. So deterministic code stops trying to
+   name every language and instead states the LAW, which it does own: answer this person in the
+   language they are writing in. That sentence is correct for every language the model supports,
+   including ones nobody has thought about, and it needs no code change when the next one arrives.
+
+   The named form below is kept for two things a model cannot do from one message: CONTINUITY
+   (somebody writes "ok" and must not be dropped back to English) and pilot protection for Shona
+   and Ndebele, which is where this was found. */
+function unnamedDirective() {
+  return 'LANGUAGE — answer this person in the language they are writing in. '
+    + 'Work out which language that is from their own words; do not default to English. '
+    + _COMMON;
+}
+
 function directive(lang) {
-  if (!lang || !lang.code || lang.code === 'en') return '';
+  /* Unknown is NOT English. It is the case where we have nothing stored for this person yet, or
+     their last message was too short to read, and it is the one that used to fall through to an
+     English answer. English proper still adds nothing, so the ordinary path costs no tokens. */
+  if (!lang || !lang.code) return unnamedDirective();
+  if (lang.code === 'en') return '';
   /* THE ANTI-DRIFT CLAUSE USED TO READ "do not switch language part-way through", FULL STOP, and
      that forbade the thing the product is supposed to do. A person who starts in English and
      moves to Shona has not made a mistake to be corrected; they have changed language, and
@@ -154,12 +194,12 @@ function directive(lang) {
      English at a system boundary. So the rule is scoped to the reply rather than the
      conversation, and which language to use is decided per turn by the caller from their most
      recent words — never by this sentence. */
-  return `LANGUAGE — this person is writing in ${lang.name}. Reply in ${lang.name}. `
-    + 'Stay in that language for the whole of this reply; do not drift into another language '
-    + 'part-way through it, and do not switch back to English to explain yourself. '
-    + 'If they mix languages, it is natural to mirror the way they mix rather than forcing '
-    + 'everything into one. Do not translate names of people, groups or organisations. '
-    + 'If you are quoting something they wrote, quote it as they wrote it.';
+  /* NAMED, because we could tell — and naming it is what carries CONTINUITY across a short
+     message, a provider outage or an attachment. "If they have moved on" is here because a name
+     remembered from an earlier turn must never override what they are writing NOW. */
+  return `LANGUAGE — this person has been writing in ${lang.name}, so reply in ${lang.name} `
+    + 'unless their latest message is plainly in another language, in which case follow them. '
+    + _COMMON;
 }
 
 /* AND THE HONEST LINE WHEN THE PROSE IS NOT AVAILABLE. The deterministic copy in this product is
@@ -173,4 +213,4 @@ function fallbackNote(lang) {
     + `English rather than ${lang.name}.`;
 }
 
-module.exports = { detect, directive, fallbackNote, nameOf, MIN_WORDS, STOPWORDS, NAMES };
+module.exports = { detect, directive, unnamedDirective, fallbackNote, nameOf, MIN_WORDS, STOPWORDS, NAMES };
