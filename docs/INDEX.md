@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `4da5140` (see the note in §11; restamped by the privacy correction). **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
+**Written against:** `1d6d7cd` (see the note in §11; restamped by the conversation-first pass). **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -380,7 +380,23 @@ decides what lands.
 >
 > `composer-privacy-law-http-smoke.js` holds the law, including the injection test: a turn that
 > asserts `visibility: 'public'` is read as the ordinary private turn it is, so the mode cannot be
-> reintroduced from a client. The class that links these rounds is the same one §8 and §10 name, arrived at from
+> reintroduced from a client.
+
+> **The conversation-first pass** (`b6dfaaa` onward) is recorded in
+> `docs/reviews/CONVERSATION_FIRST_R1.md`, and **it completed four of the brief's areas, not all
+> of them** — §0 and §6 of that report say exactly which. Three things to know before touching
+> this code:
+>
+> - **Shona and Ndebele exist.** They did not: both are Latin-script, and with no entry in
+>   `ai/language.js` STOPWORDS the detector returned null for every sentence, so a Shona speaker
+>   got English every turn. Their word lists are chosen to SEPARATE (`kuti` vs `ukuthi`) and
+>   `A7b` asserts they share no word at all.
+> - **A language switch is FOLLOWED.** The directive used to say "do not switch language part-way
+>   through" without qualification, which instructed the opposite. Anti-drift is now scoped to one
+>   reply; mixing is mirrored rather than forced.
+> - **A Focus heading is a LEAD, never a summary** (`present.focusLead`). Summarising is the
+>   model's half; deterministic code takes the person's own opening words and keeps the full text
+>   beside them in `full`/`leadIsWhole`. The class that links these rounds is the same one §8 and §10 name, arrived at from
 a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
 or something false on a real screen.**
 
