@@ -156,12 +156,39 @@ const server = app.listen(0, async () => {
       && ownCard.present.summary.openQuestion === 'What would tell you this was working?');
 
     /* AN INQUIRY IS UNCHANGED. A fix that flattened every card into the commitment reading would
-       pass everything above and destroy the thing the product is actually for. */
-    const inq = present.inquiryCard({ inquiryId: 'i1', topic: { label: 'Arrival timing' },
-      confidence: { band: 'emerging' }, status: 'exploring', hypothesis: 'People arrive late on Tuesdays' });
-    ok('FI-B10 an inquiry still reads as a belief with a band, which is what it is',
-      inq.summary.standing === 'Taking shape' && inq.summary.band === 'emerging'
-      && inq.summary.status === 'Looking into this');
+       pass everything above and destroy the thing the product is actually for.
+
+       THIS WAS ONE ASSERTION AND HAD TO BECOME TWO. It built an inquiry carrying a hypothesis but
+       NO `hypothesisStanding`, and asserted the badge read "Taking shape" — which was right when
+       it was written and went stale under a later law. `thinking` is now admitted as the card's
+       claim only when the kernel has given that hypothesis standing of its own, so for this exact
+       fixture the card has NO claim; and a badge is a statement about a claim. Leaving it meant
+       the card rendered, at 390px, "WELL SUPPORTED" directly above "I don't have a read on this
+       yet" — the contradiction this round removed.
+
+       So the law is asserted where it actually lives, in both directions: a hypothesis WITH
+       standing is a belief and carries a band, and one WITHOUT is not a claim and carries none.
+       What makes an inquiry an inquiry rather than a commitment — the confidence vocabulary and
+       "Looking into this" — is asserted on both, because that is the thing FI-B10 was written to
+       protect and it must survive either way. */
+    const settled = present.inquiryCard({ inquiryId: 'i1', topic: { label: 'Arrival timing' },
+      confidence: { band: 'emerging' }, status: 'exploring',
+      hypothesis: 'People arrive late on Tuesdays',
+      hypothesisStanding: { band: 'emerging', supportedBy: 2 } });
+    ok('FI-B10 an inquiry whose explanation has standing reads as a belief, with a band',
+      settled.summary.standing === 'Taking shape' && settled.summary.band === 'emerging'
+      && settled.summary.status === 'Looking into this'
+      && settled.summary.thinking === 'People arrive late on Tuesdays');
+    const unsettled = present.inquiryCard({ inquiryId: 'i2', topic: { label: 'Arrival timing' },
+      confidence: { band: 'emerging' }, status: 'exploring',
+      hypothesis: 'People arrive late on Tuesdays' });
+    ok('FI-B10b …and one whose explanation has none states no claim, so it wears no badge either',
+      unsettled.summary.thinking === null && unsettled.summary.standing === null);
+    ok('FI-B10c …while still being an INQUIRY rather than a commitment: the band enum and the '
+      + 'status survive, and the explanation is kept as a suggestion at its own standing',
+      unsettled.summary.band === 'emerging' && unsettled.summary.status === 'Looking into this'
+      && !!unsettled.summary.possibleExplanation
+      && unsettled.summary.possibleExplanation.statement === 'People arrive late on Tuesdays');
     const inqVoice = voice.explainObject({ kind: 'inquiry', label: 'Arrival timing',
       claim: 'people arrive late on Tuesdays', band: 'emerging', seed: 'x' });
     ok('FI-B11 …and still climbs the epistemic ladder in its grammar',

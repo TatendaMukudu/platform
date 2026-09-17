@@ -593,6 +593,65 @@ _rebuildEmailIndex();
     ok('PC-I3 …and the first screen still reads as a product rather than as a fallback',
       /First Team/.test(finalHome) && /Communication after results/i.test(finalHome));
 
+    /* ══ N — A BADGE IS A STATEMENT ABOUT A CLAIM ══════════════════════════════════════════
+       Found by reading the rendered screen rather than by testing a function. On Home, on
+       Inquiries and on Lows, the group's own question rendered:
+
+           Communication after results
+           WELL SUPPORTED
+           I don't have a read on this yet — what has been described is on the record, and
+           the reason for it is still open.
+
+       Two adjacent lines contradicting each other in IntelliQ's own voice, and the reader
+       resolves it the wrong way round every time because a badge in capitals is louder than a
+       sentence. The band was the OBSERVATION's, earned by five people describing something; the
+       claim it was sitting above was the missing EXPLANATION.
+
+       Both owners had the hole. `ai/present.js` already gated `thinking` on the hypothesis having
+       standing and left `standing` — the badge — ungated, which its own comment had predicted in
+       the words "a law with one owner and two renderers is a law with a hole in it".
+       `ai/voice.js` said in a comment that the band is "deliberately NOT spoken here" and then
+       returned it as a field two lines below.
+
+       The assertion is the law rather than the spelling: wherever the product says it has no read
+       yet, no confidence word appears on that screen. It does NOT assert the provenance line is
+       absent — "five people, five independent sources" is a fact about the record that stays true
+       and is the right thing to show when there is no read. */
+    console.log('\n  N — NO CONFIDENCE WORD ON A SCREEN THAT SAYS IT HAS NO READ');
+    const _BANDS = /\b(WELL SUPPORTED|FAIRLY SURE|LIKELY|TAKING SHAPE|EARLY THINKING)\b/i;
+    const contradictions = [];
+    for (const dest of ['home', 'inquiry', 'low', 'high']) {
+      await coach.page.evaluate(d => navigate(d), dest);
+      await coach.page.waitForTimeout(1500);
+      const body = await textOf(coach.page, null);
+      if (/don't have a read on this yet/i.test(body) && _BANDS.test(body)) {
+        contradictions.push(`${dest} (${(body.match(_BANDS) || [])[0]})`);
+      }
+    }
+    ok('PC-N1 no screen pairs "I have no read" with a confidence badge: '
+      + (contradictions.length ? contradictions.join(', ') : 'none'), contradictions.length === 0);
+    /* AND THE CONTROL. If the no-read sentence had simply stopped appearing, N1 would pass while
+       the product said nothing at all — so the state this measures has to still be reachable. */
+    /* THE CONTROL, AND IT WAS WRONG FIRST. It pinned the no-read state to the `low` screen, and
+       on this fixture the Lows bucket is empty — "Nothing needs attention right now." So N1 was
+       passing over a screen with no claim on it at all, which is exactly the vacuous-pass shape
+       a control exists to catch, and the control caught itself.
+
+       The honest control is that the state N1 measures is REACHABLE somewhere in the product,
+       not that it lives on a screen chosen in advance. */
+    let sawNoRead = false, sawProvenance = false;
+    for (const dest of ['home', 'inquiry', 'low', 'high']) {
+      await coach.page.evaluate(d => navigate(d), dest);
+      await coach.page.waitForTimeout(1200);
+      const b = await textOf(coach.page, null);
+      if (/don't have a read on this yet/i.test(b)) sawNoRead = true;
+      if (/independent source/i.test(b)) sawProvenance = true;
+    }
+    ok('PC-N2 …and that state is genuinely reachable, so N1 was not measuring empty screens',
+      sawNoRead);
+    ok('PC-N3 …with what the record DOES establish still said plainly where there is a record',
+      sawProvenance);
+
     /* ══ M — AND THE OTHER PHONE ═══════════════════════════════════════════════════════════
        Everything above ran at 390px, which is the narrow end of the device class and the right
        place to find clipping. 430px is the other end — a Pro Max — and it finds the opposite

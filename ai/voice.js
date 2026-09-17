@@ -211,7 +211,30 @@ function explainObject(obj = {}) {
     kind,
     headline,
     claim: claimLine,
-    confidence: sure,
+    /* ── AND THE BADGE HAD TO GO WITH THE SENTENCE ────────────────────────────────────────────
+       The block above says the band is "deliberately NOT spoken here", because a confidence word
+       beside "I don't have a read yet" is the same lie in a quieter register. That fixed the
+       PROSE and left this field alone, so the sentence stopped saying it and the card went on
+       rendering it -- as a badge, in capitals, directly above the sentence denying it.
+
+       Driven at 390px on the group's own question, the card read:
+
+           Communication after results
+           WELL SUPPORTED
+           I don't have a read on this yet -- what has been described is on the record, and
+           the reason for it is still open.
+
+       Two adjacent lines contradicting each other in IntelliQ's own voice, and the reader
+       resolves it the wrong way round every time because a badge is louder than a sentence. The
+       band is the OBSERVATION's, earned by five people describing something; the claim it gets
+       attached to is the missing EXPLANATION.
+
+       So the structured field follows the same rule as the sentence. `null` means "there is
+       nothing to be confident ABOUT", which is exactly what a focus already returns and what
+       every consumer of this field therefore already handles. The provenance line stays: "five
+       people, five independent sources" is a fact about the record that remains true and is the
+       right thing to show when there is no read yet. */
+    confidence: claim ? sure : null,
     provenance: prov,
     whyIThinkThat: why,
     stillUnknown: unknown,

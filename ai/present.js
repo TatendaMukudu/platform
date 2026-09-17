@@ -185,9 +185,34 @@ function inquiryCard(inquiry = {}) {
 
     summary: {
       title: humanTopic(topic),
-      // The reading of the band, and the band itself, because a caller that wants to style by
-      // band must not have to parse English back into an enum.
-      standing: humanBand(conf.band),
+      /* ── AND THE BADGE IS THE CLAIM'S, SO WITH NO CLAIM THERE IS NO BADGE ──────────────────
+         `thinking` below is already gated: a hypothesis is admitted as the card's claim only when
+         the kernel gave it standing of its own. This field was not, and it is the OTHER half of
+         the same law -- which this file's own note twenty lines down predicted, in the sentence
+         "a law with one owner and two renderers is a law with a hole in it".
+
+         The hole was rendered. Driven at 390px on a group's own question, the card read:
+
+             Communication after results
+             WELL SUPPORTED
+             I don't have a read on this yet -- what has been described is on the record,
+             and the reason for it is still open.
+
+         Two adjacent lines contradicting each other, and the reader resolves it the wrong way
+         round every time, because a badge in capitals is louder than a sentence. The band is the
+         OBSERVATION's -- earned by five people describing something -- and with `thinking` empty
+         there is no claim for it to be a band ABOUT, so it lands on the observation, which is not
+         what a confidence badge means anywhere else in the product.
+
+         NOTHING IS LOST BY REMOVING IT. How well established the observation is was never the
+         badge's job and is already said better, in words, by the provenance line the same card
+         carries: "five people, five independent sources". A band is for what IntelliQ BELIEVES;
+         the provenance is for what it was TOLD. Keeping both and labelling neither is what
+         produced the contradiction.
+
+         `band` is left untouched: it is the enum a caller styles from, and the surfaces gate the
+         badge on `standing` being present, so a null standing renders nothing. */
+      standing: (hypothesisHasStanding(i) ? humanBand(conf.band) : null),
       band: String(conf.band || 'tentative'),
       /* The badge's explanation, composed from the counts the score was computed from — see
          confidenceWhy. It rides on `summary` because the badge is on the first screen and its
