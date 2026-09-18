@@ -93,8 +93,8 @@ const server = app.listen(0, async () => {
     .then(async r => ({ status: r.status, ct: r.headers.get('content-type') || '',
       j: (r.headers.get('content-type') || '').includes('json') ? await r.json().catch(() => null) : null,
       buf: (r.headers.get('content-type') || '').includes('json') ? null : Buffer.from(await r.arrayBuffer()) }));
-  const say = (text, conversationId, extra) => call('POST', '/api/assistant/turn',
-    Object.assign({ text, conversationId }, extra || {}));
+  const say = (text, conversationId, extra, who = 'me') => call('POST', '/api/assistant/turn',
+    Object.assign({ text, conversationId }, extra || {}), who);
   const said = r => String((((r.j || {}).response) || {}).responseText || '');
 
   try {
@@ -240,6 +240,36 @@ const server = app.listen(0, async () => {
     /* AND THE DOCUMENT'S OWN SOURCE IS UNAFFECTED BY THE PICTURE'S DELETION. */
     ok('F5 deleting one source did not touch another',
       (await call('GET', `/api/materials/${mid}`)).status === 200);
+
+    /* ══ G — AND THE SEARCH ASKS WHOSE DOCUMENT IT IS ══════════════════════════════════════
+       `_conversationMaterialRow` refuses a private material belonging to somebody else. A
+       conversation is per-person, so in ordinary operation another reader's document cannot be on
+       one of mine — which means that guard is defence in depth and NOTHING EXERCISED IT. Removing
+       it left every assertion above green, which is the definition of a guard nobody is testing.
+
+       So the state it defends against is constructed directly: Rudo's private material, carrying a
+       ref to Tendai's conversation. That is not a state the product can reach today; it is the
+       state the check exists for, and the check should hold whether or not something upstream ever
+       lets it happen. */
+    console.log('\n  G — AND GOING BACK TO THE SOURCE ASKS WHOSE SOURCE IT IS');
+    const hers = await call('POST', '/api/assistant/attachments',
+      { filename: 'rudo-notes.txt', text: 'Rudo private notes. The secret number is 4711.' }, 'mate');
+    ok('G1 she has a private material of her own', hers.status === 200);
+    const mine = await call('POST', '/api/assistant/turn', { text: 'let us talk about the season' });
+    const mineConv = String(mine.j.conversationId);
+    /* THE CONSTRUCTION, stated rather than hidden: her material, pointed at his conversation. */
+    const herRow = (S.materials[C] || {})[String(hers.j.materialId)];
+    herRow.refs = (herRow.refs || []).concat([{ kind: 'conversation', id: mineConv, at: Date.now(), by: 'mate' }]);
+    ok('G2 …and it is now, artificially, attached to his conversation',
+      herRow.refs.some(r => r.kind === 'conversation' && String(r.id) === mineConv));
+    const pry = await say('What is the secret number?', mineConv);
+    ok('G3 …but going back to the source does not read it out to him',
+      !/4711/.test(said(pry)));
+    ok('G4 …and he is not told it exists', !/rudo-notes/i.test(said(pry)));
+    /* AND SHE CAN STILL READ HER OWN. The guard is about whose it is, not about refusing
+       everybody — a refusal that applied to the owner too would pass G3 for the wrong reason. */
+    const herOwn = await say('What is the secret number?', String(hers.j.conversationId), {}, 'mate');
+    ok('G5 …while she can still find it in her own conversation', /4711/.test(said(herOwn)));
 
   } catch (e) { fail++; console.error('  FAIL source-reread suite threw:', e && e.stack); }
 
