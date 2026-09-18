@@ -12464,6 +12464,107 @@ function _objectSelfRead(code, userId, object) {
   } catch (_) { return null; }
 }
 
+/* ── WHAT HAS BEEN LEARNED, WHICH IS NOT A NEW TRUTH STORE ───────────────────────────────────
+   FOUNDER, September 2026: *"What have we learned?" works when bound to an object but dead-ends
+   from Home. Do not solve this by adding another English cue. The missing capability is semantic.
+   Determine whether it should be an existing reader that is not exposed, an aggregation over
+   existing canonical readers, or a genuinely missing bounded learning read model. Prefer reuse.
+   Do not create another truth store.*
+
+   IT IS THE SECOND OF THE THREE. Nothing was missing from the record: learning in this product is
+   what happened after somebody committed to something — a Focus with an OUTCOME — together with
+   the questions that are still open around it. Both already exist, both are already authorised by
+   one owner, and nothing read them together.
+
+   So this aggregates `_allObjectsFor`, the same authorised set every object surface reads, and
+   invents nothing. An object this person may not open cannot appear, because it is not in the set
+   before this function starts.
+
+   THREE LAWS IT DOES NOT BREAK, stated because each is easy to break here:
+     NO CAUSATION. A Focus followed by "it helped" is what somebody observed after working on it.
+       This reports the pair; it never says the Focus caused the change.
+     NO RANKING. It never orders people, and it never reads across to somebody else's record —
+       the authorised set is this reader's own.
+     NO GLOBAL ANSWER OUT OF NOTHING. With no recorded outcomes it returns null and the caller's
+       ordinary refusal stands, rather than a confident paragraph about an empty history.
+
+   SCOPE COMES FROM THE OBJECTS, not from the question. A personal Focus is "I"; one carrying a
+   node or other participants is "we". That is the same distinction the cards already draw, so the
+   sentence and the screen cannot disagree about whose learning it is. */
+const _LEARN_STOP = new Set(('a,an,and,are,as,at,be,but,by,can,did,do,does,for,from,had,has,have,'
+  + 'how,i,if,in,into,is,it,its,me,my,no,not,of,on,or,our,so,that,the,their,them,then,there,these,'
+  + 'they,this,to,us,was,we,were,what,when,where,which,who,why,will,with,you,your,about,anything,'
+  + 'learn,learned,learnt,learning,far,now,yet,ever,much,any,some,tell,say,know'
+).split(','));
+
+function _learningRead(code, userId, question) {
+  try {
+    const authorised = _allObjectsFor(code, userId);
+    /* LEARNING IS AN OUTCOME THAT WAS RECORDED. A Focus nobody reported back on taught nothing
+       yet, and saying otherwise would turn an intention into a finding. */
+    const withOutcome = authorised
+      .filter(o => o && o.kind === 'focus')
+      .map(o => ({ o, out: ((o.present || {}).detail || {}).outcome || null }))
+      .filter(x => x.out && x.out.result);
+    if (!withOutcome.length) return null;
+
+    const terms = [...new Set(String(question || '').toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/)
+      .filter(w => w.length > 2 && !_LEARN_STOP.has(w)))];
+    const wordsOf = x => `${((x.o.present || {}).summary || {}).full || ''} `
+      + `${(x.o.explained || {}).headline || ''} ${String(x.out.note || '')}`.toLowerCase();
+    const hits = terms.length
+      ? withOutcome.filter(x => terms.some(t => wordsOf(x).includes(t)))
+      : [];
+
+    /* NARROWED, when their words point somewhere. */
+    if (hits.length) {
+      const lines = hits.slice(0, 4).map(x => {
+        const title = String(((x.o.present || {}).summary || {}).full
+          || (x.o.explained || {}).headline || '').replace(/\.$/, '');
+        /* WHOSE IT IS, FROM THE OBJECT. A group object carries the node's name; one shared with
+           named people carries them in `participants`. Both are "we"; a Focus that is only yours
+           is "I", and saying "with" about it would invent company nobody agreed to. */
+        const _raw = x.o.raw || {};
+        const _others = (_raw.participants || []).filter(id => String(id) !== String(userId));
+        const whose = x.o.whose && x.o.whose !== 'you' ? `with ${x.o.whose}`
+          : (_others.length ? `with ${_others.length === 1 ? _nameOf(code, _others[0])
+              : `${_others.length} others`}` : null);
+        return `You worked on "${title}"${whose ? ` ${whose}` : ''}, and afterwards recorded: `
+          + `${String(x.out.reading || present.outcomeText(x.out.result) || '').toLowerCase()}.`;
+      });
+      /* AND THE QUESTIONS STILL OPEN AROUND IT, because learning that reports only what worked is
+         a highlight reel. Taken from the same authorised set. */
+      const open = authorised.filter(o => o && o.kind === 'inquiry'
+        && terms.some(t => String((o.explained || {}).headline || '').toLowerCase().includes(t)))
+        .slice(0, 2)
+        .map(o => String((o.explained || {}).headline || '').replace(/\.$/, ''));
+      if (open.length) lines.push(`Still open alongside that: ${open.join('; ')}.`);
+      return { text: lines.join(' '), count: hits.length,
+        limitations: [
+          'that is what was recorded after each one, not proof any of them caused the change',
+          'it covers what you can see, and nothing from anybody else\'s record' ] };
+    }
+
+    /* TOO BROAD, AND THERE IS SOMETHING TO NARROW TO. The founder's own instruction: summarise the
+       most relevant, or ask which area they mean — and do not fabricate a global answer. Asking is
+       the honest half when their words pointed at nothing in particular, and it is only worth
+       asking when there really are areas to choose between. */
+    const areas = [...new Set(withOutcome.map(x => String(((x.o.present || {}).summary || {}).full
+      || (x.o.explained || {}).headline || '').replace(/\.$/, '')).filter(Boolean))];
+    if (!areas.length) return null;
+    return {
+      text: areas.length === 1
+        ? `The one thing with anything recorded against it is "${areas[0]}" — shall I go through that?`
+        : `There are ${areas.length} things with something recorded against them: `
+          + `${areas.slice(0, 4).map(a => `"${a}"`).join(', ')}`
+          + `${areas.length > 4 ? ' and others' : ''}. Which of those did you mean?`,
+      count: areas.length, asked: true,
+      limitations: ['nothing here is a conclusion; it is a list of what has something recorded against it'],
+    };
+  } catch (_) { return null; }
+}
+
 function _assistantAnswer(code, userId, question, opts = {}) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -12738,6 +12839,22 @@ function _assistantAnswer(code, userId, question, opts = {}) {
         answer = _self.text;
         confidence = 'confirmed';   // about WHAT IS ON THE RECORD, which is the only claim made
         limitations = _self.limitations;
+      }
+      /* ── AND WHAT HAS BEEN LEARNED, WHICH IS THE LAST THING TO TRY ───────────────────────
+         Round 5 left this dead-ending from Home: bound to a Focus it worked, unbound it did not.
+         The founder ruled that the missing piece was the CAPABILITY, not an English phrase — so
+         this is not triggered by matching a question. It sits where the refusal sits, as the last
+         thing tried before saying there is nothing, exactly like the material and bound-object
+         branches above. A question that overlaps somebody's recorded outcomes is answered from
+         them; one that overlaps nothing is offered the areas rather than a fabricated summary;
+         and with nothing recorded at all it returns null and the refusal below still stands. */
+      else if (_learningRead(code, userId, q)) {
+        const _l = _learningRead(code, userId, q);
+        answer = _l.text;
+        /* AN OFFER TO NARROW IS NOT A FINDING. Confidence follows what is being said: the
+           narrowed answer reports records, the broad one reports a list. */
+        confidence = _l.asked ? 'none' : 'confirmed';
+        limitations = _l.limitations;
       }
       else {
         answer = `I don't have enough authorised evidence to answer that yet.`;
