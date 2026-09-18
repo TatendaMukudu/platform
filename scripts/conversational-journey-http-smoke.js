@@ -57,6 +57,17 @@ _loadAllStores({
   } },
   orgNodes: { [C]: { first: { nodeId: 'first', name: 'First Team', parentId: null,
     childNodeIds: [], memberIds: ['me', 'mate', 'coach'], leaderIds: ['coach'] } } },
+  /* ── AN EMPTY INQUIRY NOBODY ASKED FOR, which is the OTHER failure and the control for C3d.
+     The bucket hides a signal-less inquiry because a shell the machine derived is noise on
+     somebody's screen; the September 2026 repair narrows that to "signal-less AND nobody opened
+     it". Without this row, widening the filter all the way back open would pass every assertion
+     in this file, so the fix would be proved in one direction only. */
+  inquiryStates: { [C]: { 'member:me': { 'derived.noise': {
+    inquiryId: 'inq_derived_empty', subjectRef: 'member:me',
+    topic: { canonicalConcept: 'derived.noise', label: 'Something nobody has spoken about' },
+    status: 'exploring', hypotheses: [], signals: [], missingSignals: [], falsifiers: [],
+    timeline: [], lastUpdatedAt: Date.now(),
+  } } } },
 });
 _rebuildEmailIndex();
 
@@ -147,6 +158,12 @@ const server = app.listen(0, async () => {
     ok('C3b …carrying no confidence, because nobody has said anything about it yet',
       (((visible.j || {}).objects) || []).filter(o => String(o.id) === String(inqId))
         .every(o => !(o.explained || {}).confidence));
+    /* THE CONTROL, BOTH WAYS. Hiding everything empty made the confirmation a lie; showing
+       everything empty fills a person's screen with questions no human ever asked. */
+    ok('C3c …while an empty inquiry nobody opened is still not on their screen',
+      !(((visible.j || {}).objects) || []).some(o => String(o.id) === 'inq_derived_empty'));
+    ok('C3d …and that row really is in the store, so C3c is testing a filter rather than an absence',
+      !!((S.inquiryStates[C] || {})['member:me'] || {})['derived.noise']);
 
     /* ══ D — AND THE SAME SENTENCE FROM INSIDE AN OBJECT ═══════════════════════════════════
        `create_focus` lists inquiry, high, low, focus and conversation among its contexts, which is
