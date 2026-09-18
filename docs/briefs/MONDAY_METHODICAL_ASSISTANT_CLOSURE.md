@@ -49,7 +49,21 @@ Acceptance examples are semantic, not phrase lists:
 - "That helped." -> learning without causal overclaim.
 - "What should we do next?" -> adjust existing Focus unless B materially changed.
 
-### 2. Simplify object thread UI without deleting capability
+### 1b. Preserve journey conversation, never transfer another person's chat
+
+When a High/Low/Inquiry produces a deliberate B and becomes the basis for a Focus, preserve the conversation/Forum journey for the **same authorized participant set**. The human experience should be continuous rather than "old object closed, new empty chat."
+
+Implement this through existing governed thread/object relationships; do not copy messages into a new truth store.
+
+Critical negative law: similar-A retrieval across another person/team does **not** inherit their conversation. It may retrieve only admissible reusable direction/learning — e.g. prior B/intervention shape/outcome learning at the reader's permitted standing. Private chat, Forum contributions, identities and source evidence remain behind their original audience gates. Relationship is not readership.
+
+Add adversarial tests for:
+- same participant(s): High/Low/Inquiry -> Focus reopens with conversational continuity;
+- unauthorized/new participant: relationship does not expose predecessor chat;
+- different person with similar A: prior B/learning can be available when admissible, predecessor chat cannot;
+- leaving/removal/audience change does not create durable conversation access through the Focus edge.
+
+### 2. Simplify object thread UI without deleting capability### 2. Simplify object thread UI without deleting capability
 
 Static inspection shows `openObjectThread` still permanently renders a verdict row:
 - Work on this
