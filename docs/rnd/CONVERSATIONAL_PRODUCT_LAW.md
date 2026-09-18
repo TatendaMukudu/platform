@@ -77,13 +77,19 @@ Complexity should be earned by actual history. Do not expose empty research-repo
 
 Home: what matters now. A calm current briefing, not a truth-maintenance-system readout.
 
-Highs: what is going well.
+Highs, Lows and Inquiries occupy the same broad phase of the A -> B cycle: **discovery and understanding of A**. They are different human-facing standings/forms of what IntelliQ is learning, not a mandatory sequence.
 
-Lows: what deserves attention.
+Highs: what currently appears to be going well or worth understanding/developing further.
 
-Inquiries: genuine questions IntelliQ/person/team is trying to understand. Onboarding context may seed curiosity but should not become a wall of hollow Inquiry cards simply because IntelliQ lacks a read.
+Lows: what currently appears to deserve attention or further understanding.
 
-Focuses: what the person/team has deliberately chosen to work on. Focuses should be narrow enough to represent a meaningful B; if an input contains several distinct goals, conversation may clarify which is worth working on first.
+Inquiries: important unresolved questions IntelliQ/person/team is actively trying to understand. Onboarding context can legitimately seed these when roles, goals, descriptions, expectations or self-reports create relevant unknowns. Phrase them as real questions and preserve their attributed standing.
+
+These three can strengthen one another. A High can provoke an Inquiry about why something works; a Low can provoke an Inquiry about why something happens; an Inquiry can discover a High, a Low, neither, or a more nuanced understanding. Do not force a linear High/Low -> Inquiry sequence.
+
+Focuses occupy the next broad phase: **B has been identified and a human has deliberately chosen to refine/improve/move toward it.** A Focus can emerge from a High, Low, Inquiry, direct human intention, or a combination of them. The threshold is a meaningful desired state plus deliberate human choice, not completion of a required object sequence. Once inside a Focus, the system helps refine the path toward B through action, observation, outcome and learning rather than returning to object discovery for its own sake.
+
+Focuses should be narrow enough to represent a meaningful B; if an input contains several distinct goals, conversation may clarify which is worth working on first.
 
 Forum: what authorized people are thinking about together. Not a generic social feed.
 
