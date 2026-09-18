@@ -17552,7 +17552,11 @@ function _objectBucket(code, userId, scope = 'self') {
   if (scope === 'self') {
     const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
     for (const i of Object.values(mine)) {
-      if (!i || !(i.signals || []).length) continue;
+      /* NO SIGNALS AND NOBODY ASKED FOR IT is noise, and stays hidden. NO SIGNALS BUT SOMEBODY
+         DELIBERATELY OPENED IT is a question waiting for its first answer, and hiding that made
+         the confirmation a lie: the route said "Inquiry opened" and the person's screens showed
+         nothing, on every scope. `openedBy` is set only by the governed confirmation path. */
+      if (!i || (!(i.signals || []).length && !i.openedBy)) continue;
       const lead = (i.hypotheses || []).find(h => h && h.id === i.leadingHypothesisId);
       add('inquiry', { ...i, hypothesis: lead && lead.statement,
         stillUnknown: (i.missingSignals || []).map(m => m && (m.question || m)).filter(Boolean) });
@@ -20988,6 +20992,20 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       if (!topic) return res.status(400).json({ error: 'inquiry topic required' });
       const concept = `person.inquiry.${_contentHash(topic)}`;
       const inq = _inquiryFor(code, `member:${userId}`, concept, topic, (orgMeta[code] || {}).orgMode || '', Date.now());
+      /* ── A QUESTION SOMEBODY ASKED ON PURPOSE ────────────────────────────────────────────
+         This route answered "Inquiry opened as an unsettled question", wrote a real record —
+         and the person then saw NOTHING, on any surface. `_objectBucket` skips an inquiry with
+         no signals, which is right for a DERIVED one: an empty shell the machine inferred is
+         noise on somebody's screen. It could not tell that apart from a question a person had
+         just asked and confirmed, and nobody has said anything about yet, which is the ordinary
+         and correct state of a brand-new inquiry.
+
+         So the distinction is recorded rather than guessed at. `openedBy` is the fact that a
+         human deliberately opened this, and it is the ONLY thing that changes — the inquiry is
+         still unsettled, still carries no confidence, still invents no answer, and the signal
+         filter is untouched for everything else. Found by driving the coach's phone: typed the
+         sentence, said "yeah", and went looking for the inquiry. */
+      if (inq && !inq.openedBy) inq.openedBy = { userId, at: Date.now(), via: 'confirmation' };
       prop.confirmed = { at: new Date().toISOString(), inquiryId: inq.inquiryId }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'opened', inquiry: { id: inq.inquiryId, status: inq.status },
         note: 'Inquiry opened as an unsettled question. No confidence or answer was invented.' });

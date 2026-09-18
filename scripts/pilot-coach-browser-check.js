@@ -509,6 +509,39 @@ _rebuildEmailIndex();
       && !/I have created|I have opened|created for you/i.test(afterSay));
     ok('PC-K3 …and nothing was written before they approved it',
       !posts.some(p => /\/confirm/.test(p.url)));
+
+    /* ── AND THEN THEY SAY YES IN WORDS, WHICH IS HOW PEOPLE ANSWER ────────────────────────
+       The card has a Confirm button and the button works. But a person who has just been asked
+       a question in a conversation answers it in the conversation — they type "yeah" — and until
+       September 2026 that fell through to be answered as a brand new remark, so the thing they
+       had just agreed to never happened. `resolveAcceptance` closed that, and this is the first
+       time it is driven on a phone rather than over HTTP.
+
+       WHAT MAKES IT SAFE IS ALSO ASSERTED: saying yes RESOLVES, it does not execute. The write
+       still goes through POST /turn/:turnId/confirm — the one mutation path, with its frozen
+       payload and its re-checked authority — and PC-K3d is the assertion that there is no second
+       one. A conversational shortcut that wrote directly would be the dangerous version of this. */
+    const inquiriesBefore = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+        .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
+    posts.length = 0;
+    await coach.page.fill('#iq-composer-input', 'yeah');
+    await coach.page.evaluate(() => MemberApp.wsSend());
+    await coach.page.waitForTimeout(2600);
+    const confirmPost = posts.find(p => /\/confirm/.test(p.url));
+    ok('PC-K3b typing "yeah" reaches the thing that was offered, with no button pressed',
+      !!confirmPost);
+    ok('PC-K3c …through the one governed confirmation route, carrying the proposal it resolved to',
+      !!confirmPost && /\/api\/assistant\/turn\/[^/?#]+\/confirm(\?|#|$)/.test(String(confirmPost.url))
+      && !!(confirmPost.body || {}).proposalId);
+    const inquiriesAfter = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+        .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
+    ok('PC-K3d …and the inquiry the coach asked for now exists, once',
+      inquiriesBefore >= 0 && inquiriesAfter === inquiriesBefore + 1);
+    ok('PC-K3e …and the whole acceptance still fits a 390px screen',
+      await coach.page.evaluate(() =>
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
     /* AND THE HALF THAT IS NOT AN ACTION AT ALL. A High and a Low are not created by asking; they
        appear when people in a group have offered the same observation and said which way it
        points. The product must say that plainly rather than failing silently or pretending. */

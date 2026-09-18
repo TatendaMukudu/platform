@@ -133,6 +133,20 @@ const server = app.listen(0, async () => {
     const inqDone = await acceptAndConfirm('do that', 'me');
     ok('C2 …and "do that" carries it to the governed owner',
       !!inqDone.confirmed && inqDone.confirmed.status === 200);
+    /* ── C3 — AND THE PERSON CAN THEN SEE IT ────────────────────────────────────────────────
+       C2 stopped at a 200, which was not enough and hid a real hole for two rounds. The write
+       was real, the note said "Inquiry opened as an unsettled question" — and the inquiry
+       appeared on NO surface, at any scope. `_objectBucket` skips an inquiry with no signals,
+       which is correct for one the machine derived and wrong for one a person just asked for,
+       and it could not tell them apart. A confirmation whose result is invisible is a
+       confirmation that lied. Asserted here, where it should have been all along. */
+    const inqId = ((inqDone.confirmed.j || {}).inquiry || {}).id;
+    const visible = await call('GET', '/api/objects?kind=inquiry&scope=self', undefined, 'me');
+    ok('C3 …and the person can then see the question they opened',
+      !!inqId && (((visible.j || {}).objects) || []).some(o => String(o.id) === String(inqId)));
+    ok('C3b …carrying no confidence, because nobody has said anything about it yet',
+      (((visible.j || {}).objects) || []).filter(o => String(o.id) === String(inqId))
+        .every(o => !(o.explained || {}).confidence));
 
     /* ══ D — AND THE SAME SENTENCE FROM INSIDE AN OBJECT ═══════════════════════════════════
        `create_focus` lists inquiry, high, low, focus and conversation among its contexts, which is
