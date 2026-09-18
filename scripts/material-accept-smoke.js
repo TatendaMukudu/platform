@@ -262,31 +262,39 @@ ok('M9b …and turning one into evidence is a separate, deliberate act with its 
    reached anyway by a drag or a share sheet, the refusal must be a sentence about what is missing
    rather than a library's ReferenceError. */
 console.log('\n  N — AND WHAT IS OFFERED DEPENDS ON WHAT ACTUALLY LOADED');
-const handlerWith = present => {
+/* THE SWAP IS AWAITED BEFORE IT IS UNDONE. `_processDocx` is async, so if the globals were put
+   back while it was still suspended on `await file.arrayBuffer()`, `JSZip` would be present again
+   by the time the processor reached it — and N4 would be asserting against a different error than
+   the one a coach actually saw. Found by mutating the guard away and watching N4 stay green. */
+const handlerWith = async present => {
   const had = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
   if (present) { globalThis.JSZip = {}; globalThis.XLSX = {}; }
   else { delete globalThis.JSZip; delete globalThis.XLSX; }
   let h = null;
   try { h = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { h = null; }
-  const out = h && { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
-    kinds: h.readableMaterialKinds(),
+  let out = null;
+  if (h) {
     /* A FILE THAT BEHAVES LIKE A FILE, so that WITHOUT the guard this really does reach
        `JSZip.loadAsync` and really does produce the ReferenceError a coach was being shown. A
-       stub with no arrayBuffer would fail earlier, for a reason that is not the bug, and N4 would
-       be passing for the wrong reason. */
-    refusal: (() => { try { const f = { name: 'plan.docx',
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        arrayBuffer: async () => new ArrayBuffer(8) };
-      const p = h.process(f); return p && typeof p.then === 'function'
-        ? p.then(() => null, e => String(e && e.message)) : null; } catch (e) { return String(e && e.message); } })() };
+       stub with no arrayBuffer would fail earlier, for a reason that is not the bug. */
+    const f = { name: 'plan.docx',
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      arrayBuffer: async () => new ArrayBuffer(8) };
+    let refusal = null;
+    try { await h.process(f); } catch (e) { refusal = String(e && e.message); }
+    out = { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
+      kinds: h.readableMaterialKinds(), refusal };
+  }
   globalThis.JSZip = had.JSZip; globalThis.XLSX = had.XLSX;
   if (had.JSZip === undefined) delete globalThis.JSZip;
   if (had.XLSX === undefined) delete globalThis.XLSX;
   return out;
 };
-const withLibs = handlerWith(true);
-const noLibs   = handlerWith(false);
 
+
+(async () => {
+const withLibs = await handlerWith(true);
+const noLibs   = await handlerWith(false);
 ok('N1 with the readers loaded, the offer is exactly what it always was',
   !!withLibs && ['.docx', '.xlsx', '.pptx', '.txt', '.md', '.csv'].every(e => withLibs.material.includes(e)));
 ok('N1b …and the composer still offers them alongside the image types',
@@ -305,13 +313,12 @@ ok('N3b …and the handler says which kinds it can actually read right now, not 
 
 /* THE FILE THAT GETS THERE ANYWAY. A drag, a share sheet, or a page cached before the connection
    went: the picker is not the only door, so the refusal has to be readable too. */
-(async () => {
-  const msg = noLibs && await noLibs.refusal;
+  const msg = noLibs && noLibs.refusal;
   ok('N4 a file picked anyway is refused with a sentence, not a library\'s ReferenceError',
     typeof msg === 'string' && !/is not defined/.test(msg) && !/ReferenceError/.test(msg));
   ok('N4b …that names what is missing and what still works',
     typeof msg === 'string' && /did not load/i.test(msg) && /paste the text/i.test(msg));
-  const fine = withLibs && await withLibs.refusal;
+  const fine = withLibs && withLibs.refusal;
   ok('N4c …and with the readers present that refusal does not happen at all',
     fine === null || !/did not load/i.test(String(fine)));
 
