@@ -12621,6 +12621,62 @@ function _assistantAnswer(code, userId, question, opts = {}) {
         // lets the governed reasoner take the question instead (see _assistantTurn).
         standingRead = true;
       }
+      /* ── GOING BACK TO THE SOURCE, BEFORE SAYING THERE IS NOTHING ───────────────────────
+         FOUNDER, September 2026: *Retained source material exists partly so IntelliQ can inspect
+         it again. If that information was not preserved in the initial description, IntelliQ must
+         be capable of re-reading the authorized source rather than fabricating an answer or
+         claiming the information is unavailable while the source still exists.*
+
+         The branch below hands over the document's STRUCTURE — "I have this, it is in twenty
+         parts". That is right for "what is this?" and wrong for "what was their home record
+         again?", where the answer may be in part nineteen, outside the context cap, present the
+         whole time and never offered. `material.findIn` searches the WHOLE material for the parts
+         that bear on the question and returns their own words, with the part named.
+
+         RETRIEVAL, NOT UNDERSTANDING. Nothing is summarised and nothing is inferred: what comes
+         back is text already in the document. The reading stays the reader's, which is why the
+         answer says where each piece came from rather than drawing a conclusion from it. */
+      /* ── A PICTURE HAS NO PARTS TO SEARCH, AND THE BYTES ARE STILL THERE ────────────────
+         An image material's text is a DESCRIPTION — one model's account of the picture, written
+         when it arrived to answer a question nobody had asked yet. "What was their home record
+         again?" about a screenshot of a league table is exactly the case the founder named: the
+         answer is in the picture, was never in the description, and the picture is kept.
+
+         Looking again needs vision, which is a provider capability and is off in the pilot. So
+         this says WHICH of the two situations it is, and they are different facts a person is
+         entitled to tell apart:
+
+           the original is gone        there is nothing to look at, and that is final
+           the original is here        it can be looked at again, just not right now
+
+         Saying "I don't have that" for the second one would be false while the file sits in the
+         store, which is the specific dishonesty this branch exists to prevent. It does NOT guess
+         at the answer from the description, because a description that did not mention the home
+         record is not evidence about the home record. */
+      else if (opts.materialRow && String(opts.materialRow.kind) === 'image'
+               && opts.materialRow.sourceMedia && opts.materialRow.sourceMedia.retained) {
+        const _name = opts.materialRow.filename || opts.materialRow.title || 'that picture';
+        answer = ai.canUnderstand('image')
+          ? `I can look at ${_name} again for that — ask me to and I will read it properly rather `
+            + 'than answering from the note I made when it arrived.'
+          : `What I wrote down when ${_name} arrived does not cover that. The picture itself is `
+            + 'still here, so it can be looked at again — that needs the reasoning engine, which '
+            + 'is not available on this host right now. I am not going to guess at it from the note.';
+        confidence = 'none';
+        limitations = ['the original is retained and can be re-read; the note taken from it does not answer this',
+          'nothing here was inferred from the description'];
+      }
+      else if (opts.materialRow && material.findIn(opts.materialRow, q, { max: 2 })) {
+        const hit = material.findIn(opts.materialRow, q, { max: 2 });
+        answer = `From ${hit.filename || hit.title}:\n\n${hit.text}`;
+        confidence = 'confirmed';   // about WHAT THE DOCUMENT SAYS, the only claim being made
+        limitations = [
+          `those are the parts of ${hit.filename || hit.title} that mention `
+            + hit.matched.slice(0, 4).join(', ') + ', in its own words',
+          'external material is not evidence about a person or the organisation',
+        ];
+        cites = [];
+      }
       else if (opts.material && opts.material.title) {
         /* ── THE DOCUMENT THEY JUST ATTACHED IS NOT "NO AUTHORISED EVIDENCE" ──────────────────
            A coach uploads a debrief review, asks "what does this say?", and was told "I don't
@@ -15734,6 +15790,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
          was on the card the person was looking at. */
       qa = _assistantAnswer(code, userId, cls.questionText || text,
         { material: _conversationMaterialContext(code, userId, _conv),
+          /* AND THE WHOLE MATERIAL, not only the capped context built from it, so a question can
+             be answered from a part the cap left out. Same authority: `_conversationMaterialRow`
+             resolves through the same owner and returns nothing for a document this reader could
+             not open. */
+          materialRow: _conversationMaterialRow(code, userId, _conv),
           object: actionContext && actionContext.object ? actionContext.object : null });
     } catch (_) { qa = null; }
   }
@@ -18996,6 +19057,20 @@ function _materialContext(code, userId, about) {
    `_materialFor` now takes `requireObject`, so the object rule stays exactly as it was for
    anything hanging on a High, a Low, an Inquiry or a Focus. The visibility half is repeated here
    rather than assumed, because this is the function that decides what reaches a model. */
+/* THE WHOLE MATERIAL BOUND TO THIS CONVERSATION, through the SAME authority as the bounded
+   context beside it — a document this reader may not open resolves to nothing here too. Separate
+   from `_conversationMaterialContext` because they answer different questions: that one is "what
+   may the model be handed this turn", capped and in document order; this one is "which document
+   is this conversation about", so a search can go through all of it. */
+function _conversationMaterialRow(code, userId, conversation) {
+  if (!conversation || !(assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === conversation.id)) return null;
+  const latest = Object.values(_materials(code)).filter(m => _materialOn(m, 'conversation', conversation.id))
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  if (!latest) return null;
+  if (latest.visibility === 'private' && String(latest.byId) !== String(userId)) return null;
+  return latest;
+}
+
 function _conversationMaterialContext(code, userId, conversation) {
   if (!conversation || !(assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === conversation.id)) return null;
   const latest = Object.values(_materials(code)).filter(m => _materialOn(m, 'conversation', conversation.id))

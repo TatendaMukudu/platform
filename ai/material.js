@@ -292,6 +292,89 @@ function contextFor(material = {}, { sectionIds = null, cap = CONTEXT_CAP } = {}
   };
 }
 
+/* ── 2b. GOING BACK TO THE SOURCE ────────────────────────────────────────────────────────────
+
+   FOUNDER, September 2026: *Retained source material exists partly so IntelliQ can inspect it
+   again. If that information was not preserved in the initial description, IntelliQ must be
+   capable of re-reading the authorized source rather than fabricating an answer or claiming the
+   information is unavailable while the source still exists.*
+
+   `contextFor` above hands over as much as fits under a cap, in document order. That is right for
+   "here is the briefing" and wrong for "what was their home record again?" — the answer may be in
+   part nineteen of a twenty-part deck, outside the cap, present the whole time and never offered.
+
+   So this looks through the WHOLE material for the parts that bear on a question, and returns
+   their own words. It is deterministic, needs no model, and cannot fabricate: what comes back is
+   text that is already in the document, with the part it came from named so somebody can check.
+
+   IT IS RETRIEVAL, NOT UNDERSTANDING. No scoring of relevance beyond word overlap, no summary, no
+   inference. A word that appears in the question and in a part is a reason to show that part to a
+   person; it is not a claim about what the part means. The reading stays the reader's. */
+const _STOP = new Set(('a,an,and,are,as,at,be,but,by,can,did,do,does,for,from,had,has,have,how,i,'
+  + 'if,in,into,is,it,its,me,my,no,not,of,on,or,our,so,that,the,their,them,then,there,these,they,'
+  + 'this,to,was,we,were,what,when,where,which,who,why,will,with,you,your,again,about,tell,say'
+).split(','));
+
+function _terms(question) {
+  return [...new Set(String(question || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !_STOP.has(w)))];
+}
+
+function findIn(material = {}, question, { max = 3, cap = CONTEXT_CAP } = {}) {
+  const terms = _terms(question);
+  if (!terms.length) return null;
+  const secs = _arr(material.sections).filter(Boolean);
+  if (!secs.length) return null;
+  const scored = secs.map(s => {
+    const hay = `${s.heading || ''} ${s.text || ''}`.toLowerCase();
+    /* WHICH of the asked-about words are in this part, not how many times. A part that repeats
+       one word twenty times is not more about the question than a part that mentions two of
+       them — counting occurrences would rank a header block above the answer. */
+    const hits = terms.filter(t => hay.includes(t));
+    return { s, hits: hits.length, matched: hits };
+  }).filter(x => x.hits > 0);
+  if (!scored.length) return null;
+  scored.sort((a, b) => (b.hits - a.hits) || (a.s.ordinal - b.s.ordinal));
+  const take = scored.slice(0, Math.max(1, max));
+  const lines = [];
+  let used = 0;
+  for (const x of take) {
+    /* WHAT A PERSON READS, NOT WHAT THE STORE CALLS IT. `contextFor` prefixes `[s2]` because it
+       is talking to a model that may need to cite a part; this is talking to somebody, and an
+       internal section id in front of a sentence is architecture vocabulary in a conversation.
+
+       AND THE HEADING IS NOT ALWAYS A HEADING. `segment` derives one from a part's opening line,
+       so for ordinary prose the "heading" IS the first line of the text — printing both gave the
+       same sentence twice. It is shown only when it says something the text does not already
+       start with, which for a deck is "Slide 3: …" and for a paragraph is nothing. */
+    const head = String(x.s.heading || '').trim();
+    const body = String(x.s.text || '').trim();
+    /* CONTAINS, not starts-with. A slide's text begins "Slide 3: …" while its derived heading is
+       the words after that, so a prefix test says they differ and prints the same sentence twice.
+       The question is whether the heading adds anything the body does not already say. */
+    const block = (head && !body.toLowerCase().includes(head.toLowerCase().slice(0, 40)))
+      ? `${head}\n${body}` : body;
+    if (!block) continue;
+    if (used + block.length > cap) break;
+    lines.push(block);
+    used += block.length;
+  }
+  if (!lines.length) return null;
+  return {
+    title: _s(material.title, 200),
+    filename: _s(material.filename, 200),
+    sectionIds: take.slice(0, lines.length).map(x => x.s.id),
+    headings: take.slice(0, lines.length).map(x => _s(x.s.heading, 120)),
+    matched: [...new Set(take.flatMap(x => x.matched))],
+    /* WHETHER THIS SEARCHED THE WHOLE THING. A caller that only ever sees the capped context
+       would otherwise report "not in the document" about a part it was never shown. */
+    searched: secs.length,
+    text: lines.join('\n\n'),
+  };
+}
+
 /* ── 3. DID IT LAND? ─────────────────────────────────────────────────────────────────────────
 
    `engagements` are declarations: { personId, sectionId, state, at }. Everything below is
@@ -382,5 +465,5 @@ function landedNote(u = {}) {
 module.exports = {
   TEXT_CAP, SECTION_CAP, SECTION_TEXT, CONTEXT_CAP, MIN_SECTION, ENGAGEMENT, KINDS,
   CLASSES, DEFAULT_CLASS, CLASS_TEXT, classifyRequest, hasReadableText,
-  segment, contextFor, understanding, landedNote,
+  segment, contextFor, findIn, understanding, landedNote,
 };
