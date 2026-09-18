@@ -317,12 +317,16 @@ const server = app.listen(0, async () => {
     /* THE HONEST HALF. Acceptance in another language is not a deterministic capability — saying
        so is better than a Shona word list, which is the allowlist the language layer already lost
        once. Confirming through the card still works, and that is the path that must not break. */
-    const g1p = props(g1).find(p => p.actionType === 'create_focus');
+    /* A MISSING PROPOSAL MUST FAIL G3, NOT BLIND IT. Mutation M1 (the model's reading discarded,
+       so the English list is the only signal again) made G0 red and then THREW here, which took
+       G3-G6 out of the run entirely — a failing assertion that switches off the four assertions
+       behind it reports a smaller problem than it found. */
+    const g1p = props(g1).find(p => p.actionType === 'create_focus') || { id: '__no_proposal__' };
     const g1done = await call('POST', `/api/assistant/turn/${g1.j.turnId}/confirm`, { proposalId: g1p.id });
     ok('G3 …while confirming it reaches the same governed owner',
       g1done.status === 200 && !!g1done.j.focus);
     ok('G4 …and the Focus carries the person\'s own words, untranslated',
-      /Taura kutanga/.test(String(g1done.j.focus.text)));
+      /Taura kutanga/.test(String(((g1done.j || {}).focus || {}).text)));
     SEEN.length = 0;
     picks('create_inquiry', { text: 'kungani sithula nxa sesivinjelwe' });
     const g5 = await say('Ngifuna ukwazi ukuthi kungani sithula nxa sesivinjelwe');
@@ -330,6 +334,47 @@ const server = app.listen(0, async () => {
       SEEN.length > 0 && SEEN.join('').includes('create_inquiry'));
     ok('G6 …and produces the same governed proposal',
       props(g5).some(p => p.actionType === 'create_inquiry'));
+
+    /* ══ H — AND THE MODEL'S READING IS A READING, NOT AUTHORITY ═══════════════════════════
+       Section G handed the model a field that opens the commitment gate, which is the right
+       architecture and also a new surface: the party that reads the sentence can now say the
+       word that lets a Focus be staged. Two properties stop that becoming a way to TALK past
+       the gate, and NEITHER WAS ASSERTED when the fix first went in — two mutations survived
+       the very suite that found the defect, and the second survived `npm test` entire. That is
+       the shape round 5 warned about: a suite that proves the capability and not the limit.
+
+         · the field is CLOSED. Two exact strings and nothing else: no coercion, no truthiness,
+           no unknown value falling through to the permissive one. A field that took whatever
+           arrived would let a provider open the gate with almost any reply.
+         · the QUESTION VETO IS NOT NEGOTIABLE. "Should I work on this?" is not a declaration
+           however it is labelled, so deterministic code keeps the refusal. The model interprets
+           language; it does not acquire mutation authority. H4 asks it in English and in Shona,
+           because that veto is punctuation and structure rather than vocabulary and must not
+           quietly become another thing that only works in one language.
+
+       H5 is the control that stops the four refusals above it being satisfied by a route that
+       stages nothing at all: the SAME Shona sentence, with the field filled in properly, does
+       produce the proposal. Without it, deleting create_focus outright would make H1-H4 greener. */
+    console.log('\n  H — THE FIELD IS CLOSED, AND THE QUESTION VETO STAYS WITH THE CODE');
+    const DECLARES = 'Ndinoda kushanda pakuchengetedza bhora';
+    const ASKS_SN  = 'Ndoita sei kuti ndichengetedze bhora?';
+    /* One helper, one sentence, one variable: what the model says it read. */
+    const readAs = async (intent, text) => {
+      NEXT = { actions: [{ type: 'create_focus', arguments: { text: 'Chengetedza bhora' },
+        reason: 'they said so' }], intent, needsClarification: null };
+      return props(await say(text || DECLARES)).some(p => p.actionType === 'create_focus');
+    };
+    ok('H1 a reading that is not one of the two words does not open the commitment gate',
+      !(await readAs('declared')));
+    ok('H2 …nor does one that merely CONTAINS the word',
+      !(await readAs('stated: they clearly want this')));
+    ok('H3 …nor a value that is only the word once something has coerced it to a string',
+      !(await readAs(['stated'])) && !(await readAs({ toString: () => 'stated' })));
+    ok('H4 …and a question is still a question however the model labelled it',
+      !(await readAs('stated', 'Should I work on keeping the ball?'))
+      && !(await readAs('stated', ASKS_SN)));
+    ok('H5 …while the same sentence, read as a declaration, does produce the proposal',
+      await readAs('stated'));
 
   } catch (e) { fail++; console.error('  FAIL conversational-continuity suite threw:', e && e.stack); }
 
