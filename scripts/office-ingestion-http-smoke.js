@@ -104,9 +104,20 @@ const server = app.listen(0, async () => {
         (pt.match(/^Slide \d+:/gm) || []).length === 10);
       /* SLIDE 10 SORTS BEFORE SLIDE 2 ALPHABETICALLY. A deck handed back in string order makes
          "the third slide" mean a different thing to IntelliQ than to the person holding it. */
+      /* ORDER AND IDENTITY ARE TWO CLAIMS. The first version of this asserted only that the
+         label "Slide 2:" appeared before "Slide 10:" — and the labels were numbered from the
+         loop index, so they were in order no matter what order the FILES came in. Removing the
+         sort left it green while slide 2 carried slide 10's words. Both are asserted now:
+         the lines are in numeric order, and each line holds its OWN slide's content. */
       ok(`A4 …in NUMERIC slide order, not string order (${how})`,
         pt.indexOf('Slide 2:') < pt.indexOf('Slide 10:')
         && pt.indexOf('Slide 9:') < pt.indexOf('Slide 10:'));
+      ok(`A4b …and every line carries the content of the slide it names (${how})`,
+        (pt.match(/^Slide (\d+): .*?The point of slide (\d+)$/gm) || []).length === 10
+        && pt.split('\n\n').every(line => {
+          const m = line.match(/^Slide (\d+):.*The point of slide (\d+)$/);
+          return !!m && m[1] === m[2];
+        }));
     }
 
     /* ══ B — THROUGH THE COMPOSER DOOR, END TO END ═════════════════════════════════════════ */
