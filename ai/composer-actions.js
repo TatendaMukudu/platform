@@ -356,6 +356,27 @@ function prompt({ text, context = {}, priorMessages = [] } = {}) {
   });
 }
 
+/* ── A LENGTH CAP THAT CANNOT CUT A CHARACTER IN HALF ─────────────────────────────────────────
+   `slice` counts UTF-16 code units, and a character outside the Basic Multilingual Plane is two
+   of them. Measured: a 302-code-unit topic whose 300th and 301st units are the halves of one
+   character came back 300 long and ENDED IN A LONE SURROGATE (U+D840) -- half a character, which
+   a browser renders as the replacement glyph and which stops being recoverable the moment
+   anything writes it as UTF-8 bytes. It is somebody's own question, stored canonically, with a
+   broken character on the end of it.
+
+   That is the rare half of Han, the historic scripts, and anything else above U+FFFF. It costs
+   one comparison to not do it: if the cap would land between the two halves, keep one character
+   less.
+
+   WHAT THIS DOES NOT CLAIM. This is the boundary where a person's relayed words become a
+   proposal payload and then a canonical record, which is the one that matters most; the several
+   `_s(v, n)` helpers across ai/* still cap by code unit, and this is not a repo-wide fix. */
+function _cut(s, n) {
+  if (s.length <= n) return s;
+  const code = s.charCodeAt(n - 1);
+  return s.slice(0, code >= 0xd800 && code <= 0xdbff ? n - 1 : n);
+}
+
 function normalize(result, context = {}) {
   const allowed = new Set(available(context).map(a => a.type));
   const rows = Array.isArray(result && result.actions) ? result.actions : [];
@@ -388,7 +409,7 @@ function normalize(result, context = {}) {
       if (ARG_IS_LIST.has(key)) {
         if (Array.isArray(raw[key])) args[key] = [...new Set(raw[key].map(String))].slice(0, 20);
       } else if (typeof raw[key] === 'string' && raw[key].trim()) {
-        args[key] = raw[key].trim().slice(0, key === 'because' ? 600 : 300);
+        args[key] = _cut(raw[key].trim(), key === 'because' ? 600 : 300);
       }
     }
     actions.push({ type, arguments: args, reason: String(row.reason || '').slice(0, 240), requiresConfirmation: ACTIONS[type].confirmation });
@@ -710,7 +731,13 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
     if (required.some(k => !args[k])) continue;
     actions.push({ ...action, arguments: args, argumentSources: sources });
   }
-  return { actions, needsClarification };
+  /* THE READING TRAVELS ON, because the sentence was read once and two places need to know what
+     it was. `intent` is already the bounded two-value field the commitment gate uses; the turn
+     handler needs the OTHER value of it — 'asked_about' — to know somebody is asking something
+     when they asked it without a question mark in a language whose question words are not
+     English. Dropping it here meant the model read the sentence, said what it read, and the
+     answer began one function later with nothing but a `?` and an English word list. */
+  return { actions, needsClarification, intent: (reading && reading.intent) || null };
 }
 
 module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground, readCommand,

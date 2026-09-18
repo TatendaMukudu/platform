@@ -315,12 +315,58 @@ const _STOP = new Set(('a,an,and,are,as,at,be,but,by,can,did,do,does,for,from,ha
   + 'this,to,was,we,were,what,when,where,which,who,why,will,with,you,your,again,about,tell,say'
 ).split(','));
 
-function _terms(question) {
-  return [...new Set(String(question || '').toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !_STOP.has(w)))];
+/* ── AND A WORD IS NOT ALWAYS SOMETHING WITH SPACES AROUND IT ─────────────────────────────────
+   Splitting on whitespace and matching whole tokens is right for most of the writing systems this
+   product will meet, and silently wrong for three of the largest. Measured, not assumed:
+
+     Arabic, Greek, Cyrillic, Latin   a question found its answer in the document
+     Chinese, Japanese                NOTHING, every time
+     Korean                           NOTHING, every time
+
+   Two different causes with one remedy. Chinese and Japanese do not put spaces between words, so
+   a whole sentence arrives as ONE token and `includes` can only match the identical sentence.
+   Korean does use spaces but attaches its particles to the word: the question says 점유율에 and
+   the document says 점유율이 — the same word, one character apart — so whole-token matching never
+   fires.
+
+   This matters more than it looks. The directive this product sends says "answer this person in
+   the language they are writing in", which is a claim of universality; deterministic re-reading
+   returning nothing for a third of the world while that sentence goes out is the product claiming
+   a capability it does not have. It is also NOT a translation problem — the words are right there
+   in the document in the person's own script — so it is fixable here, in the one function that
+   decides what a word is, rather than by adding anything.
+
+   The remedy is character bigrams over runs of Han, Kana and Hangul, which is the ordinary way
+   those scripts are indexed. 报告怎么说控球 becomes 报告 告怎 怎么 么说 说控 控球, and the document
+   contains 报告 and 控球; 점유율에 and 점유율이 share 점유 and 유율. A one-character run is kept whole,
+   because a one-character word is a real word in these scripts. Everything else keeps the
+   whitespace rule exactly as it was, including the length and stopword filters, which are about
+   English noise and have nothing to say about a bigram. */
+const _CJK_RUN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu;
+
+function terms(question) {
+  const out = [];
+  const plain = w => { if (w.length > 2 && !_STOP.has(w)) out.push(w); };
+  for (const word of String(question || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/)) {
+    if (!word) continue;
+    /* `match` with a global regex returns every run and leaves no sticky state behind, which a
+       `test` in the same breath would; there is one regex here and it is used one way. */
+    const runs = word.match(_CJK_RUN);
+    if (!runs) { plain(word); continue; }
+    /* The runs of unspaced script become bigrams; whatever is left of the token — a number, a
+       borrowed Latin word — is still an ordinary word and keeps the ordinary rule. */
+    let rest = word;
+    for (const run of runs) {
+      rest = rest.replace(run, ' ');
+      if (run.length === 1) { out.push(run); continue; }
+      for (let i = 0; i + 2 <= run.length; i++) out.push(run.slice(i, i + 2));
+    }
+    for (const w of rest.split(/\s+/)) if (w) plain(w);
+  }
+  return [...new Set(out)];
 }
+const _terms = terms;
 
 function findIn(material = {}, question, { max = 3, cap = CONTEXT_CAP } = {}) {
   const terms = _terms(question);
@@ -465,5 +511,9 @@ function landedNote(u = {}) {
 module.exports = {
   TEXT_CAP, SECTION_CAP, SECTION_TEXT, CONTEXT_CAP, MIN_SECTION, ENGAGEMENT, KINDS,
   CLASSES, DEFAULT_CLASS, CLASS_TEXT, classifyRequest, hasReadableText,
-  segment, contextFor, findIn, understanding, landedNote,
+  /* `terms` is exported because the learning read was carrying its OWN COPY of this tokeniser —
+     the same regex, the same length rule, a slightly different stopword list — so a question in
+     Korean or Chinese failed in two places for one reason, and fixing one of them would have left
+     the other broken and looking correct. What a word is has one owner. */
+  segment, contextFor, findIn, terms, understanding, landedNote,
 };

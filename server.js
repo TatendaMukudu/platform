@@ -12508,9 +12508,14 @@ function _learningRead(code, userId, question) {
       .filter(x => x.out && x.out.result);
     if (!withOutcome.length) return null;
 
-    const terms = [...new Set(String(question || '').toLowerCase()
-      .replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/)
-      .filter(w => w.length > 2 && !_LEARN_STOP.has(w)))];
+    /* WHAT A WORD IS HAS ONE OWNER, AND IT IS NOT THIS FUNCTION. This carried its own copy of
+       material.js's tokeniser -- the same regex, the same length rule, its own stopword list --
+       so when whitespace tokens turned out to find nothing in Chinese, Japanese or Korean, the
+       defect existed in two places for one reason and fixing either would have left the other
+       broken and looking correct. The tokeniser is material.terms; the list below is this
+       question's own noise ("what have we LEARNED so far") and stays here, because it is about
+       this question rather than about what a word is. */
+    const terms = material.terms(question).filter(w => !_LEARN_STOP.has(w));
     const wordsOf = x => `${((x.o.present || {}).summary || {}).full || ''} `
       + `${(x.o.explained || {}).headline || ''} ${String(x.out.note || '')}`.toLowerCase();
     const hits = terms.length
@@ -15887,6 +15892,21 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // evidence is in evidenceLog before _assistantAnswer reads it; embedding is a
   // fire-and-forget optimisation and retrieval works lexically without it).
   const cls = capture.classify(text);
+  /* ── AND WHETHER SOMEBODY IS ASKING SOMETHING IS A READING OF LANGUAGE ──────────────────────
+     `capture.classify` decides it from a question mark or an ENGLISH interrogative opener, which
+     is right for English and silently wrong everywhere else. Measured: a Korean speaker who
+     uploaded a Korean document and then asked, in Korean and without a question mark, what it
+     said about possession did not reach the answer path AT ALL -- the same document answered the
+     same question asked in English. The punctuation half is fixed in ai/capture.js, where the
+     question marks of other writing systems now count; this is the other half, for the languages
+     that mark a question with a word or an ending rather than a symbol.
+
+     It is the field the model already fills in, not a new one and not another English cue: the
+     bounded two-value `intent`, whose other value means precisely "they are asking, wondering or
+     discussing it, in whatever language they wrote". It can only WIDEN what is treated as a
+     question -- a turn already read as one stays one -- so with no provider, a malformed reply or
+     an unknown value, this is exactly the behaviour that shipped before it. */
+  const _modelSaysAsking = String((actionReading && actionReading.intent) || '') === 'asked_about';
   // Small talk / greeting — be warm and human, then offer a way in. Not a question, not a
   // command; without this a "hi" falls through to a flat "Noted." and reads as broken.
   const _greeting = (cls.kind === 'conversation' || (!cls.isQuestion && !cls.command))
@@ -15927,7 +15947,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
      resolver the composer uses, so a document the reader could not open is not one this answer
      can speak about either. Without it the deterministic path dead-ends on a file the person is
      looking at while they are looking at it. */
-  if (cls.isQuestion || infoRequest) {
+  if (cls.isQuestion || infoRequest || _modelSaysAsking) {
     try {
       /* AND THE OBJECT THEY ARE STANDING IN travels with it too, resolved by the server through
          `_composerActionContext` — never from what the client says is on screen. Without it a
