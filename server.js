@@ -12404,6 +12404,66 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
   } catch (_) { return null; }
 }
 
+/* ── WHAT THIS OBJECT'S OWN RECORD SAYS ABOUT ITSELF ─────────────────────────────────────────
+   Returns null when the record holds nothing worth saying, so the caller's dead end still stands
+   for an object that genuinely has no answer in it — an empty Focus somebody opened a minute ago
+   should not produce a paragraph about itself.
+
+   ONE READING, NOT A SECOND ONE. Everything here comes from `ai/present.js`, the owner the card
+   already renders from: `focusCard` for a Focus, `inquiryCard` for the other three. Writing the
+   sentences from the raw record would be a second presenter, and the two would drift until the
+   screen and the reply disagreed about the same object.
+
+   AND A REPORTED OUTCOME IS NOT A CAUSE. "It helped" is what somebody observed after working on
+   something. Saying it caused the change would be the causality claim this product does not make,
+   so the limitation travels with the answer rather than being left to the phrasing. */
+function _objectSelfRead(code, userId, object) {
+  try {
+    if (!object || !object.kind || object.kind === 'conversation' || object.kind === 'material') return null;
+    const live = _allObjectsFor(code, userId)
+      .find(o => o.kind === object.kind && String(o.id) === String(object.id));
+    if (!live) return null;
+    const card = live.present || {};
+    const detail = card.detail || {};
+    const summary = card.summary || {};
+    const title = String(summary.full || summary.title || (live.explained || {}).headline || '').trim();
+    if (!title) return null;
+    const parts = [];
+    const limitations = [];
+
+    if (object.kind === 'focus') {
+      const out = detail.outcome;
+      if (out && out.result) {
+        parts.push(`You are working on "${title}", and you recorded how it went: ${String(out.reading || present.outcomeText(out.result) || '').toLowerCase()}.`);
+        if (out.note) parts.push(`You added: “${String(out.note).slice(0, 200)}”.`);
+        limitations.push('that is what you observed after working on it, not proof the focus caused it');
+      } else if (detail.target) {
+        parts.push(`You are working on "${title}". What you said would tell you it was working: ${detail.target}.`);
+        parts.push('Nothing has been recorded about how it went yet.');
+      } else {
+        parts.push(`You are working on "${title}". Nothing has been recorded about how it went yet.`);
+      }
+      const rel = (live.raw || {}).addresses;
+      if (rel && rel.kind && rel.id) {
+        const src = _allObjectsFor(code, userId).find(o => o.kind === rel.kind && String(o.id) === String(rel.id));
+        if (src) parts.push(`You started it from ${rel.kind === 'inquiry' ? 'the question' : 'the ' + rel.kind} "${String((src.explained || {}).headline || '').replace(/\.$/, '')}".`);
+      }
+    } else {
+      // A High, a Low or an Inquiry. Its claim and its standing are the card's own words.
+      const claim = String((live.explained || {}).claim || '').trim();
+      if (!claim) return null;
+      parts.push(`On "${title}": ${claim}`);
+      const because = (detail.because || []).filter(Boolean).slice(0, 2);
+      if (because.length) parts.push(`That rests on ${because.join(', ')}.`);
+      const unknown = (detail.stillUnknown || []).filter(Boolean)[0];
+      if (unknown) parts.push(`Still open: ${unknown}`);
+      if (detail.contested) limitations.push('accounts of this do not agree, and that disagreement is part of the finding');
+    }
+    parts.push('That is what is on the record here, not a fresh reading of it.');
+    return { text: parts.join(' '), limitations };
+  } catch (_) { return null; }
+}
+
 function _assistantAnswer(code, userId, question, opts = {}) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -12600,6 +12660,28 @@ function _assistantAnswer(code, userId, question, opts = {}) {
         confidence = 'confirmed';   // about WHAT IS HELD, which is the only claim being made
         limitations = ['the document is held and named, not interpreted',
           'external material is not evidence about a person or the organisation'];
+      }
+      else if (opts.object && _objectSelfRead(code, userId, opts.object)) {
+        /* ── THE OBJECT THEY ARE STANDING IN IS NOT "NO AUTHORISED EVIDENCE" ─────────────────
+           The seventh instance of the same dead end, and the one the R5 audit found: a person
+           inside a Focus with a recorded outcome asks "what happened when we tried this?" and was
+           told there was not enough authorised evidence — about a fact printed on the card in
+           front of them. The free-text retrieval bundle genuinely had nothing; the OBJECT had the
+           answer, and nothing carried it here.
+
+           LANGUAGE-FREE, DELIBERATELY. This does not match the question, exactly as the material
+           branch above does not: it is the fallback that replaces the dead end when there is a
+           bound object, so it works in any language the person asks in. Matching English question
+           cues here would rebuild the allowlist problem one layer down.
+
+           THE RECORD DESCRIBING ITSELF, NOT A READING OF IT. Every word comes from the same
+           presenter the card renders from (`ai/present.js`), so the screen and the sentence can
+           never disagree, and a reported outcome is reported as what somebody observed — never as
+           proof the focus caused it. */
+        const _self = _objectSelfRead(code, userId, opts.object);
+        answer = _self.text;
+        confidence = 'confirmed';   // about WHAT IS ON THE RECORD, which is the only claim made
+        limitations = _self.limitations;
       }
       else {
         answer = `I don't have enough authorised evidence to answer that yet.`;
@@ -15646,8 +15728,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
      looking at while they are looking at it. */
   if (cls.isQuestion || infoRequest) {
     try {
+      /* AND THE OBJECT THEY ARE STANDING IN travels with it too, resolved by the server through
+         `_composerActionContext` — never from what the client says is on screen. Without it a
+         question asked from inside a Focus dead-ended on the free-text bundle while the answer
+         was on the card the person was looking at. */
       qa = _assistantAnswer(code, userId, cls.questionText || text,
-        { material: _conversationMaterialContext(code, userId, _conv) });
+        { material: _conversationMaterialContext(code, userId, _conv),
+          object: actionContext && actionContext.object ? actionContext.object : null });
     } catch (_) { qa = null; }
   }
   // ── RECALL ───────────────────────────────────────────────────────────────────
@@ -20865,7 +20952,33 @@ app.get('/api/assistant/turn/:turnId', requireAuth, (req, res) => {
 /* POST /api/assistant/turn/:turnId/confirm — approve ONE proposal. Routes to the EXISTING
    capability (workspace capture / calendar draft / check-in registration). Visibility only
    increases if the user EXPLICITLY provides a wider visibility here — never silently. */
+/* ── THE ONE MUTATION PATH, AND THE ONE PLACE IT COULD ANSWER NOTHING ────────────────────────
+   EVERY consequential Composer action executes here. The handler is `async`, and until the R5
+   audit nothing caught a throw inside it: an unexpected record shape in any one of the eighteen
+   branches became an unhandled rejection, the response was never written, and the person who had
+   just pressed Confirm sat watching a spinner until their client gave up — after a partial write
+   may already have landed. Found by driving `disagree_with_inquiry` against an inquiry whose
+   hypothesis was missing a field the kernel assumes: the evidence record was created, the reply
+   never came.
+
+   A boundary does not make the underlying bug acceptable, and it does not hide one: the throw is
+   still logged with its stack, and `_captureError` still records it where the operator sees it.
+   What changes is that the person gets an answer, and the answer says plainly that nothing was
+   taken as done — because after an exception the only honest thing to say about a half-finished
+   write is that it should be checked rather than assumed. The proposal is deliberately NOT marked
+   confirmed, so the governed at-most-once guard still lets them try again. */
 app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) => {
+  try {
+    return await _confirmProposal(req, res);
+  } catch (e) {
+    console.error('[assistant/confirm] failed:', e && e.stack ? e.stack : e);
+    try { _captureError(e, { route: 'assistant/confirm', status: 500 }); } catch (_) {}
+    return res.status(500).json({ error: 'confirm_failed',
+      note: 'Something went wrong carrying that out. Nothing has been taken as done — open it and check before trying again.' });
+  }
+});
+
+async function _confirmProposal(req, res) {
   const { orgCode: code, userId } = req.iqSession;
   const turn = (assistantTurns[_wsKey(code, userId)] || []).find(t => t.turnId === req.params.turnId);
   if (!turn) return res.status(404).json({ error: 'turn not found' });
@@ -21373,7 +21486,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       outcome: { acknowledgement: r.acknowledgement, noticed: r.noticed } });
   }
   return res.status(400).json({ error: 'unknown proposal type' });
-});
+}
 
 /* POST /api/assistant/turn/:turnId/correct — correct the INTERPRETATION/proposal, never the
    original message. Bounded corrections only; the raw input is immutable. */

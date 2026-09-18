@@ -558,6 +558,22 @@ const DIRECTIONS = Object.freeze(['improvement', 'decline', 'neutral']);
 
 function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
+  /* ── A MISSING LIST IS AN EMPTY LIST, NOT A CRASH ─────────────────────────────────────────
+     `newHypothesis` has always set `supportRefs` and `challengeRefs`, so an inquiry grown in this
+     process always has them. A record RESTORED FROM STORAGE need not: this state is persisted and
+     reloaded across deploys, and a hypothesis written before those fields existed comes back
+     without them. The confidence pass below then reached `h.supportRefs.map` and threw, which the
+     R5 audit caught by driving a disagreement against exactly that shape — the evidence record was
+     created and the reply never came.
+
+     This normalises rather than decides: an absent list of supporting refs means nothing supports
+     the hypothesis yet, which is what an empty list already means everywhere else in this file.
+     No confidence moves, no signal is invented, and a hypothesis that HAS refs is untouched. */
+  for (const h of (next.hypotheses = Array.isArray(next.hypotheses) ? next.hypotheses : [])) {
+    if (!Array.isArray(h.supportRefs)) h.supportRefs = [];
+    if (!Array.isArray(h.challengeRefs)) h.challengeRefs = [];
+  }
+  if (!Array.isArray(next.signals)) next.signals = [];
   // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
   // this turn produced), we hold the proposal's own id — still a reference, never the content.
   const refOf = typeof evidenceRefOf === 'function' ? evidenceRefOf : (p => String(p.id));
