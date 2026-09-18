@@ -71,13 +71,24 @@ The Focus/object page should lead with human meaning:
 
 Technical relationship/provenance/confidence machinery should be progressive disclosure or conversationally answerable rather than a day-one wall. Do not weaken epistemic truth to simplify presentation.
 
-### 3. Real Inquiries, not onboarding-field placeholders
+### 3. Onboarding can legitimately seed Inquiries, Highs and Lows
 
-Audit why the screenshots showed onboarding-derived cards such as "What they say they bring" and "Where they are trying to get to" as Inquiries with "I don't have a read on this yet."
+Founder correction: do **not** assume onboarding-derived objects such as "What they say they bring" or "Where they are trying to get to" are unwanted merely because they originated during onboarding.
 
-Onboarding is attributed world/self context. It may seed curiosity, but absence of a read is not itself a worthwhile Inquiry. Do not delete canonical onboarding context. Correct the projection/index/presentation so the Inquiry bucket contains genuine questions being investigated, while context remains available to the assistant.
+Onboarding is attributed world/self/org context, not empirical truth. Precisely because it establishes claims, roles, goals, descriptions, expectations and unknowns, it can create useful epistemic starting points.
 
-This is potentially high-risk because it touches object projection/identity. Trace owner first and mutation-test.
+The requirement is semantic quality, not deletion:
+- If onboarding exposes an important question that IntelliQ genuinely does not know and has reason to investigate, phrase/present it as a real Inquiry.
+- If onboarding plus admissible evidence supports "something appears to be going well", it may surface through the existing High path at the correct standing.
+- If onboarding plus admissible evidence supports "something may deserve attention", it may surface through the existing Low path at the correct standing.
+- A person's self-description remains attributed knowledge; authority/repetition does not convert it into empirical truth.
+- Absence of knowledge alone should not flood the product with arbitrary questions. Curiosity must be relevant to the person's/team's desired states, role/context, current evidence, contradiction, uncertainty, change, or information value.
+
+Audit the current onboarding -> Inquiry/High/Low projection and improve the human phrasing/standing while preserving canonical context and provenance. Do not delete these objects merely to make the screen look cleaner. This is potentially high-risk because it touches projection/identity; trace owner first and mutation-test.
+
+The long-term direction is a bounded **curiosity / truth-challenge loop** over the existing kernel, not a second truth system: current beliefs/context/evidence are periodically or event-triggeredly challenged for contradiction, weak support, important unknowns, stale assumptions, unexplained change, and useful discriminating questions. Candidate questions do not become canonical Inquiries merely because an LLM generated them. The kernel/governed deterministic layer evaluates whether the question is admissible, non-duplicate, relevant, genuinely unresolved, and worth learning; accepted candidates can then become or strengthen canonical Inquiries.
+
+The same challenge process may strengthen or change the standing of existing Inquiries/Highs/Lows as new evidence arrives. It must not score people, invent uncertainty for engagement, or ask questions indefinitely.
 
 ### 4. Home copy and cold start
 
@@ -86,6 +97,10 @@ Home should be a calm current briefing, not a truth-maintenance-system report. T
 Preserve the underlying distinction; simplify the default presentation. Cold start should say, in human language, that IntelliQ is still learning and invite conversation. Do not fabricate findings to avoid emptiness.
 
 ### 5. Focus shape
+
+Founder clarification: Focus is downstream of understanding. Inquiries, Highs and Lows are discovery/understanding surfaces; a Focus exists when that understanding helps a human identify a desirable B and deliberately choose to work toward it.
+
+A High can lead to a Focus ("this is going well; I want to develop it further"), a Low can lead to a Focus ("this deserves attention; I want to change it"), and an Inquiry can lead to a Focus once enough has been learned to justify trying a direction. A Focus does not require that every uncertainty is settled, and the system must not force a rigid High/Low -> Inquiry -> Focus sequence. Humans may start anywhere, but deliberate B + human choice is the Focus threshold.
 
 The screenshot showed a Focus whose title/body bundled multiple goals: team performance, own skills/consistency, communication, culture, responsibility, competitive goals.
 
