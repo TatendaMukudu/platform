@@ -270,8 +270,13 @@ const handlerWith = present => {
   try { h = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { h = null; }
   const out = h && { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
     kinds: h.readableMaterialKinds(),
+    /* A FILE THAT BEHAVES LIKE A FILE, so that WITHOUT the guard this really does reach
+       `JSZip.loadAsync` and really does produce the ReferenceError a coach was being shown. A
+       stub with no arrayBuffer would fail earlier, for a reason that is not the bug, and N4 would
+       be passing for the wrong reason. */
     refusal: (() => { try { const f = { name: 'plan.docx',
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        arrayBuffer: async () => new ArrayBuffer(8) };
       const p = h.process(f); return p && typeof p.then === 'function'
         ? p.then(() => null, e => String(e && e.message)) : null; } catch (e) { return String(e && e.message); } })() };
   globalThis.JSZip = had.JSZip; globalThis.XLSX = had.XLSX;
