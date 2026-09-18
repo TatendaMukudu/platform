@@ -15228,7 +15228,17 @@ const MemberApp = {
         e.reviewOn ? `<div><strong>Review:</strong> ${esc(e.reviewOn)}</div>` : '',
         e.outcome ? `<div><strong>Outcome:</strong> ${esc(e.outcome)}</div>` : '',
         e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}${p.actionType === 'share_to_forum' ? ` (${esc(e.audience.readable)} current readers)` : ''}</div>` : '',
+        /* ── CONNECTING SOMETHING IS NOT SHARING IT ───────────────────────────────────────
+           Founder decision, September 2026: connecting private material to a shared object does
+           not share the original source. The behaviour was always this; the CARD did not say so,
+           and "Attach this material — board.png" reads to a coach as having handed the photograph
+           to the squad. Two sentences, shown only when there is really a gap between where the
+           file lives and where it is going: what stays private, and that sharing it is a separate
+           thing they have not just done. */
         e.material ? `<div><strong>Material:</strong> ${esc(e.material.name)}</div>` : '',
+        e.material && e.material.widerAudience
+          ? `<div class="iq-eff-note">The file itself stays private to you. Connecting it here does
+             not give anyone else the original — sharing that is a separate choice.</div>` : '',
         e.disclosure ? `<div>${esc(e.disclosure)}</div>` : '',
       ].filter(Boolean).join('');
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">

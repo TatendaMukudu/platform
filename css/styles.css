@@ -3642,3 +3642,7 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    rather than that the library is. This says which. */
 .iq-chart-off{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;
   padding:.7rem .8rem;border:1px dashed var(--border);border-radius:12px;margin:.4rem 0}
+
+/* WHAT CONNECTING SOMETHING DOES NOT DO. Shown on a confirmation card when the destination has a
+   wider audience than the file: the original stays where it is, and sharing it is a separate act. */
+.iq-eff-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.3rem 0 0}

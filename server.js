@@ -15421,7 +15421,12 @@ function _composerActionMaterials(code, userId, object, conversation) {
       if (seen.has(id)) continue;
       if (!_materialFor(code, userId, id, { requireObject: false }).ok) continue;
       seen.add(id);
-      out.push({ id, name: String(m.title || m.filename || '').slice(0, 200) });
+      /* WHOSE IT IS TRAVELS WITH IT. A composer upload is `visibility: 'private'` — the founder's
+         "talking to IntelliQ is not contributing to the organisation" — so connecting one to an
+         object with a wider audience leaves the original where it was. The confirmation card has
+         to be able to say that, and it cannot work it out from a name. */
+      out.push({ id, name: String(m.title || m.filename || '').slice(0, 200),
+        privateToYou: m.visibility === 'private' && String(m.byId) === String(userId) });
       if (out.length >= 6) break;
     }
   } catch (_) { return []; }
@@ -15614,11 +15619,34 @@ function _composerActionEffect(candidate, context) {
        nothing. Resolved from the same server-side pool grounding used, so the card and the
        action can never be talking about different files. */
     material: a.materialId
-      ? { id: a.materialId,
-          name: ((context.attachment && String(context.attachment.id) === String(a.materialId)
-            ? context.attachment.name : null)
-            || ((context.materials || []).find(m => String(m.id) === String(a.materialId)) || {}).name
-            || 'Attached material') }
+      ? (() => {
+          const _m = (context.materials || []).find(x => String(x.id) === String(a.materialId)) || {};
+          const _name = (context.attachment && String(context.attachment.id) === String(a.materialId)
+            ? context.attachment.name : null) || _m.name || 'Attached material';
+          /* ── RELATIONSHIP IS NOT READERSHIP, ON THE CARD THEY READ BEFORE CONFIRMING ────────
+             FOUNDER DECISION, September 2026, settled: *Connecting private material to a shared
+             object does not automatically share the original source. If the destination has a
+             wider audience than the source, the source remains under its existing audience. If
+             the human wants the original shared, that is a separate governed audience action.*
+
+             The behaviour was already right — attaching adds a reference and changes no
+             visibility. What was wrong was the WORD. The card said "Attach this material" and
+             named the file, and a coach connecting a board photograph to a squad Focus would
+             reasonably read that as having given it to the squad. Nobody else could open it, and
+             nothing said so.
+
+             So the card carries the two facts it was missing: that the original stays as private
+             as it is, and that sharing it is a separate thing they have not just done. Computed
+             from the material's OWN visibility and the destination's audience, so it says
+             "shared" only when there really is a gap between them — telling somebody their
+             private note stayed private when it is going nowhere else is noise. */
+          const _wider = !!(context.object && _m.privateToYou
+            && (context.forumAvailable || (context.object.nodeId)));
+          return { id: a.materialId, name: _name,
+            privateToYou: !!_m.privateToYou,
+            sourceStaysPrivate: _wider || !!_m.privateToYou,
+            widerAudience: _wider };
+        })()
       : null,
     /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
        `supports` is asking somebody to agree to a judgement without telling them it is not yet
@@ -21407,8 +21435,20 @@ async function _confirmProposal(req, res) {
       const materialRow = readable.material;
       if (!_materialOn(materialRow, ref.kind, ref.id)) materialRow.refs = _materialRefs(materialRow).concat([{ kind: ref.kind, id: ref.id, at: Date.now(), by: userId }]);
       prop.confirmed = { at: new Date().toISOString(), materialId }; scheduleSave();
+      /* AND THE CONFIRMATION SAYS THE SAME THING THE CARD DID. A person who has just pressed
+         Confirm is entitled to know what did NOT happen: the original is where it was, and
+         sharing it is a separate act nobody has performed. Said only when the destination really
+         is wider than the source. */
+      const _stillPrivate = materialRow.visibility === 'private'
+        && String(materialRow.byId) === String(userId)
+        && !!(live && (live.whoseNodeId || (live.raw && (live.raw.nodeId
+          || (live.raw.participants || []).length > 1))));
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'referenced', materialId,
-        note: 'Attached by reference. External material did not become evidence about your organisation.' });
+        sourceShared: false, sourceStaysPrivate: _stillPrivate,
+        note: 'Attached by reference. External material did not become evidence about your organisation.'
+          + (_stillPrivate
+            ? ' The file itself is still private to you — connecting it here did not give anyone'
+              + ' else the original.' : '') });
     }
 
     if (prop.actionType === 'discuss_with_group') {

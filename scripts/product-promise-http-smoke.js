@@ -350,6 +350,55 @@ const server = app.listen(0, async () => {
     ok('H8 …and attaching it did not hand it to anybody else',
       (await call('GET', `/api/materials/${mid}`, undefined, 'p2')).status === 404);
 
+    /* ══ H9 — AND THE PERSON IS TOLD THAT, BEFORE AND AFTER ════════════════════════════════
+       FOUNDER DECISION, settled September 2026: connecting private material to a shared object
+       does not share the original source; if the human wants it shared that is a separate governed
+       audience action. The BEHAVIOUR was already right. What was missing was that nobody said so —
+       "Attach this material — board.png" reads to a coach as having handed the photograph over,
+       and then nobody else can open it and nothing explained why.
+
+       Asserted on the SHARED destination, because that is the only place the gap exists. On a
+       private Focus there is no wider audience and the product should say nothing. */
+    const shared9 = await stage('discuss_with_group',
+      { groupId: 'first', text: 'we keep going quiet after we concede' },
+      { conversationId: (await call('POST', '/api/assistant/turn',
+        { text: 'we keep going quiet after we concede' })).j.conversationId,
+        text: 'ask the team about this' });
+    const sharedFid = String((await confirm(shared9.turnId, shared9.prop.id)).j.focus.id);
+    const doc9 = await call('POST', '/api/assistant/attachments',
+      { filename: 'board.png', text: 'What I drew on the whiteboard about restarts.' });
+    const h9 = await stage('attach_material', { materialId: String(doc9.j.materialId) },
+      { conversationId: doc9.j.conversationId, about: { kind: 'focus', id: sharedFid },
+        text: 'use this as evidence' });
+    const h9m = ((h9.prop || {}).effect || {}).material || {};
+    ok('H9 the card for a SHARED destination says the original stays private',
+      h9m.widerAudience === true && h9m.sourceStaysPrivate === true);
+    const h9Done = await confirm(h9.turnId, h9.prop.id);
+    ok('H9b …and the confirmation says the same, rather than only the card',
+      h9Done.status === 200 && h9Done.j.sourceShared === false
+      && /still private to you/i.test(String(h9Done.j.note)));
+    ok('H9c …and it is true: the teammate on that Focus cannot open the original',
+      (await call('GET', `/api/materials/${doc9.j.materialId}`, undefined, 'p2')).status === 404);
+    ok('H9d …while they CAN see the Focus it was connected to, so this is about the file alone',
+      (await listed('focus', 'all', 'p2')).includes(sharedFid));
+    /* AND ON A PRIVATE DESTINATION IT SAYS NOTHING, because there is no gap to explain.
+       A SECOND document in a SECOND conversation: the first one's thread is now bound to the
+       shared Focus, and a turn that tried to retarget it is refused — correctly, since a
+       conversation belongs to one object. Reusing it here would have measured that refusal
+       instead of the thing under test. */
+    const doc9b = await call('POST', '/api/assistant/attachments',
+      { filename: 'mine.png', text: 'A note only I am working from about the restarts.' });
+    const h9priv = await stage('attach_material', { materialId: String(doc9b.j.materialId) },
+      { conversationId: doc9b.j.conversationId, about: { kind: 'focus', id: fid },
+        text: 'use this as evidence' });
+    ok('H9e the proposal really was made on the private Focus', !!h9priv.prop
+      && !!(((h9priv.prop || {}).effect || {}).material || {}).id);
+    ok('H9f …and there the product does not explain a gap that is not there',
+      (((h9priv.prop || {}).effect || {}).material || {}).widerAudience === false);
+    ok('H9g …and confirming says nothing about privacy either, because nothing changed hands',
+      !/still private to you/i.test(String(
+        (await confirm(h9priv.turnId, h9priv.prop.id)).j.note)));
+
     /* ══ J — "KEPT NEAR THE TOP" ═══════════════════════════════════════════════════════════ */
     console.log('\n  J — "KEPT NEAR THE TOP" → IT IS ACTUALLY NEAR THE TOP');
     const j = await stage('prioritise_object', {}, { about: { kind: 'focus', id: fid }, text: 'keep this near the top' });
