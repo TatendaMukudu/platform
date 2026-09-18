@@ -11493,8 +11493,9 @@ const MemberApp = {
     inquiry: { title: 'Inquiries', sub: 'What IntelliQ is working out — including what it still does not know',
                empty: 'Nothing being worked out yet. Talk to IntelliQ and it will start.', make: null },
     focus:   { title: 'Focuses', sub: 'What you have deliberately chosen to work on',
-               empty: 'You are not working on anything yet. Start a focus when you want to change something.', make: 'Start a focus' },
-    // ^ the ONE thing a person creates.
+               empty: 'Nothing here yet. Tell IntelliQ what you want to work on.', make: null },
+    // Creation belongs to the Composer. Focus remains canonical underneath; the person should
+    // not have to operate a separate object-creation workflow.
     high:    { title: 'Highs', sub: 'What is going well',
                empty: 'Nothing has stood out as going well yet.', make: null },
     low:     { title: 'Lows', sub: 'What needs attention',
