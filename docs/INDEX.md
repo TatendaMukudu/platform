@@ -400,6 +400,30 @@ decides what lands.
 a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
 or something false on a real screen.**
 
+> **The conversational command layer and source retention** (`12a2051` onward) is recorded in
+> `docs/reviews/CONVERSATION_FIRST_R4.md`. Four things to know before touching this code:
+>
+> - **`readCommand` is a models-off FALLBACK, not the language layer.** It covers *create focus /
+>   create inquiry / high / low* and nothing else, and `conversational-commands-http-smoke` H1–H4
+>   pin that size on purpose. Understanding arbitrary language belongs to the model with a bounded
+>   action schema (`prompt` → `completeJSON` → `normalize` → `ground`); deterministic code
+>   validates, proposes, confirms and executes. Growing the regex list would rebuild, at the intent
+>   layer, the allowlist problem the language layer just lost.
+> - **"This" is resolved from a server-side pool, not from the current turn.**
+>   `_composerActionMaterials` is the referent pool for `attach_material`; one safe referent
+>   resolves, two ask by name, and an id outside the pool asks rather than substituting another
+>   document. Two authority gaps were closed underneath it: the executor asked `_materialFor` in
+>   its `requireObject` form (404 for every composer upload) and never asked `_mayAttach` at all.
+> - **A source is kept, and its audience is inherited.** `materialSource` holds the original bytes
+>   for what the server actually receives, which today is an image. The read route asks
+>   `_materialFor` and asks nothing else — a source has no audience of its own. Deleting removes
+>   bytes and answers **410, not 404**, leaving "Source attachment deleted" on the material and in
+>   every list. There is no TTL and no sweeper, deliberately.
+> - **`openedBy` is why an inquiry somebody asked for is visible.** `_objectBucket` hides a
+>   signal-less inquiry because a derived shell is noise; it could not tell that from a question a
+>   person had just confirmed, so "Inquiry opened" was true about a write that appeared on no
+>   screen at any scope. `openedBy` is set only by the governed confirmation path.
+
 **The A-to-B spine.** The loop already ran end to end; three of eight coach-facing sections were
 structurally empty and the loop's last arrow did not close. `AB_SPINE_TRUTH_MAP_R1.md` is the record,
 including where Part I turned out to be wrong. A human may now propose a candidate explanation for a
