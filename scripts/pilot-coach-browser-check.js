@@ -118,7 +118,18 @@ _rebuildEmailIndex();
   /* Chart.js is loaded from a CDN by index.html and this run has no network, so it fires on every
      page in the product, on this branch and on its base alike. Excluded BY NAME with its reason —
      a blanket filter would swallow the bugs this file exists to find. */
-  const HARNESS_ONLY = [/^Chart is not defined$/];
+  /* ── THE EXCUSE LIST IS EMPTY, AND THAT IS THE ASSERTION ──────────────────────────────────
+     This held `/^Chart is not defined$/`, called a harness artifact. It was not one. Chart.js
+     arrives from a CDN and `js/charts.js` touched `Chart.defaults` at MODULE LOAD, so on any
+     connection that could not fetch it — a filtered network, an installed app with no signal,
+     this build environment — the assignment threw, the whole file stopped evaluating, every
+     chart helper below it ceased to exist, and a pilot user got an uncaught error on every page
+     load. Suppressing it here is why PC-F4 stayed green about a journey that really was throwing.
+
+     `js/charts.js` now degrades honestly and says where the picture would have been, so nothing
+     needs excusing. Keeping this list empty is what stops the next real error being renamed a
+     harness artifact: an error on this journey fails the check, whatever it is. */
+  const HARNESS_ONLY = [];
 
   const openAs = async (who, name) => {
     const ctx = await browser.newContext({ viewport: IPHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });

@@ -3636,3 +3636,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   line-height:1.5;margin:.3rem 0 0}
 .iqt-mat-class-ask{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:.6rem 0 .35rem}
 .iqt-mat-class-btns{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.45rem}
+
+/* WHERE A CHART WOULD HAVE BEEN. Chart.js is a CDN dependency; on a connection that could not
+   fetch it the drawing cannot happen, and an empty box would teach somebody the data is missing
+   rather than that the library is. This says which. */
+.iq-chart-off{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;
+  padding:.7rem .8rem;border:1px dashed var(--border);border-radius:12px;margin:.4rem 0}
