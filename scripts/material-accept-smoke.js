@@ -243,29 +243,25 @@ ok('M10c …and a FAILED attachment still speaks, because an error with no words
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
   /\/classification/.test(appJs));
 
-/* ── N — A LIST IS ONLY TRUE IF THE THING THAT READS IT LOADED ─────────────────────────────
-   THE HOLE. Word, PowerPoint and spreadsheets are read by libraries fetched from a CDN — JSZip
-   and SheetJS, two <script src="https://..."> tags in index.html. The whole of this file above
-   asks "does the picker offer only what the parsers can read", and every one of those assertions
-   passed while the answer depended on a network request nobody checked.
+/* ── N — WHO READS A DOCUMENT, AND WHY THIS SECTION CHANGED ────────────────────────────────
+   ROUND 5 asserted a narrowing law: Word, PowerPoint and spreadsheets were read in this browser
+   by JSZip and SheetJS, two CDN script tags, so what the picker could honestly OFFER depended on
+   whether those requests had landed. Narrowing was the right answer to that architecture.
 
-   The founder's device is a phone on a stadium connection, and this is installable. Offline, on a
-   filtered network, or on a second visit with no signal, the page still runs and those globals do
-   not exist. The picker offered .docx anyway; `_processDocx` reached `JSZip.loadAsync` and threw
-   `JSZip is not defined` at somebody who had just chosen a file. That is the exact hollow-control
-   shape this file was written to prevent, arriving through the one gap the rule did not cover:
-   what is ADVERTISED was hard-coded while what is POSSIBLE was not.
+   THE FOUNDER THEN CHANGED THE ARCHITECTURE. *Office parsing belongs server-side; core document
+   understanding must not depend on runtime browser CDNs.* `lib/office.js` opens all three with
+   Node's own zlib and no dependency, the script tags are gone from index.html, and the browser
+   selects and uploads. So those kinds need nothing here and the picker offers them
+   unconditionally — which is not a weakening of the round-5 law but the same law under a true
+   premise: WHAT IS OFFERED IS EXACTLY WHAT CAN BE READ. What changed is who reads.
 
-   ASSERTED BOTH WAYS, because a one-directional test here proves nothing. With the libraries
-   present the offer must be unchanged — a fix that quietly narrowed the product for everybody
-   would be worse than the bug. With them absent the format must not be offered AND, if it is
-   reached anyway by a drag or a share sheet, the refusal must be a sentence about what is missing
-   rather than a library's ReferenceError. */
-console.log('\n  N — AND WHAT IS OFFERED DEPENDS ON WHAT ACTUALLY LOADED');
-/* THE SWAP IS AWAITED BEFORE IT IS UNDONE. `_processDocx` is async, so if the globals were put
-   back while it was still suspended on `await file.arrayBuffer()`, `JSZip` would be present again
-   by the time the processor reached it — and N4 would be asserting against a different error than
-   the one a coach actually saw. Found by mutating the guard away and watching N4 stay green. */
+   THREE THINGS ARE ASSERTED, so the change cannot quietly become a regression:
+     N1–N2  the three Office kinds are offered whether or not any browser library exists,
+     N3     the derivation MACHINERY still works, proved on a kind that does declare a need, so
+            removing the CDN did not also remove the rule that protects the next such format,
+     N4     and a caller that reaches the old browser processor is told where the capability went
+            rather than meeting a library's ReferenceError. */
+console.log('\n  N — THE OFFICE FORMATS ARE READ BY THE SERVER, SO THE BROWSER NEEDS NOTHING');
 const handlerWith = async present => {
   const had = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
   if (present) { globalThis.JSZip = {}; globalThis.XLSX = {}; }
@@ -274,16 +270,14 @@ const handlerWith = async present => {
   try { h = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { h = null; }
   let out = null;
   if (h) {
-    /* A FILE THAT BEHAVES LIKE A FILE, so that WITHOUT the guard this really does reach
-       `JSZip.loadAsync` and really does produce the ReferenceError a coach was being shown. A
-       stub with no arrayBuffer would fail earlier, for a reason that is not the bug. */
     const f = { name: 'plan.docx',
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       arrayBuffer: async () => new ArrayBuffer(8) };
     let refusal = null;
     try { await h.process(f); } catch (e) { refusal = String(e && e.message); }
     out = { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
-      kinds: h.readableMaterialKinds(), refusal };
+      kinds: h.readableMaterialKinds(), serverKind: h.serverReadKind({ name: 'a.pptx' }),
+      needs: Object.keys(h.KIND_NEEDS || {}), refusal, handler: h };
   }
   globalThis.JSZip = had.JSZip; globalThis.XLSX = had.XLSX;
   if (had.JSZip === undefined) delete globalThis.JSZip;
@@ -291,37 +285,56 @@ const handlerWith = async present => {
   return out;
 };
 
-
 (async () => {
 const withLibs = await handlerWith(true);
 const noLibs   = await handlerWith(false);
-ok('N1 with the readers loaded, the offer is exactly what it always was',
-  !!withLibs && ['.docx', '.xlsx', '.pptx', '.txt', '.md', '.csv'].every(e => withLibs.material.includes(e)));
-ok('N1b …and the composer still offers them alongside the image types',
-  !!withLibs && withLibs.composer.includes('.pptx') && withLibs.composer.includes('image/png'));
-ok('N2 with the readers MISSING, the formats that need them are not offered',
-  !!noLibs && !noLibs.material.includes('.docx') && !noLibs.material.includes('.pptx')
-  && !noLibs.material.includes('.xlsx'));
-ok('N2b …and neither does the composer, which is the picker a person actually presses',
-  !!noLibs && !noLibs.composer.includes('.docx') && !noLibs.composer.includes('.xlsx'));
-ok('N3 …while the formats that need nothing are still offered, so a lost CDN does not take the whole door with it',
-  !!noLibs && noLibs.material.includes('.txt') && noLibs.material.includes('.csv')
-  && noLibs.material.includes('.md') && noLibs.composer.includes('image/jpeg'));
-ok('N3b …and the handler says which kinds it can actually read right now, not which it knows about',
-  !!noLibs && noLibs.kinds.length === 2 && !noLibs.kinds.includes('docx')
-  && !!withLibs && withLibs.kinds.length === 5);
 
-/* THE FILE THAT GETS THERE ANYWAY. A drag, a share sheet, or a page cached before the connection
-   went: the picker is not the only door, so the refusal has to be readable too. */
-  const msg = noLibs && noLibs.refusal;
-  ok('N4 a file picked anyway is refused with a sentence, not a library\'s ReferenceError',
-    typeof msg === 'string' && !/is not defined/.test(msg) && !/ReferenceError/.test(msg));
-  ok('N4b …that names what is missing and what still works',
-    typeof msg === 'string' && /did not load/i.test(msg) && /paste the text/i.test(msg));
-  const fine = withLibs && withLibs.refusal;
-  ok('N4c …and with the readers present that refusal does not happen at all',
-    fine === null || !/did not load/i.test(String(fine)));
+ok('N1 with no browser library at all, Word, PowerPoint and spreadsheets are still offered',
+  !!noLibs && ['.docx', '.xlsx', '.pptx'].every(e => noLibs.material.includes(e)));
+ok('N1b …on the composer\'s picker too, which is the one a person actually presses',
+  !!noLibs && ['.docx', '.xlsx', '.pptx'].every(e => noLibs.composer.includes(e)));
+ok('N1c …and the offer is the SAME whether or not those libraries happen to exist',
+  !!withLibs && !!noLibs && withLibs.composer === noLibs.composer);
+ok('N2 …because the handler routes them to the server rather than reading them',
+  !!noLibs && noLibs.serverKind === 'pptx' && noLibs.needs.length === 0);
+ok('N2b …while the formats the browser really does read on its own are still offered',
+  !!noLibs && ['.txt', '.md', '.csv'].every(e => noLibs.material.includes(e)));
 
-  console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
-  process.exit(fail ? 1 : 0);
+/* THE MACHINERY, NOT THE CASE. Emptying KIND_NEEDS was the right answer for these three formats,
+   and it would be easy for the RULE to rot now that nothing exercises it. This declares a
+   hypothetical kind that does need a browser library and asserts the derivation still narrows —
+   so the protection survives for the next format that needs it. */
+const rule = withLibs && withLibs.handler;
+ok('N3 the derivation rule still narrows a kind that genuinely needs a browser library',
+  (() => {
+    if (!rule) return false;
+    const saved = rule.KIND_NEEDS;
+    try {
+      rule.KIND_NEEDS = { csv: 'SomeLibraryNobodyLoaded' };
+      const narrowed = rule.materialAcceptAttr();
+      return !narrowed.includes('.csv') && narrowed.includes('.txt');
+    } finally { rule.KIND_NEEDS = saved; }
+  })());
+ok('N3b …and offers it again when that library is present',
+  (() => {
+    if (!rule) return false;
+    const saved = rule.KIND_NEEDS;
+    try {
+      globalThis.SomeLibraryNobodyLoaded = {};
+      rule.KIND_NEEDS = { csv: 'SomeLibraryNobodyLoaded' };
+      return rule.materialAcceptAttr().includes('.csv');
+    } finally { rule.KIND_NEEDS = saved; delete globalThis.SomeLibraryNobodyLoaded; }
+  })());
+
+/* AND THE OLD ROAD SAYS WHERE THE CAPABILITY WENT. Three surfaces outside the pilot journey still
+   call `process()` directly; with the CDN gone they would otherwise meet `JSZip is not defined`. */
+ok('N4 a caller reaching the old browser processor is told where documents are read now',
+  !!noLibs && typeof noLibs.refusal === 'string'
+  && !/is not defined|ReferenceError/.test(noLibs.refusal));
+ok('N4b …in a sentence that says what to do instead',
+  !!noLibs && /read by IntelliQ itself now/i.test(String(noLibs.refusal))
+  && /attach it in a conversation/i.test(String(noLibs.refusal)));
+
+console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);
 })();

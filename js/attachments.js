@@ -82,7 +82,17 @@ const AttachmentHandler = {
      refusal says which thing is missing and what to do instead, rather than a library's
      ReferenceError. Nothing is narrowed when the libraries ARE present, which is the ordinary
      case; this only changes what somebody sees when they could not have been served anyway. */
-  KIND_NEEDS: { docx: 'JSZip', pptx: 'JSZip', xlsx: 'XLSX' },
+  /* ── AND SINCE SEPTEMBER 2026 THE OFFICE FORMATS NEED NOTHING HERE ────────────────────────
+     This list was the right answer to the wrong architecture. Word, PowerPoint and spreadsheets
+     were read in this browser by JSZip and SheetJS, so what could be OFFERED genuinely depended
+     on whether two CDN requests had landed — and narrowing the picker was the honest response.
+
+     The founder's decision moved that reading to the server, where `lib/office.js` opens all three
+     with Node's own zlib and no dependency. So those kinds no longer need anything in the browser
+     and the picker offers them unconditionally again. The LAW is unchanged and is the reason this
+     map still exists rather than being deleted: what is offered is exactly what can be read. What
+     changed is who does the reading. */
+  KIND_NEEDS: {},
   KIND_NEEDS_LABEL: { JSZip: 'the Word and PowerPoint reader', XLSX: 'the spreadsheet reader' },
   _readerFor(kind) { return this.KIND_NEEDS[kind] || null; },
   _readerPresent(kind) {
@@ -120,10 +130,49 @@ const AttachmentHandler = {
     return this.READABLE_IMAGE_TYPES.concat(Object.keys(this.materialExtensions())).join(',');
   },
 
+  /* ── WHICH FORMATS THE SERVER READS, NOT THIS BROWSER ─────────────────────────────────────
+     FOUNDER DECISION, September 2026: Office parsing belongs server-side. Word, PowerPoint and
+     spreadsheets are opened by `lib/office.js`, which uses Node's own zlib and no dependency, so
+     the capability no longer turns on whether two CDN script tags arrived. This browser selects
+     the file and uploads it; it does not try to understand it.
+
+     Named here, beside the processors, so the picker and the uploader cannot disagree about which
+     formats take which road. */
+  SERVER_READ: Object.freeze({ '.docx': 'docx', '.xlsx': 'xlsx', '.pptx': 'pptx' }),
+  serverReadKind(file) {
+    const m = String((file && file.name) || '').toLowerCase().match(/\.[a-z0-9]+$/);
+    return (m && this.SERVER_READ[m[0]]) || null;
+  },
+  /* The bytes, base64, with the data: prefix removed — the shape `/api/assistant/attachments`
+     takes for a picture, reused rather than invented again for a document. */
+  fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || '').split(',')[1] || '');
+      r.onerror = () => reject(new Error('That file could not be read from your device.'));
+      r.readAsDataURL(file);
+    });
+  },
+
   /* ── Main entry point ─────────────────────────────────── */
   async process(file) {
     const kind = this.ACCEPTED[file.type];
     if (!kind) throw new Error(`Unsupported file type: ${file.type}`);
+    /* ── THOSE THREE DO NOT COME THROUGH HERE ANY MORE ──────────────────────────────────────
+       Word, PowerPoint and spreadsheets are read by the SERVER since September 2026, and the two
+       CDN scripts that used to open them in this browser are gone from index.html. So the
+       processors below would now reach an undefined `JSZip`/`XLSX` and throw a ReferenceError at
+       whoever called them.
+
+       The two pickers on the pilot journey never get here for those kinds — they check
+       `serverReadKind` and upload the file whole. This is for every OTHER caller: the alert
+       composer, the coach's card attachment, the knowledge import. They still browser-parse, and
+       rather than letting them fail with a library's own error they are told plainly that this
+       format goes up whole now, which is a true sentence about where the capability lives. */
+    if (this.SERVER_READ['.' + kind]) {
+      throw new Error('Word, PowerPoint and spreadsheet files are read by IntelliQ itself now — '
+        + 'attach it in a conversation and it will be read there.');
+    }
     /* THE PICKER SHOULD NOT HAVE OFFERED THIS, but a drag, a share sheet or a page cached before
        the connection went can all get here anyway. Say which thing is missing and what still
        works — never let a library's own ReferenceError be the message a person reads. */

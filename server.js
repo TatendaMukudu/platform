@@ -19238,6 +19238,17 @@ function _materialChecksum(text) {
    by accident. Refused with a size, because "too large" without a number is a dead end. */
 const IMAGE_B64_CAP = 6 * 1024 * 1024;
 const IMAGE_TYPES = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+/* A DOCUMENT MAY BE BIGGER THAN A PHOTOGRAPH, because a deck legitimately is, and smaller than
+   what `material.TEXT_CAP` would accept out of one — the cap that bites first should be the one
+   about the file, so the refusal can name a size somebody recognises. */
+const FILE_B64_CAP = 12 * 1024 * 1024;
+/* The type a retained Office original is served back as, so a re-read hands the browser the real
+   thing rather than a generic download. One mapping, beside the one list of supported kinds. */
+const OFFICE_MIME = Object.freeze({
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+});
 /* WHAT THE MODEL IS ASKED, and the whole reason this is one sentence rather than a paragraph of
    instructions: it is asked to DESCRIBE, never to conclude. "What is visually present" is a
    question about the picture; "what does this tell us about the team" is a question about the
@@ -19250,6 +19261,69 @@ const IMAGE_READ_PROMPT = [
   'person or organisation. If something is unclear or unreadable, say that rather than guessing.',
 ].join(' ');
 
+/* ── ONE PLACE THAT TURNS AN UPLOADED OFFICE FILE INTO WORDS ──────────────────────────────────
+   FOUNDER DECISION, September 2026: *Office parsing belongs server-side. Core document
+   understanding must not depend on runtime browser CDNs.*
+
+   What it replaces: the browser parsed .docx, .xlsx and .pptx with JSZip and SheetJS — two
+   `<script src="https://…">` tags — and posted the extracted TEXT. On a filtered network, an
+   installed app with no signal, or a stadium connection those scripts do not arrive and the whole
+   capability silently is not there. Round 5 measured that this build environment cannot reach
+   either CDN, so those three formats had never once worked in a browser check.
+
+   WHAT THIS REUSES RATHER THAN BUILDS. `lib/office.js` already read .docx and .xlsx with no
+   dependency at all — Node's own `zlib` over the ZIP central directory — and had been imported by
+   this file and called from nowhere since it was written. It gained the PowerPoint reader it was
+   missing, and this is its caller. There is no new document-intelligence system: what comes out is
+   text, and from there it is an ordinary Material on the path anything typed takes.
+
+   ONE HELPER, BOTH DOORS. The composer's `/api/assistant/attachments` and the object thread's
+   `/api/materials` both take files, and a second copy of this would be a second set of limits and
+   a second answer to "is that supported". Returns `{ ok }` with everything the caller needs, or
+   `{ ok: false, status, body }` — a refusal already phrased for a person.
+
+   AND THE ORIGINAL IS THE SERVER'S TO KEEP. The bytes reach us for the first time, so the
+   September retention law applies to a document exactly as it does to a photograph. */
+function _readOfficeUpload(b) {
+  const f = (b && b.file) || {};
+  const name = String(f.name || b.filename || '').slice(0, 200);
+  const declared = String(f.kind || '').toLowerCase();
+  const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1];
+  /* THE KIND IS DECIDED HERE, from the file's own extension, and a caller's claim only breaks a
+     tie when there is no extension to read. A client that says "docx" about a spreadsheet does not
+     get to route it to the wrong reader. */
+  const kind = office.SUPPORTED.includes(String(ext || '').toLowerCase())
+    ? String(ext).toLowerCase()
+    : (office.SUPPORTED.includes(declared) ? declared : null);
+  if (!kind) {
+    return { ok: false, status: 415, body: { error: 'That kind of file cannot be read yet.',
+      readable: office.SUPPORTED,
+      note: 'Word, PowerPoint and spreadsheet files can be read. Paste the text for anything else.' } };
+  }
+  const data = String(f.data || '');
+  if (!data) return { ok: false, status: 400, body: { error: 'file data required' } };
+  if (data.length > FILE_B64_CAP) {
+    return { ok: false, status: 413, body: { error: 'That file is larger than IntelliQ will read.',
+      limitMB: Math.round(FILE_B64_CAP / (1024 * 1024)) } };
+  }
+  let buf = null;
+  try { buf = Buffer.from(data, 'base64'); } catch (_) { buf = null; }
+  if (!buf || !buf.length) return { ok: false, status: 400, body: { error: 'that file did not arrive intact' } };
+  const extracted = office.toText(kind, buf);
+  /* IT FAILS HONESTLY WHEN IT CANNOT, and the refusal is about the FILE rather than about the
+     product: either it is not really that format, or it is and holds no words. Neither invents a
+     Material, and both leave pasting the text as a way through. */
+  if (!extracted || !material.hasReadableText(extracted)) {
+    return { ok: false, status: 422, body: { error: 'Nothing readable came out of that file.',
+      because: 'no_extractable_text',
+      note: 'It may be a different format than its name suggests, or hold only pictures. '
+          + 'Pasting the text in still works.' } };
+  }
+  return { ok: true, kind, text: extracted,
+    readFrom: { kind, bytes: buf.length, name },
+    retain: { mimetype: OFFICE_MIME[kind], data, bytes: buf.length } };
+}
+
 app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const b = req.body || {};
@@ -19257,6 +19331,32 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   let kind = 'text';
   let readFrom = null;
   let _retainSource = null;
+
+  /* ── A DOCUMENT IS READ BY THE SERVER, NOT BY THE BROWSER ────────────────────────────────────
+     FOUNDER DECISION, September 2026: *Office parsing belongs server-side. Core document
+     understanding must not depend on runtime browser CDNs.*
+
+     What it replaces: the browser parsed .docx, .xlsx and .pptx with JSZip and SheetJS — two
+     `<script src="https://…">` tags — and posted the extracted TEXT. On a filtered network, an
+     installed app with no signal, or a stadium connection, those scripts do not arrive and the
+     whole capability silently is not there. Round 5 measured that this build environment cannot
+     reach either CDN at all, so those three formats had never once worked in a browser check.
+
+     WHAT THIS REUSES RATHER THAN BUILDS. `lib/office.js` already read .docx and .xlsx with no
+     dependency at all — Node's own `zlib` over the ZIP central directory — and had been imported
+     here and called from nowhere since it was written. It gained the third reader it was missing
+     and this is its caller. There is no new document-intelligence system: what comes out is text,
+     and from that point it is an ordinary Material on the same path as anything somebody typed.
+
+     AND THE ORIGINAL IS NOW THE SERVER'S TO KEEP. The bytes reach us for the first time, so the
+     September retention law applies to a document exactly as it does to a photograph: retained,
+     audience inherited from the material, deletable with a tombstone, no invented duration. */
+  if (b.file && typeof b.file === 'object') {
+    const read = _readOfficeUpload(b);
+    if (!read.ok) return res.status(read.status).json(read.body);
+    text = read.text; kind = read.kind; readFrom = read.readFrom;
+    _retainSource = read.retain;
+  }
 
   /* AN IMAGE IS READ AT THE DOOR, ONCE, THROUGH THE GATEWAY THAT COULD ALREADY DO IT.
      `ai.understand` has built Claude image blocks and OpenAI `image_url` since it was written and
@@ -19385,10 +19485,12 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
       filename: String(b.filename || b.title || '').slice(0, 200),
       /* THE KIND IS THE SERVER'S, not the client's, when the server is the one that read it. An
          image's kind is decided by the branch above having actually gone through the vision path;
-         a caller claiming `kind: 'image'` for a block of text it typed does not get to say so. */
-      kind: kind === 'image' ? 'image'
+         a caller claiming `kind: 'image'` for a block of text it typed does not get to say so.
+         The same now holds for a document: `kind` is set by whichever reader actually opened the
+         file, so a .pptx segments into slides because it really was a deck. */
+      kind: kind !== 'text' ? kind
         : (material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text'),
-      sections: material.segment(text, { kind: kind === 'image' ? 'image' : String(b.kind || 'text') }),
+      sections: material.segment(text, { kind: kind !== 'text' ? kind : String(b.kind || 'text') }),
       refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
       checksum, visibility: 'private', provenance: 'external', createdAt: Date.now(),
       /* WHETHER THE ORIGINAL IS STILL OPENABLE, AND IF NOT, WHY NOT — as a state on the material
@@ -19420,10 +19522,19 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
     parts: row.sections.length, kind: row.kind, epistemicEffect: 'none',
     sourceMedia: row.sourceMedia || { retained: false, because: 'never_held' },
     ...(row.kind === 'image' ? { readFrom, imageRetained: !!(row.sourceMedia && row.sourceMedia.retained) } : {}),
+    ...(office.SUPPORTED.includes(row.kind) ? { readFrom } : {}),
     note: row.kind === 'image'
       ? 'I have read what the picture appears to show, and the picture itself is kept so you can '
         + 'open it again. Only the people who can read this material can open it. What it appears '
         + 'to show is not evidence about you or the organisation.'
+      /* A DOCUMENT THE SERVER OPENED ITSELF says the two things a person cannot otherwise know:
+         that the file is kept and openable, and that reading it changed nothing anybody believes.
+         It deliberately does NOT claim to have understood it — what was taken is the words. */
+      : office.SUPPORTED.includes(row.kind)
+      ? `I have the words out of ${row.filename || 'that file'} — ${row.sections.length} `
+        + `part${row.sections.length === 1 ? '' : 's'} — and the file itself is kept so you can open `
+        + 'it again. Only the people who can read this material can open it. It is external '
+        + 'material, so nothing in it is evidence about you or the organisation.'
       : 'Available to this conversation as external material. It is not evidence about you or the organisation.' });
 });
 /* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
@@ -19503,7 +19614,16 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const at = b.attachTo || {};
   const kind = String(at.kind || '');
   if (!['focus', 'inquiry', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'attach it to a focus, inquiry, high or low' });
-  const text = String(b.text || '');
+  /* THE OTHER DOOR THAT TAKES A FILE, through the same reader. An object thread's Material picker
+     posts here; before this it posted browser-extracted text, which is the dependency the founder
+     removed. One helper, so the two doors cannot disagree about which formats are supported, how
+     large a file may be, or what a refusal says. */
+  let _fileRead = null;
+  if (b.file && typeof b.file === 'object') {
+    _fileRead = _readOfficeUpload(b);
+    if (!_fileRead.ok) return res.status(_fileRead.status).json(_fileRead.body);
+  }
+  const text = _fileRead ? _fileRead.text : String(b.text || '');
   /* `text.trim()` IS NOT ENOUGH, and finding out why cost an attachment list with a
      control-character heading in it. trim() strips WHITESPACE; a NUL is not whitespace. So a
      corrupt binary — a .pptx that failed to parse, an image renamed to .txt — arrives as control
@@ -19521,7 +19641,10 @@ app.post('/api/materials', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'you do not lead this group, and material attached here reaches everybody in it' });
   }
 
-  const sections = material.segment(text, { kind: String(b.kind || 'text') });
+  /* THE KIND IS THE READER'S when the server did the reading, so a deck really segments into
+     slides. A caller's `kind` only speaks for text it extracted itself. */
+  const _kind = _fileRead ? _fileRead.kind : (material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text');
+  const sections = material.segment(text, { kind: _kind });
   if (!sections.length) return res.status(400).json({ error: 'nothing readable came out of that file' });
 
   /* THE SAME DOCUMENT ATTACHED TWICE IS ONE DOCUMENT. Keyed by a checksum of its own text, so a
@@ -19570,7 +19693,7 @@ app.post('/api/materials', requireAuth, (req, res) => {
     materialId: id, byId: userId, orgCode: code,
     title: String(b.title || b.filename || 'Attached material').trim().slice(0, 200),
     filename: String(b.filename || '').trim().slice(0, 200),
-    kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
+    kind: _kind,
     sections,
     checksum,
     /* WHAT IT IS, AND WHERE IT CAME FROM, recorded together. `classification` is what was
@@ -19579,12 +19702,19 @@ app.post('/api/materials', requireAuth, (req, res) => {
     classification: _cls.class,
     source: _cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '',
     visibility: 'object', provenance: 'internal',
+    /* AND THE ORIGINAL, WHEN THE SERVER HELD IT. Same retention law as a photograph: the audience
+       is the material's, deleting removes bytes and leaves a tombstone, and no duration is set. */
+    sourceMedia: _fileRead
+      ? { retained: true, mimetype: _fileRead.retain.mimetype, bytes: _fileRead.retain.bytes }
+      : { retained: false, because: 'never_held' },
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
     refs: [{ kind, id: String(at.id), at: Date.now(), by: userId }],
     attachTo: { kind, id: String(at.id) },
     createdAt: Date.now(),
   };
+  if (_fileRead) _materialSources(code)[id] = { mimetype: _fileRead.retain.mimetype,
+    data: _fileRead.retain.data, bytes: _fileRead.retain.bytes, at: Date.now(), byId: userId };
   _audit(code, { actor: userId, action: 'material_attached', subjectIds: [], basis: `${kind}:${at.id} (${sections.length} parts)` });
   scheduleSave();
   res.json({ ok: true, materialId: id, parts: sections.length,

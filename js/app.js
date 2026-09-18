@@ -13497,15 +13497,27 @@ const MemberApp = {
       if (typeof AttachmentHandler === 'undefined') return say('The uploader is not available right now.');
       say('Reading it…');
       try {
-        const parsed = await AttachmentHandler.process(file);
-        // An image or a PDF arrives as bytes with no text. IntelliQ cannot work from words it
-        // does not have, and saying so is better than attaching something it will then answer
-        // about from nothing.
-        const text = parsed.content || '';
-        if (!text.trim()) return say('No text came out of that one, so there would be nothing for IntelliQ to read. A deck, a document, a spreadsheet or a text file works.');
+        /* A WORD, EXCEL OR POWERPOINT FILE GOES UP WHOLE and is read by `lib/office.js`. The
+           same decision as the composer's paperclip, through the same server helper, so this
+           picker cannot come to support a different set of formats than that one does. */
+        const officeKind = AttachmentHandler.serverReadKind
+          ? AttachmentHandler.serverReadKind(file) : null;
+        let body;
+        if (officeKind) {
+          body = { attachTo: { kind, id: objectId }, title: file.name, filename: file.name,
+            file: { data: await AttachmentHandler.fileToBase64(file), kind: officeKind, name: file.name } };
+        } else {
+          const parsed = await AttachmentHandler.process(file);
+          // An image or a PDF arrives as bytes with no text. IntelliQ cannot work from words it
+          // does not have, and saying so is better than attaching something it will then answer
+          // about from nothing.
+          const text = parsed.content || '';
+          if (!text.trim()) return say('No text came out of that one, so there would be nothing for IntelliQ to read. A deck, a document, a spreadsheet or a text file works.');
+          body = { attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text };
+        }
         const r = await fetch('/api/materials', {
           method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text }),
+          body: JSON.stringify(body),
         }).then(x => x.json());
         if (!r.ok) return say(r.error || 'That could not be attached.');
         /* WHAT CAME OUT, AND WHAT IT IS. The founder's "read it and work from it" is only
@@ -15012,15 +15024,32 @@ const MemberApp = {
     };
     try {
       if (typeof AttachmentHandler === 'undefined') throw new Error('The uploader isn’t available right now.');
-      const parsed = await AttachmentHandler.process(file);
+      /* ── A WORD, EXCEL OR POWERPOINT FILE GOES UP WHOLE ──────────────────────────────────────
+         FOUNDER DECISION, September 2026: Office parsing belongs server-side. This browser used to
+         open those three formats itself with JSZip and SheetJS — two CDN script tags — and post
+         the extracted text. When those scripts did not arrive, and round 5 measured that they
+         often do not, the capability silently was not there.
+
+         So the browser now does what a browser should: select, upload, show the attachment, and
+         let the conversation carry on. `lib/office.js` on the server reads it with Node's own
+         zlib and no dependency at all. The picture path was already this shape, which is why
+         there is one branch here and not two. */
+      const officeKind = AttachmentHandler.serverReadKind
+        ? AttachmentHandler.serverReadKind(file) : null;
+      const parsed = officeKind ? null : await AttachmentHandler.process(file);
       /* A PICTURE HAS NO TEXT TO EXTRACT, AND THAT IS NOT A FAILURE. Everything else this handler
          produces is words pulled out in the browser; an image produces BYTES, and the reading is
          done by the server through the vision gateway. So the "no text in that file" refusal below
          is right for a document and would be wrong here -- an image with no `content` is the
          ordinary case, not a broken upload. */
       const isImage = parsed && parsed.kind === 'image' && parsed.data;
-      const content = isImage ? '' : (parsed.content || parsed.summary || '');
-      if (!isImage && !String(content).trim()) throw new Error('I couldn’t read any text from that file.');
+      /* A DOCUMENT THE SERVER WILL READ has no text here either, for the same reason: what goes
+         up is the file. The "no text in that file" refusal below belongs to the browser-parsed
+         shapes only — csv, txt, md — and applying it to the other two would refuse every upload
+         that is working correctly. */
+      const officeBytes = officeKind ? await AttachmentHandler.fileToBase64(file) : null;
+      const content = (isImage || officeKind) ? '' : (parsed.content || parsed.summary || '');
+      if (!isImage && !officeKind && !String(content).trim()) throw new Error('I couldn’t read any text from that file.');
 
       /* BOUNDED, like every other write in this file. An upload with no ceiling leaves
          "Reading that file…" on the screen for as long as the person is willing to wait, which
@@ -15034,11 +15063,15 @@ const MemberApp = {
         r = await fetch('/api/assistant/attachments', {
           method: 'POST', signal: ctrl.signal,
           headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-          /* ONE DOOR, TWO SHAPES. A document sends the text it extracted; a picture sends the
-             bytes and lets the server read them. Same route, same conversation binding, same
-             material laws afterwards -- which is the whole point of not building a second path. */
+          /* ONE DOOR, THREE SHAPES. A picture sends bytes for the vision gateway; a Word,
+             Excel or PowerPoint file sends bytes for `lib/office.js`; everything else sends the
+             text the browser could read on its own. Same route, same conversation binding, same
+             material laws afterwards — which is the whole point of not building a second path. */
           body: JSON.stringify(isImage
             ? { image: { data: parsed.data, mimetype: parsed.mediaType, name: file.name },
+                title: file.name, filename: file.name, conversationId, about }
+            : officeKind
+            ? { file: { data: officeBytes, kind: officeKind, name: file.name },
                 title: file.name, filename: file.name, conversationId, about }
             : { kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
                 conversationId, about }),
