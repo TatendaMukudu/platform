@@ -408,6 +408,83 @@ const server = app.listen(0, async () => {
     ok('L3 …and the disagreement that produced the Low survives',
       flat.includes('inq_mine') && /dissents|contradicts|disputes/.test(flat));
 
+    /* ══ M — AND THE REST OF THE VOCABULARY, SO THE AUDIT IS NOT A SAMPLE ═════════════════
+       The founder's §4: search the whole Composer schema for consequential state IntelliQ can
+       tell somebody it changed, and ask where the human sees it afterwards. The actions above are
+       the journey; these are the remainder, each with the door that makes its sentence true. */
+    console.log('\n  M — EVERY OTHER CONSEQUENTIAL ACTION HAS A DOOR TOO');
+    const m1 = await stage('update_focus', { text: 'Speak first, and name who takes the restart' },
+      { about: { kind: 'focus', id: fid }, text: 'change it to speak first and name who takes the restart' });
+    ok('M1 "Focus updated" is proposed', !!m1.prop);
+    const m1Done = await confirm(m1.turnId, m1.prop.id);
+    const m1Card = await card('focus', 'self', fid);
+    ok('M2 …and the card really says the new words',
+      m1Done.status === 200
+      && String(((m1Card.present || {}).summary || {}).full) === 'Speak first, and name who takes the restart');
+    ok('M3 …on the SAME focus, not a second one',
+      (await listed('focus', 'self')).filter(x => x === fid).length === 1);
+
+    const m4 = await stage('create_library_folder', { folderName: 'Set pieces' },
+      { text: 'make a folder called Set pieces' });
+    const m4Done = await confirm(m4.turnId, m4.prop.id);
+    const folderId = String(((m4Done.j || {}).folder || {}).id || '');
+    ok('M4 "Created a folder" answers with a canonical id', m4Done.status === 200 && !!folderId);
+    ok('M5 …and both Library doors show THAT folder',
+      (((await call('GET', '/api/library/folders')).j || {}).folders || [])
+        .some(f => String(f.id) === folderId)
+      && (((await call('GET', '/api/library/shelf')).j || {}).folders || [])
+        .some(f => String(f.id) === folderId));
+    ok('M6 …and nobody else gained a folder',
+      !(((await call('GET', '/api/library/folders', undefined, 'p2')).j || {}).folders || [])
+        .some(f => String(f.id) === folderId));
+
+    /* THE ONE THAT UNDOES SOMETHING. "Taken off your priorities" has to be as true as the mark. */
+    const onTop = () => call('GET', '/api/me/attention').then(r =>
+      ((r.j || {}).items || []).some(i => String(i.ref) === `focus:${fid}`));
+    ok('M7 it is on the attention list to begin with', await onTop());
+    const m8 = await stage('unprioritise_object', {},
+      { about: { kind: 'focus', id: fid }, text: 'take it off my priorities' });
+    const m8Done = await confirm(m8.turnId, m8.prop.id);
+    ok('M8 "Taken off your priorities" is confirmed', m8Done.status === 200);
+    ok('M9 …and it is actually off the list', !(await onTop()));
+    ok('M10 …while the Focus itself is untouched', (await listed('focus', 'self')).includes(fid));
+
+    /* AND THE TWO THAT REFUSE. A refusal is a promise too — it must be true, and the record must
+       be exactly as it was. Settling an empirical question is not a human's to declare, and a
+       relation with no evidence bound to it has nothing to be about. */
+    const inqBefore = JSON.stringify(await card('inquiry', 'self', 'inq_mine'));
+    const m11 = await stage('settle_inquiry', {},
+      { about: { kind: 'inquiry', id: 'inq_mine' }, text: 'I think this is settled' });
+    const m11Done = m11.prop ? await confirm(m11.turnId, m11.prop.id) : { status: 0, j: {} };
+    ok('M11 a person\'s call cannot settle an empirical question', m11Done.status !== 200);
+    ok('M12 …and the Inquiry is on the record exactly as it was',
+      JSON.stringify(await card('inquiry', 'self', 'inq_mine')) === inqBefore);
+    const m13 = await stage('declare_focus_relation', { relation: 'supports' },
+      { about: { kind: 'focus', id: fid }, text: 'that evidence supports this' });
+    ok('M13 declaring a relation with no evidence bound to it proposes nothing', !m13.prop);
+
+    /* ══ N — THE LOOP READS FROM BOTH ENDS ═════════════════════════════════════════════════
+       The founder's §7: the intelligence follows the thing through time. K proved the Focus
+       remembers the question. This proves the question remembers the Focus — because a loop
+       readable from one end only is a loop somebody standing at the other end cannot see. */
+    console.log('\n  N — AND THE QUESTION REMEMBERS THE FOCUS, NOT ONLY THE OTHER WAY ROUND');
+    const nOut = await stage('record_focus_outcome', { outcome: 'helped' },
+      { about: { kind: 'focus', id: kFid }, text: 'we tried it today and it helped' });
+    await confirm(nOut.turnId, nOut.prop.id);
+    const fromInquiry = ((await call('GET', '/api/objects/inquiry/inq_mine/related')).j || {});
+    ok('N1 standing at the Inquiry, the Focus is related back',
+      (fromInquiry.related || []).some(r => String(r.ref) === `focus:${kFid}` && r.type === 'addressed_by'));
+    ok('N2 …and the loop names the same two ends from here',
+      (fromInquiry.loop || {}).focus === `focus:${kFid}`
+      && (fromInquiry.loop || {}).addresses === 'inquiry:inq_mine');
+    ok('N3 …carrying what came of it',
+      (fromInquiry.loop || {}).outcome === 'helped');
+    /* AND NOTHING WAS DUPLICATED OR ERASED BY GOING ROUND IT. */
+    ok('N4 the Inquiry is still there after the Focus reported an outcome',
+      (await listed('inquiry', 'self')).filter(x => x === 'inq_mine').length === 1);
+    ok('N5 …and the Focus was not replaced by a second one',
+      (await listed('focus', 'self')).filter(x => x === kFid).length === 1);
+
   } catch (e) { fail++; console.error('  FAIL product-promise suite threw:', e && e.stack); }
 
   server.close();
