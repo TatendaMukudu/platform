@@ -242,6 +242,23 @@ function readCommand(text) {
 
 const MODEL_SCHEMA = Object.freeze({
   actions: [{ type: 'one ACTION name', arguments: 'object containing only values stated by the user', reason: 'short explanation' }],
+  /* ── WHETHER THEY DECLARED IT OR ASKED ABOUT IT, WHICH ONLY LANGUAGE CAN TELL ─────────────
+     `create_focus` manufactures a commitment, so it is the one action that must not be staged
+     from somebody merely wondering aloud. That test used to be an ENGLISH WORD LIST — "work on",
+     "I want to", "let's", "get better at" — and it sat after the model had already read the
+     sentence and chosen the action.
+
+     So a Shona speaker saying "Ndinoda kushanda pakutaura kutanga" — I want to work on speaking
+     first — got no Focus. The model understood, picked the right action and supplied the right
+     words, and deterministic code then re-did the interpretation in one language and threw it
+     away. That is the allowlist the language layer already lost once, arriving one layer down at
+     the action that matters most.
+
+     Reading a sentence is the model's half, so it is asked. This is a CLOSED TWO-VALUE FIELD, not
+     free text: `ground` accepts nothing else, and the question test still overrides it, because
+     "should I work on this?" is not a declaration however it is labelled. Deterministic code
+     keeps the veto; what it stops doing is deciding, in English, what the sentence meant. */
+  intent: "'stated' when the person is declaring what they will do, 'asked_about' when they are asking, wondering or discussing it — in whatever language they wrote",
   needsClarification: 'string or null',
 });
 
@@ -313,7 +330,14 @@ function normalize(result, context = {}) {
     if (Array.isArray(raw.participantIds)) args.participantIds = [...new Set(raw.participantIds.map(String))].slice(0, 20);
     actions.push({ type, arguments: args, reason: String(row.reason || '').slice(0, 240), requiresConfirmation: ACTIONS[type].confirmation });
   }
-  return { actions, needsClarification: typeof result?.needsClarification === 'string' ? result.needsClarification.slice(0, 300) : dropped };
+  /* AND THE MODEL'S READING OF THE SENTENCE, BOUNDED TO TWO WORDS. Anything else — free text, a
+     missing field, an older provider that has never heard of it — normalises to null, which is
+     simply not a declaration. A field that could carry arbitrary text into `ground` would be a
+     way for a model to talk its way past the commitment gate. */
+  const intent = result && result.intent === 'stated' ? 'stated'
+    : (result && result.intent === 'asked_about' ? 'asked_about' : null);
+  return { actions, intent,
+    needsClarification: typeof result?.needsClarification === 'string' ? result.needsClarification.slice(0, 300) : dropped };
 }
 
 /* Model output is a reading, not a source of user intent. Consequential values are
@@ -384,9 +408,17 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        not in the list. The suite caught it (CA3b), and the right answer was to widen the family
        rather than to relax the assertion — the product was wrong, not the test. */
     const _asksForAFocus = /\b(?:creat(?:e|ing)|set(?:ting)?\s*up|start(?:ing)?|mak(?:e|ing)|add(?:ing)?|new)\s+(?:this\s+|that\s+|it\s+|a\s+|an\s+|the\s+|another\s+|my\s+|our\s+)*focus\b/i;
+    /* THE ENGLISH LIST SURVIVES AS THE MODELS-OFF FALLBACK, where it is the only signal there is,
+       and is no longer the only way to declare intent. */
     const _statesIntent = t => _asksForAFocus.test(t)
       || /\b(work(?:ing)? on|focus on|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
-    const _mayTakeWording = !_isQuestion(current) && (requested || _statesIntent(current));
+    /* THE MODEL'S READING OF THE SENTENCE, bounded to one of two values and to nothing else. A
+       missing or unrecognised value is simply not a declaration, so an older provider, a
+       malformed reply or a models-off turn all fall back to the English list rather than to
+       staging a commitment nobody made. */
+    const _modelSaysStated = String((reading && reading.intent) || '') === 'stated';
+    const _mayTakeWording = !_isQuestion(current)
+      && (requested || _statesIntent(current) || _modelSaysStated);
 
     /* ── AND THE GATE APPLIES TO THE MODEL'S OWN WORDS, NOT ONLY TO THE FALLBACKS ──────────────
        This block used to sit ABOVE the gate and copied `raw.text` in unconditionally, so the
@@ -461,10 +493,19 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
         worse:     /\bgot worse\b|\bwas worse\b|\bworse\b/i,
         unclear:   /\btoo tangled\b|\bcan['’]?t tell\b|\bcannot tell\b|\bhard to tell\b|\bunclear\b/i,
       };
+      /* THE VOCABULARY IS THE MEANINGS, AND A MEANING HAS MORE THAN ONE ORDINARY WORDING.
+         The rule here is that the OUTCOME WORD MUST BE THE PERSON'S OWN — a model may not decide
+         for somebody how it went. That rule is untouched. What was too narrow was the list of
+         ways a person is allowed to have said each of the three things: "that didn't work" and
+         "no real difference" are as plainly an outcome as "it didn't help", and both were
+         refused. The founder named both as acceptance cases.
+
+         This is not the intent layer and must not become it: three closed meanings, matched
+         against what the person literally wrote, and anything outside them still asks. */
       const SELF_WORDS = {
-        helped: /\bhelped\b/i,
-        mixed:  /\bmixed\b/i,
-        no:     /\b(did not|didn['’]t|has not|hasn['’]t) help\b|\bno (?:change|difference|improvement)\b/i,
+        helped: /\b(helped|worked|made a difference)\b/i,
+        mixed:  /\b(mixed|some days|hit and miss|on and off)\b/i,
+        no:     /\b(?:did|has|have|had)\s*n[o’']?t\s+(?:really\s+)?(?:help|work)(?:ed)?\b|\bno\s+(?:real\s+)?(?:change|difference|improvement)\b|\bnothing\s+changed\b|\bsame\s+as\s+before\b/i,
       };
       const words = _isGroupFocus ? GROUP_WORDS : SELF_WORDS;
       const test = words[outcome];
