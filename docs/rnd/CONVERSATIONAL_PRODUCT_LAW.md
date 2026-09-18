@@ -49,6 +49,26 @@ The assistant should continually determine the useful next move:
 - Does the outcome change current understanding? Learn and adjust.
 - Is curiosity/watch/no action the honest next state? Allow it.
 
+## Journey continuity and recurrence law
+
+When a High, Low, or Inquiry becomes the basis for a Focus, the **human-facing conversation continues for the same authorized participant set**. Choosing B should not make the involved person/people feel that one room was closed and an unrelated product opened. Their prior discussion, relevant Forum context, canonical relationships, and governed evidence lineage remain reachable as the same journey.
+
+Conversation continuity is **participant- and audience-bound, not topic-bound**. A relationship between objects never grants a new reader access to the conversation that produced them. Relationship is not readership.
+
+If a later person/team encounters a similar underlying A, IntelliQ may retrieve the prior journey only at the standing and scope that reader is authorized to use. It may use the reusable learning/direction from that journey — for example the prior B, intervention shape, outcome summary, and governed organizational learning — without carrying over another person/team's private chat, Forum messages, identities, or source material.
+
+Therefore:
+- same authorized participant(s), continuing journey -> conversation/Forum continuity may carry into the Focus;
+- different person/team, similar A -> **no chat inheritance**; only admissible reusable learning/direction may inform reasoning;
+- prior B is precedent, not prescription. The new B may be the same, similar, or different because context and desired outcomes differ;
+- historical similarity never becomes causal proof or an automatic Focus. Human choice still establishes the new B/Focus.
+
+The traceable lineage should remain reconstructable for authorized readers:
+
+context/onboarding -> observation/evidence -> High/Low/Inquiry -> conversation/Forum -> proposed B -> human choice -> Focus -> action/experiment -> outcome -> learning -> changed understanding.
+
+This lineage is long-lived learning memory. Months or years later, a similar A can retrieve prior comparable journeys so IntelliQ can explain what direction was tried, what happened, what was learned, and what differs now — while preserving the original journey's privacy boundaries.
+
 ## Focus law
 
 A Focus is the deliberate-action phase, not another observation bucket and not a Focus factory.
