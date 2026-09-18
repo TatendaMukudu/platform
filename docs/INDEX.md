@@ -424,6 +424,31 @@ or something false on a real screen.**
 >   person had just confirmed, so "Inquiry opened" was true about a write that appeared on no
 >   screen at any scope. `openedBy` is set only by the governed confirmation path.
 
+> **The product-connectivity audit** (`fb3ea1c` onward) is recorded in
+> `docs/reviews/PRODUCT_CONNECTIVITY_R5.md`. It answers one question: was the invisible Inquiry an
+> Inquiry bug, or does IntelliQ generally write truth it cannot find again? **It was specific.**
+> Every one of the eighteen consequential Composer actions was driven end to end — promise,
+> canonical id, the surface that lists it, the thread that reopens it, the continuation, and the
+> outsider who must find nothing — and all the others were already connected. Four things to know:
+>
+> - **`scripts/product-promise-http-smoke.js` is the gate for this class.** It refuses as proof a
+>   200, a row in persistence, prose on a screen, or a card that renders anything other than the id
+>   that was written. Every assertion is an id or a reader's behaviour. Adding a consequential
+>   Composer action means adding its section here.
+> - **`_confirmProposal` runs inside an error boundary.** The one mutation path is `async` and
+>   nothing caught a throw, so a bad record shape in any branch left the person watching a spinner
+>   after a possible partial write. It now answers, says nothing was taken as done, and leaves the
+>   proposal retryable. `applyProposals` also reads a missing `supportRefs` as an empty one, because
+>   persisted records predate that field.
+> - **A bound object answers about itself** (`_objectSelfRead`). A question asked from inside a
+>   Focus used to dead-end on the free-text bundle — the seventh instance of that — while the
+>   answer was on the card. It reads from the same presenter the card renders from, matches no
+>   question words, and a reported outcome carries the limitation that it is not a cause.
+> - **The browser check's excuse list is empty, deliberately.** It held
+>   `/^Chart is not defined$/`, called a harness artifact; it never was one. `js/charts.js` touched
+>   `Chart.defaults` at module load, so a connection that could not fetch the CDN threw and took
+>   every chart helper with it. Charts degrade honestly now. Do not put anything back on that list.
+
 **The A-to-B spine.** The loop already ran end to end; three of eight coach-facing sections were
 structurally empty and the loop's last arrow did not close. `AB_SPINE_TRUTH_MAP_R1.md` is the record,
 including where Part I turned out to be wrong. A human may now propose a candidate explanation for a
