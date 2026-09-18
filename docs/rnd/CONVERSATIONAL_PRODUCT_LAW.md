@@ -49,6 +49,29 @@ The assistant should continually determine the useful next move:
 - Does the outcome change current understanding? Learn and adjust.
 - Is curiosity/watch/no action the honest next state? Allow it.
 
+## Ownership of conversation, organizational learning, and outside knowledge
+
+**Conversation belongs to its people. Evidence and reusable direction belong to the organization at their governed standing.** A person's/team's chat is never converted into organizational chat merely because useful learning came from it. The organization may retain admissible evidence, provenance, outcome records, and reusable learning/direction produced through governed paths without inheriting the private conversation itself.
+
+This distinction applies across time and people:
+- chat/message content remains governed by the participant/audience boundary that created it;
+- admissible evidence retains provenance and its own visibility/admissibility rules;
+- reusable organizational direction may include a prior B, intervention/action shape, conditions, outcome summary, limitations, and resulting learning when policy permits;
+- organizational learning must not reveal private wording or make de-identification claims the underlying cohort/privacy rules do not support.
+
+Suggestions are not limited to internal history. IntelliQ may build candidate directions from three clearly distinguished bases:
+1. **Current/internal evidence** — what this person/team/org is lawfully seeing now.
+2. **Organizational learning** — what this organization previously tried/observed and what followed.
+3. **External knowledge** — cited research, professional guidance, public evidence, or admissible examples from outside organizations.
+
+External knowledge can bootstrap a candidate B when there is credible evidence that an approach has helped attain a similar desired state elsewhere. It remains external evidence, not proof that it will work here. IntelliQ should expose source/basis, population/context, relevant differences, uncertainty and limitations; then translate it into a candidate direction or experiment appropriate to the current A. Human choice is still required before it becomes this person's/team's Focus.
+
+The learning loop can therefore be:
+
+current A + internal evidence + organizational memory + external knowledge -> understand/inquire -> candidate B/path -> human choice -> Focus -> action -> outcome -> local learning.
+
+Once this organization actually tries an externally informed direction, the resulting local outcome becomes organizational learning without erasing the external provenance that originally informed the choice.
+
 ## Journey continuity and recurrence law
 
 When a High, Low, or Inquiry becomes the basis for a Focus, the **human-facing conversation continues for the same authorized participant set**. Choosing B should not make the involved person/people feel that one room was closed and an unrelated product opened. Their prior discussion, relevant Forum context, canonical relationships, and governed evidence lineage remain reachable as the same journey.
