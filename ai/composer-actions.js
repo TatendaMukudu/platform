@@ -512,9 +512,57 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
     const folder = folders.find(f => String(f.id) === String(raw.folderId) && currentHas(f.name));
     if (folder) { args.folderId = folder.id; sources.folderId = 'deterministically_resolved'; }
 
+    /* ── WHICH DOCUMENT "THIS" IS ───────────────────────────────────────────────────────────
+       FOUNDER DECISION, September 2026: "when there is exactly one safe referent, resolve it;
+       when several are plausible, do not guess — ask the smallest clarification."
+
+       This used to bind ONLY to `context.attachment`, the file uploaded in this very turn. So
+       "use this as evidence", said three messages after attaching the report, resolved nothing,
+       the required argument was missing, and the action was dropped in silence. The capability
+       existed the whole time and could not be addressed.
+
+       The pool is the server's — materials on the bound object or this conversation that this
+       reader may actually read (`_composerActionMaterials`). Nothing here trusts an id: a model
+       naming one that is not in the pool does not get a fallback to whatever else is lying
+       around, because substituting a different document for the one somebody named is a worse
+       failure than asking. It asks.
+
+       THIS IS THE LANGUAGE-FREE HALF ON PURPOSE. Steps 1 and 3 read no words at all, so a Shona
+       or Ndebele sentence the model understood resolves exactly as an English one does. Step 2
+       matches a document's own title, which is whatever the person called their file — not a
+       vocabulary this repo ships. */
     const attachment = context.attachment || null;
-    if (raw.materialId && attachment && String(raw.materialId) === String(attachment.id)) {
-      args.materialId = String(attachment.id); sources.materialId = 'deterministically_resolved';
+    if (action.type === 'attach_material') {
+      const pool = [];
+      const seen = new Set();
+      for (const m of [...(attachment ? [attachment] : []), ...(context.materials || [])]) {
+        const id = m && m.id != null ? String(m.id) : '';
+        if (!id || seen.has(id)) continue;
+        seen.add(id); pool.push({ id, name: String((m && m.name) || '') });
+      }
+      let picked = null;
+      if (raw.materialId) {
+        // 1 — NAMED, AND CHECKED. An id that is not in this reader's pool resolves to nothing.
+        picked = pool.find(m => m.id === String(raw.materialId)) || null;
+        if (!picked) needsClarification = needsClarification
+          || 'I could not find that document here. Open it, or attach it again, and I can use it.';
+      }
+      if (!picked && !needsClarification) {
+        // 2 — THEY NAMED THE FILE. One match is an answer; two is still a question.
+        const named = pool.filter(m => currentHas(m.name));
+        if (named.length === 1) picked = named[0];
+        // 3 — EXACTLY ONE SAFE REFERENT.
+        else if (!named.length && pool.length === 1) picked = pool[0];
+        else if (pool.length > 1) {
+          const names = pool.slice(0, 3).map(m => m.name).filter(Boolean);
+          needsClarification = names.length > 1
+            ? `Which one do you mean — ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`
+            : 'Which document do you mean?';
+        } else if (!pool.length) {
+          needsClarification = 'I do not have a document here to use. Attach it and I can.';
+        }
+      }
+      if (picked) { args.materialId = picked.id; sources.materialId = 'deterministically_resolved'; }
     }
 
     const groups = context.groups || [];

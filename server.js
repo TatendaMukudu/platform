@@ -15254,6 +15254,42 @@ function _assessTopic(t) {
   return m ? m[1].trim().replace(/[.?!,;].*$/, '').trim() : '';
 }
 
+/* ── WHAT "THIS" COULD MEAN, WHEN SOMEBODY SAYS "USE THIS AS EVIDENCE" ────────────────────────
+   THE REFERENT PROBLEM, resolved where every other referent already is: on the server, from the
+   reader's own authorised records, and never from what the client claims is on screen.
+
+   Until this existed, the only document a turn could name was the one uploaded IN THAT TURN. A
+   person who attached a report, talked about it for three messages and then said "use that as
+   evidence" named something the grounding layer could not see, so the action was dropped with no
+   proposal and no explanation. The capability was there; nothing could address it.
+
+   THE POOL IS DELIBERATELY SMALL. A material qualifies only if it hangs on the object this turn
+   is bound to, or on this conversation — the two places the person can actually be pointing at —
+   and only if `_materialFor` says this reader may read it. Possessing an id is not access here
+   either: an id that resolves to a material this reader cannot open never enters the pool, so it
+   cannot be named, cannot be attached, and cannot be confirmed to exist by the shape of the
+   refusal. Ordered most recent first, capped, because ambiguity beyond a handful is still just
+   ambiguity and `ground` refuses to guess at two. */
+function _composerActionMaterials(code, userId, object, conversation) {
+  const out = [];
+  try {
+    const seen = new Set();
+    const rows = Object.values(_materials(code)).filter(m => m
+      && ((object && _materialOn(m, object.kind, object.id))
+        || (conversation && _materialOn(m, 'conversation', conversation.id))));
+    rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    for (const m of rows) {
+      const id = String(m.materialId);
+      if (seen.has(id)) continue;
+      if (!_materialFor(code, userId, id, { requireObject: false }).ok) continue;
+      seen.add(id);
+      out.push({ id, name: String(m.title || m.filename || '').slice(0, 200) });
+      if (out.length >= 6) break;
+    }
+  } catch (_) { return []; }
+  return out;
+}
+
 /* The page tells the composer where the person is; the server decides what that address means.
    An `about` value is never authority. It is resolved through the same object view used by the
    page, and an unreadable object becomes no context rather than an existence oracle. */
@@ -15301,6 +15337,8 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
     })(),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
+    /* EVERY DOCUMENT "THIS" COULD LAWFULLY MEAN, not just the one uploaded this second. */
+    materials: _composerActionMaterials(code, userId, object, conversation),
     /* THE ONE PIECE OF EVIDENCE THIS TURN IS ABOUT, resolved by the server from the reader's own
        authorised objects. `opts.evidenceRef` is the page's CLAIM about what is on screen, not a
        permission: it is checked against the bound object's own records before it means anything,
