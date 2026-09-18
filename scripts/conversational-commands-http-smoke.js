@@ -77,6 +77,15 @@ _loadAllStores({
   } },
   orgNodes: { [C]: { first: { nodeId: 'first', name: 'First Team', parentId: null,
     childNodeIds: [], memberIds: ['me', 'mate', 'coach'], leaderIds: ['coach'] } } },
+  /* A SQUAD'S OWN FOCUS, which every member can open and only its leader may put material on.
+     Section E8 needs an object whose audience is a whole group rather than a list of named
+     people: that is the only shape where "may I attach here" has a different answer from
+     "may I open this". */
+  teamFocuses: { [C]: { first: [
+    { focusId: 'tf_restart', nodeId: 'first', text: 'Organise the first restart after conceding',
+      status: 'active', createdAt: Date.now() - 6 * 86400000, by: 'coach',
+      origin: { from: 'leader', by: 'coach', at: Date.now() - 6 * 86400000, inquiryId: null } },
+  ] } },
 });
 _rebuildEmailIndex();
 
@@ -172,43 +181,172 @@ const server = app.listen(0, async () => {
       !!made && (made.visibility || 'private') === 'private');
 
     /* ══ E — EVIDENCE PROMOTION, WHICH HAD NO PATH AT ALL ══════════════════════════════════
-       The founder's case: "use this as evidence" produced nothing. Through the model path it is
-       `attach_material`, and this drives it with a real material. */
+       The founder's case, in their words: "Use this as evidence" produces no proposal. Through
+       the model path it is `attach_material`, and the reason it produced nothing was NOT the
+       vocabulary — the model has had that action all along (A2 above). It was referent binding:
+       the material argument bound only to a file uploaded in the SAME turn, so a document
+       attached three messages ago could not be named. */
     console.log('\n  E — USING SOMETHING AS EVIDENCE GOES THROUGH THE GOVERNED OWNER');
+    /* THE REAL JOURNEY, not a convenient one. The report is uploaded into an ORDINARY CHAT —
+       nothing on screen, no object bound — which is how a person on a phone actually does it.
+       Only afterwards do they open the Focus and say to use it. So the document is not this
+       turn's attachment, is not attached to the Focus, and until this pass could not be named. */
     const att = await call('POST', '/api/assistant/attachments',
       { filename: 'results.txt', text: 'Draw 1-1. Draw 0-0. Draw 2-2. Draw 1-1. Draw 3-3.' }, 'me');
     ok('E1 a material exists to talk about', att.status === 200 && !!att.j.materialId);
+    const evConv = att.j.conversationId;
+    const onFocus = async () => (((await call('GET',
+      `/api/objects/focus/${fid}/materials`, undefined, 'me')).j || {}).materials || []);
+    ok('E1b …and the Focus has nothing on it yet', (await onFocus()).length === 0);
+    /* THE GAP THIS CLOSES. Nothing is uploaded on this turn; the conversation simply moves on,
+       which is what makes "this" a referent rather than an upload receipt. */
+    modelPicks('show_evidence');
+    await say('what does that tell you', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
     modelPicks('attach_material', { materialId: att.j.materialId });
-    const evOffer = await say('use this as evidence', 'me', { about: { kind: 'focus', id: String(fid) } });
+    const evOffer = await say('use this as evidence', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
     const evProp = props(evOffer).find(p => p.actionType === 'attach_material');
-    ok('E2 …and the request becomes a governed proposal rather than a silent write', !!evProp);
-    ok('E3 …which requires confirmation, because changing what something COUNTS as is consequential',
+    ok('E2 …and a document from EARLIER in the conversation is still what "this" means', !!evProp);
+    ok('E2b …bound to that document and no other',
+      !!evProp && String(((evProp.effect || {}).material || {}).id) === String(att.j.materialId));
+    /* AND THE CARD SAYS SO. A confirmation that names no file asks somebody to agree to
+       "attach this material" about a document it will not identify. */
+    ok('E2c …and the confirmation names the file by the name they gave it',
+      !!evProp && ((evProp.effect || {}).material || {}).name === 'results.txt');
+    ok('E3 …and it is proposed, not written: it needs a confirmation',
       !!evProp && evProp.requiredApproval !== false);
+    ok('E3b …so nothing has been attached yet', (await onFocus()).length === 0);
+    /* AND THEN THE GOVERNED OWNER WRITES. This is the assertion that makes the whole section
+       about the product rather than about a card: the Focus really does end up holding it. */
+    const evDone = await call('POST', `/api/assistant/turn/${evOffer.j.turnId}/confirm`,
+      { proposalId: evProp.id }, 'me');
+    ok('E3c confirming reaches the canonical owner', evDone.status === 200);
+    const nowOn = await onFocus();
+    ok('E3d …and the Focus now holds exactly that document',
+      nowOn.length === 1 && String(nowOn[0].materialId || nowOn[0].id) === String(att.j.materialId));
+    /* THE OTHER HALF OF THE FOUNDER'S RULE. An id the model names that this reader cannot open is
+       not a licence to substitute the document that IS lying around. */
+    modelPicks('attach_material', { materialId: 'mat_does_not_exist' });
+    const ghost = await say('use that one as evidence', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
+    ok('E4 an unresolvable material id attaches nothing at all',
+      !props(ghost).some(p => p.actionType === 'attach_material'));
+    ok('E4b …and does not quietly substitute the one real document instead',
+      !JSON.stringify(props(ghost)).includes(String(att.j.materialId)));
+    /* AND POSSESSING ANOTHER PERSON'S ID IS NOT ACCESS. Rudo's private attachment exists; Tendai
+       naming its real id must reach exactly the same nothing as naming a fictional one. */
+    const hers = await call('POST', '/api/assistant/attachments',
+      { filename: 'hers.txt', text: 'Rudo private notes about the back four shape.' }, 'mate');
+    ok('E5 the other person really does have a material', hers.status === 200 && !!hers.j.materialId);
+    modelPicks('attach_material', { materialId: hers.j.materialId });
+    const stolen = await say('use that one as evidence', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
+    ok('E6 another person\'s material id is not a way to attach their document',
+      !JSON.stringify(props(stolen)).includes(String(hers.j.materialId)));
+
+    /* ══ E7 — AND WHEN SEVERAL THINGS ARE PLAUSIBLE, IT ASKS ═══════════════════════════════
+       "Do not guess if several consequential referents are plausible." A second document on the
+       same Focus makes "this" genuinely ambiguous, and the safe answer is a question. */
+    console.log('\n  E7 — TWO DOCUMENTS MAKE "THIS" A QUESTION, NOT A GUESS');
+    const att2 = await call('POST', '/api/assistant/attachments',
+      { filename: 'notes.txt', conversationId: evConv, about: { kind: 'focus', id: String(fid) },
+        text: 'Second half we stopped talking. Nobody organised the restart.' }, 'me');
+    ok('E7a a second document is in the same conversation', att2.status === 200);
+    modelPicks('attach_material', {});
+    const ambiguous = await say('use this as evidence', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
+    ok('E7b with two plausible documents nothing is attached',
+      !props(ambiguous).some(p => p.actionType === 'attach_material'));
+    ok('E7c …and the person is asked which, by name',
+      /which one do you mean/i.test(String(resp(ambiguous).responseText || ''))
+      && /notes\.txt/.test(String(resp(ambiguous).responseText || ''))
+      && /results\.txt/.test(String(resp(ambiguous).responseText || '')));
+    /* NAMING ONE RESOLVES IT. The only word-reading step, and the word is the person's own
+       filename rather than anything this repo ships a pattern for. */
+    modelPicks('attach_material', {});
+    const byName = await say('use notes.txt as evidence', 'me',
+      { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
+    const named = props(byName).find(p => p.actionType === 'attach_material');
+    ok('E7d naming the document resolves the ambiguity', !!named);
+    ok('E7e …to the one that was named', !!named
+      && JSON.stringify(named).includes(String(att2.j.materialId))
+      && !JSON.stringify(named).includes(String(att.j.materialId)));
+
+    /* ══ E8 — AND THE COMPOSER IS NOT A SECOND DOOR AROUND WHO MAY ATTACH ══════════════════
+       Material on a group object reaches everybody in that group, so `POST /api/materials` has
+       always required that you LEAD the node. Reaching the same write by talking must meet the
+       same rule: being able to open an object is not permission to put things on it. */
+    console.log('\n  E8 — TALKING TO INTELLIQ DOES NOT RAISE WHO MAY ATTACH');
+    const sqid = 'tf_restart';
+    const squadSeen = await call('GET', '/api/objects?kind=focus&scope=group:first', undefined, 'me');
+    ok('E8a the squad Focus is a real object the member can see',
+      (((squadSeen.j || {}).objects) || []).some(o => String(o.id) === sqid));
+    const mineOnSquad = await call('GET', `/api/objects/focus/${sqid}/materials`, undefined, 'me');
+    ok('E8b …and they can open what is on it', mineOnSquad.status === 200);
+    const memberDoc = await call('POST', '/api/assistant/attachments',
+      { filename: 'mine.txt', text: 'My own note about how the restarts went for me.' }, 'me');
+    modelPicks('attach_material', { materialId: memberDoc.j.materialId });
+    const push = await say('use this as evidence', 'me',
+      { conversationId: memberDoc.j.conversationId, about: { kind: 'focus', id: String(sqid) } });
+    const pushProp = props(push).find(p => p.actionType === 'attach_material');
+    ok('E8c a member can still be OFFERED it, because offering is not doing', !!pushProp);
+    const refused = await call('POST', `/api/assistant/turn/${push.j.turnId}/confirm`,
+      { proposalId: pushProp && pushProp.id }, 'me');
+    ok('E8d …and confirming is refused: they do not lead that group', refused.status === 403);
+    /* READ AS THE PERSON WHO OWNS THE DOCUMENT. Reading as the leader would pass whether or not
+       the attach happened, because a private material is not theirs to see either way — the
+       assertion would hold for the wrong reason. */
+    ok('E8e …so nothing reached the group object',
+      (((await call('GET', `/api/objects/focus/${sqid}/materials`, undefined, 'me')).j || {})
+        .materials || []).length === 0);
+    /* AND THE RULE IS ABOUT AUTHORITY, NOT ABOUT THE ACTION. The person who leads it may. */
+    const coachDoc = await call('POST', '/api/assistant/attachments',
+      { filename: 'plan.txt', text: 'Restart plan: nearest player speaks first, then the keeper.' }, 'coach');
+    modelPicks('attach_material', { materialId: coachDoc.j.materialId });
+    const led = await say('use this as evidence', 'coach',
+      { conversationId: coachDoc.j.conversationId, about: { kind: 'focus', id: String(sqid) } });
+    const ledProp = props(led).find(p => p.actionType === 'attach_material');
+    const allowed = await call('POST', `/api/assistant/turn/${led.j.turnId}/confirm`,
+      { proposalId: ledProp && ledProp.id }, 'coach');
+    ok('E8f the person who leads the group may attach the same way', allowed.status === 200);
 
     /* ══ F — ASKING THE TEAM ═══════════════════════════════════════════════════════════════ */
     console.log('\n  F — ASKING THE TEAM REACHES THE EXISTING FORUM MACHINERY');
+    const conv = await say('we keep going quiet after we concede', 'me');
+    const cid = (conv.j || {}).conversationId;
     modelPicks('discuss_with_group', { groupId: 'first' });
-    const forumOffer = await say('ask the team about this', 'me',
-      { about: { kind: 'focus', id: String(fid) } });
+    const forumOffer = await say('ask the team about this', 'me', { conversationId: cid });
     ok('F1 "ask the team" becomes a governed discussion proposal',
       props(forumOffer).some(p => p.actionType === 'discuss_with_group'));
+    ok('F1b …carrying what the person actually said, not the command',
+      /concede/i.test(JSON.stringify(props(forumOffer).find(p => p.actionType === 'discuss_with_group') || {})));
     /* AND NOT INTO A GROUP THEY ARE NOT IN. The model naming a node is not authorisation. */
     modelPicks('discuss_with_group', { groupId: 'nowhere' });
-    const badGroup = await say('ask the reserves about this', 'me',
-      { about: { kind: 'focus', id: String(fid) } });
+    const badGroup = await say('ask the reserves about this', 'me', { conversationId: cid });
     const bg = props(badGroup).find(p => p.actionType === 'discuss_with_group');
     ok('F2 …and a group the person is not in is not silently accepted from the model',
       !bg || !/nowhere/.test(JSON.stringify(bg)));
 
-    /* ══ G — RECORDING WHAT HAPPENED ═══════════════════════════════════════════════════════ */
+    /* ══ G — RECORDING WHAT HAPPENED ═══════════════════════════════════════════════════════
+       The outcome word must be the person's own. A model that decides for them what happened is
+       writing a claim about the world in somebody else's name. */
     console.log('\n  G — SAYING WHAT HAPPENED REACHES record_focus_outcome');
-    modelPicks('record_focus_outcome', { focusId: String(fid), result: 'helped' });
+    modelPicks('record_focus_outcome', { outcome: 'helped' });
     const outOffer = await say('we tried it today and it helped', 'me',
       { about: { kind: 'focus', id: String(fid) } });
-    ok('G1 an ordinary sentence about what happened becomes an outcome proposal',
-      props(outOffer).some(p => p.actionType === 'record_focus_outcome'));
+    const outProp = props(outOffer).find(p => p.actionType === 'record_focus_outcome');
+    ok('G1 an ordinary sentence about what happened becomes an outcome proposal', !!outProp);
     ok('G2 …and it is confirmed rather than written, because an outcome is a claim about the world',
-      (props(outOffer).find(p => p.actionType === 'record_focus_outcome') || {}).requiredApproval !== false);
+      !!outProp && outProp.requiredApproval !== false);
+    /* THE MODEL MAY NOT DECIDE WHAT HAPPENED. Same action, same context, same person — but the
+       word is the model's alone, and the sentence does not contain it. */
+    modelPicks('record_focus_outcome', { outcome: 'helped' });
+    const invent = await say('we tried it today', 'me', { about: { kind: 'focus', id: String(fid) } });
+    ok('G3 an outcome the person never said is not recorded on their behalf',
+      !props(invent).some(p => p.actionType === 'record_focus_outcome'));
+    ok('G4 …they are asked, in the words their own Focus offers',
+      /did it help, not help, or was it mixed/i.test(String(resp(invent).responseText || '')));
 
     /* ══ H — THE FALLBACK IS A FALLBACK ════════════════════════════════════════════════════
        With no provider the deterministic reader still covers the pilot's two most important

@@ -15469,7 +15469,19 @@ function _composerActionEffect(candidate, context) {
         ? { id: context.forumRoom.key, name: context.forumRoom.name, readable: context.forumRoom.readable }
         : null)
       : (group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null)),
-    material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
+    /* WHICH DOCUMENT, ON THE CARD THEY READ BEFORE THEY PRESS CONFIRM. This looked only at the
+       file uploaded in THIS turn, the same narrow binding that stopped `attach_material` naming
+       anything else — so once grounding could resolve a document from earlier in the
+       conversation, the confirmation for it would have said "Attach this material" and named
+       nothing. Resolved from the same server-side pool grounding used, so the card and the
+       action can never be talking about different files. */
+    material: a.materialId
+      ? { id: a.materialId,
+          name: ((context.attachment && String(context.attachment.id) === String(a.materialId)
+            ? context.attachment.name : null)
+            || ((context.materials || []).find(m => String(m.id) === String(a.materialId)) || {}).name
+            || 'Attached material') }
+      : null,
     /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
        `supports` is asking somebody to agree to a judgement without telling them it is not yet
        theirs. The evidence REF is deliberately not here: it is a server-resolved identifier, the
@@ -19209,7 +19221,7 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
     if (prior) priorConvId = prior.id;
   }
   const conv = _resolveConversation(key, b.conversationId || priorConvId,
-    b.title || 'Attached material', Date.now(), about);
+    b.title || b.filename || 'Attached material', Date.now(), about);
   const conversationRef = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
   let ref = conversationRef;
   if (about) {
@@ -19225,7 +19237,13 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   } else {
     const id = 'mat_' + generateId();
     row = { materialId: id, byId: userId, orgCode: code,
-      title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
+      /* A DOCUMENT IS CALLED WHAT ITS OWNER CALLED IT. This ignored the filename it was handed,
+         so every upload through the composer door was titled "Attached material" — and the
+         sibling route two hundred lines down already did `title || filename || default`. With one
+         file nobody noticed. With two, the question that asks which one you mean reads "Attached
+         material or Attached material", and the Library shelf lists the same words twice. */
+      title: String(b.title || b.filename || 'Attached material').trim().slice(0, 200),
+      filename: String(b.filename || b.title || '').slice(0, 200),
       /* THE KIND IS THE SERVER'S, not the client's, when the server is the one that read it. An
          image's kind is decided by the branch above having actually gone through the vision path;
          a caller claiming `kind: 'image'` for a block of text it typed does not get to say so. */
@@ -20866,8 +20884,26 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
     if (prop.actionType === 'attach_material') {
       const materialId = String(p.materialId || '');
-      const readable = _materialFor(code, userId, materialId);
+      /* ── TWO QUESTIONS, ASKED SEPARATELY, BECAUSE THEY HAVE DIFFERENT ANSWERS ──────────────
+         MAY THIS READER OPEN THE DOCUMENT is `_materialFor`, and the right form of it here is
+         `requireObject: false` — the same form every other "may I read this" route uses. The
+         default form asks a THIRD question, "does it already hang on an object I can see", and
+         the answer for an ordinary composer upload is no: it hangs on a conversation. So this
+         handler answered 404 for the one journey it exists to serve — a document uploaded in a
+         chat, then promoted to a Focus — and the proposal above it could never be confirmed.
+
+         MAY THIS READER ATTACH TO THE DESTINATION is `_mayAttach`, and it was not asked at all.
+         `POST /api/materials` has asked it since it was written: only somebody who leads a node
+         may put material on a squad object, because material on a squad object reaches everybody
+         in that squad. Reaching the same write through a confirmation did not ask, so the
+         composer was a second door around a rule the first door enforces. Being able to OPEN an
+         object has never been permission to put things on it. */
+      const readable = _materialFor(code, userId, materialId, { requireObject: false });
       if (!readable.ok) return res.status(404).json({ error: 'not found' });
+      if (!_mayAttach(code, userId, live)) {
+        return res.status(403).json({ error: 'not yours to attach',
+          note: 'Material on a group object reaches everybody in that group, so only somebody who leads it may attach.' });
+      }
       const materialRow = readable.material;
       if (!_materialOn(materialRow, ref.kind, ref.id)) materialRow.refs = _materialRefs(materialRow).concat([{ kind: ref.kind, id: ref.id, at: Date.now(), by: userId }]);
       prop.confirmed = { at: new Date().toISOString(), materialId }; scheduleSave();
