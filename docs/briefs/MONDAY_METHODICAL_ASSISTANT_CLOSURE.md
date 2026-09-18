@@ -49,7 +49,20 @@ Acceptance examples are semantic, not phrase lists:
 - "That helped." -> learning without causal overclaim.
 - "What should we do next?" -> adjust existing Focus unless B materially changed.
 
-### 1b. Preserve journey conversation, never transfer another person's chat
+### 1a. Keep chat ownership separate from evidence/direction ownership
+
+Founder law: **chat always belongs to the people in it; admissible evidence and reusable direction/learning belong to the organization at their governed standing.** Never make chat organizational property merely because a Focus or learning object references it.
+
+The assistant may reason from three source classes and must preserve which class supported a suggestion:
+- current/internal evidence;
+- prior organizational learning/direction;
+- cited external knowledge/research/public examples.
+
+External evidence can justify proposing a B/path when research or another organization's documented experience supports it, but it does not prove the same result will occur here. Preserve citations/provenance, population/context, limitations and meaningful differences. The proposal remains a candidate until the human chooses it. If tried, the local action/outcome becomes new organizational learning while retaining the external source lineage.
+
+Do not copy another organization's/private person's chat as precedent. Cross-org/public examples enter only through an authorized external-knowledge path with appropriate sourcing.
+
+### 1b. Preserve journey conversation, never transfer another person's chat### 1b. Preserve journey conversation, never transfer another person's chat
 
 When a High/Low/Inquiry produces a deliberate B and becomes the basis for a Focus, preserve the conversation/Forum journey for the **same authorized participant set**. The human experience should be continuous rather than "old object closed, new empty chat."
 
