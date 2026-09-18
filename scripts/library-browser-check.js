@@ -194,8 +194,36 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
   ok('B7 the Material picker exists on the object thread and advertises a NON-EMPTY accept list — an empty one offers everything', !!acc);
   ok('B7b …and it does not offer a PDF or an image, which it would have to refuse after the file was chosen',
     !!acc && !/\.pdf/i.test(acc) && !/image/i.test(acc));
-  ok('B7c …while still offering the formats it can read, including the founder\'s PowerPoint case',
-    !!acc && /\.pptx/.test(acc) && /\.docx/.test(acc) && /\.xlsx/.test(acc) && /\.csv/.test(acc));
+  /* ── B7c — THE LAW, NOT THE LIST, AND WHY THAT CHANGED ────────────────────────────────────
+     This used to assert the literal set `.pptx .docx .xlsx .csv`, and it passed every time. It
+     was reading a hard-coded attribute, not a capability. Word, PowerPoint and spreadsheets are
+     read by JSZip and SheetJS, which arrive from a CDN — and in THIS environment that CDN is
+     unreachable (`net::ERR_TUNNEL_CONNECTION_FAILED`, measured, not assumed). So those three
+     formats have never once been readable in any browser check this engagement has run, while
+     this assertion said they were on offer. It was green, and it was wrong: exactly the class
+     this whole engagement keeps finding, in the file written to catch that class.
+
+     The picker is now derived from what actually loaded, so what this must assert is the
+     INVARIANT: offered is exactly readable. That holds on a coach's phone with the libraries in
+     cache, holds on a stadium connection without them, and fails the moment either side drifts —
+     which the literal list could not do. */
+  const readerState = await page.evaluate(() => ({
+    kinds: AttachmentHandler.readableMaterialKinds(),
+    exts: Object.keys(AttachmentHandler.materialExtensions()),
+    known: Object.keys(AttachmentHandler.MATERIAL_EXTENSIONS),
+    jszip: typeof JSZip !== 'undefined', xlsx: typeof XLSX !== 'undefined',
+  })).catch(() => null);
+  ok('B7c the picker offers EXACTLY the formats whose reader is present in this browser',
+    !!readerState && acc === readerState.exts.join(','));
+  ok('B7d …and a format whose reader did not load is not advertised',
+    !!readerState && (readerState.jszip || !/\.docx|\.pptx/.test(acc))
+    && (readerState.xlsx || !/\.xlsx/.test(acc)));
+  ok('B7e …while the formats that need no library are always there, so a lost CDN never leaves a dead door',
+    !!acc && /\.txt/.test(acc) && /\.csv/.test(acc) && /\.md/.test(acc));
+  /* AND THE ENVIRONMENT FACT IS PRINTED rather than inferred, because a future reader of this
+     output has to be able to tell "the capability regressed" from "this box has no internet". */
+  console.log(`    [readers] JSZip=${readerState && readerState.jszip} `
+    + `XLSX=${readerState && readerState.xlsx} → offering ${acc}`);
 
   /* ── 7. THE DEGRADED REPLY, RENDERED ──────────────────────────────────────────────────── */
   console.log('\n  A DEGRADED REPLY, ON THE SCREEN');
