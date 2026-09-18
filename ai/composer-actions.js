@@ -11,14 +11,48 @@
 
 const { FOCUS_RELATIONS } = require('./cross-evidence.js');
 
+/* ── AN ACTION SCHEMA THAT DOES NOT NAME ITS ARGUMENTS IS NOT A BOUNDED SCHEMA ────────────────
+   Every entry below declares `args`: the arguments THE MODEL MAY AUTHOR for that action, by the
+   exact key the rest of this pipeline reads, each with what it means.
+
+   It was found by driving the eight actions no test had ever driven. `create_library_folder` was
+   offered, proposed, shown on a card and CONFIRMED BY A PERSON, and then answered 400 "folder
+   name required" — because the model had supplied `{ name: 'Restarts' }` and the one key this
+   code reads is `folderName`. Nothing anywhere had ever told it that. The schema handed to the
+   model said `arguments: 'object containing only values stated by the user'` and stopped, so
+   `folderName`, `reviewOn`, `materialId`, `groupId`, `because` and the rest had to be GUESSED,
+   and a wrong guess was silently dropped by an allowlist one function away. The person who
+   pressed Confirm got an error or, worse, a thing created with the value missing.
+
+   Two properties, and the second is the reason this is a tightening rather than a convenience:
+
+     · the model is told the vocabulary, so it can supply what the person actually said;
+     · `normalize` filters PER ACTION from this same declaration rather than from a second
+       hand-written union, so an argument belonging to one action can no longer ride in on
+       another. `create_focus` used to accept `visibility` from the model — which the card never
+       showed and the canonical owner never read, so it was dead weight that nonetheless looked
+       like the model setting an audience.
+
+   WHAT IS NOT DECLARED IS AS DELIBERATE AS WHAT IS. `evidenceRef` is never authorable: the law
+   splits the proposal so the server supplies identifiers and the model may suggest one of three
+   words. Where an id IS declared — `folderId`, `groupId`, `materialId` — it is a HINT that must
+   match something the server already put in `currentContext`, and `ground` re-resolves every one
+   of them against the person's own lawful context before it reaches a proposal. */
 const ACTIONS = Object.freeze({
   create_focus: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', null], confirmation: true,
+    args: { text: 'the commitment in the person own words', target: 'a measurable target ONLY if they stated one',
+      reviewOn: 'a review date ONLY if they stated one' },
     description: 'Start a private focus in the user words; target and review date are optional and never invented.' },
   update_focus: { contexts: ['focus'], confirmation: true,
+    args: { text: 'the new wording, in the person own words', target: 'a target ONLY if they stated one',
+      reviewOn: 'a review date ONLY if they stated one',
+      visibility: 'private or shared, ONLY if they said which',
+      participantIds: 'ids from currentContext.contacts, ONLY if they named people' },
     description: 'Change the wording, target, review date, or audience of the current focus.' },
   record_focus_outcome: { contexts: ['focus'], confirmation: true,
+    args: { outcome: 'the outcome word the person themselves used' },
     description: 'Record the user declared outcome of the current focus.' },
-  inspect_inquiry: { contexts: ['inquiry'], confirmation: false,
+  inspect_inquiry: { contexts: ['inquiry'], confirmation: false, args: {},
     description: 'Open or explain the current inquiry and its governed evidence.' },
   /* `'conversation'` WAS MISSING, AND IT IS THE ONLY CONTEXT AN UNBOUND TURN EVER HAS.
      `contexts: [null, …]` reads as "offered when nothing is bound", but `_composerActionContext`
@@ -29,22 +63,29 @@ const ACTIONS = Object.freeze({
      the same meaning. `'inquiry'` stays off it deliberately: you do not open an inquiry from
      inside one. */
   create_inquiry: { contexts: [null, 'conversation', 'focus', 'high', 'low'], confirmation: true,
+    args: { text: 'the question in the person own words' },
     description: 'Open a private inquiry on a topic stated by the user; it starts unsettled.' },
-  show_evidence: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false,
+  show_evidence: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false, args: {},
     description: 'Open the governed evidence view for the current object.' },
-  settle_inquiry: { contexts: ['inquiry'], confirmation: true,
+  settle_inquiry: { contexts: ['inquiry'], confirmation: true, args: {},
     description: 'Record the owner call that the current inquiry is settled; never decide confidence.' },
   disagree_with_inquiry: { contexts: ['inquiry', 'high', 'low'], confirmation: true,
+    args: { because: 'the person own account of why they disagree, in their words' },
     description: 'Contribute the user own contradicting account through the existing evidence boundary.' },
-  request_research: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false,
+  request_research: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false, args: {},
     description: 'Show external cited reading for the current object; it is never internal evidence.' },
   attach_material: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+    args: { materialId: 'the id of a document from currentContext.attachment or one the person named; the server re-resolves it and discards anything else' },
     description: 'Attach an uploaded material reference to the current object.' },
   keep_in_library: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: true,
+    args: { folderId: 'an id from currentContext.folders, ONLY if the person named a folder that is in that list' },
     description: 'File a live reference on the user shelf; filing grants no access and creates no copy.' },
   create_library_folder: { contexts: [null, 'inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: true,
+    args: { folderName: 'the folder name in the person own words; never invented' },
     description: 'Create a personal Library folder.' },
   discuss_with_group: { contexts: [null, 'conversation', 'inquiry', 'high', 'low', 'focus'], confirmation: true,
+    args: { groupId: 'an id from currentContext.groups', text: 'what the person wants to put to the group, in their words',
+      participantIds: 'ids from currentContext.contacts, ONLY if they named people' },
     description: 'Open the governed Forum room; a private noticing is first promoted to a Focus with an explicit group.' },
   /* PRIVATE -> FORUM IS A DISCLOSURE, AND DISCLOSURE IS NEVER A SIDE EFFECT.
 
@@ -68,6 +109,7 @@ const ACTIONS = Object.freeze({
      its authority. It never chooses the room (that is the object's), never chooses the words
      (those are the person's), and cannot make the share happen. */
   share_to_forum: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+    args: { text: 'the wording to share, taken from what the person actually said in this conversation' },
     description: 'OFFER to put something the person has said into the Forum for the object they are looking at. Propose ONLY the wording, taken from what they actually said. You do not choose the room -- it is the room of the object in view -- and nothing is shared until they read the audience and confirm. Never offer this for anything they have not themselves just said in this conversation.' },
   /* DECLARED, NEVER INFERRED (founder law, September 2026). The model may notice that a piece of
      evidence looks like it bears on what somebody is working on and OFFER to mark it -- "this may
@@ -81,19 +123,27 @@ const ACTIONS = Object.freeze({
      pick from, never told one exists that it cannot see, and never in a position to name an
      identifier at all. The only thing it authors here is one of three words. */
   declare_focus_relation: { contexts: ['focus'], confirmation: true, requiresBoundEvidence: true,
+    /* `evidenceRef` IS ABSENT ON PURPOSE and adding it here would be the same breach as adding it
+       to the old allowlist: the evidence is whatever the person has in view, resolved by the
+       server, and the model authors one of three words and nothing else. */
+    args: { relation: 'one word from relationVocabulary and nothing else' },
     description: `OFFER to record how the piece of evidence currently in view stands to this focus: ${FOCUS_RELATIONS.join(', ')}. Propose ONLY the relation word. The evidence and the focus are already decided by what the person is looking at -- do not name, guess or ask for an identifier for either. The person decides the word; you never decide for them, and you never read it off the direction the evidence carries on an inquiry.` },
   /* PERSONAL ATTENTION OVERRIDE. Two named actions rather than one carrying a boolean, because an
      action whose meaning depends on an argument the model may omit has a default, and the default
      here would be switching something ON in somebody's record. There is no such thing as a
      half-supplied "unprioritise". The target is never authored by the model: it is the object the
      turn is bound to. */
-  prioritise_object: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+  prioritise_object: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true, args: {},
     description: 'Mark the CURRENT object as one the person wants kept near the top for them. It is private to them, it changes nothing about who can see the object, and it says nothing about what the organisation thinks. It is not a score and there are no levels.' },
-  unprioritise_object: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+  unprioritise_object: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true, args: {},
     description: 'Take the person own priority mark off the CURRENT object, returning it to ordinary ordering.' },
-  navigate_to_object: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: false,
+  navigate_to_object: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: false, args: {},
     description: 'Return a safe address for the current object.' },
 });
+
+/* The one argument that is a list of ids rather than a string. Named here so `normalize` reads
+   its shape from the same place it reads the vocabulary, instead of carrying a second rule. */
+const ARG_IS_LIST = Object.freeze(new Set(['participantIds']));
 
 /* ── A COMMAND SHAPE, WHICH IS NOT AN INTENT ENGINE ───────────────────────────────────────────
    FOUNDER ADJUDICATION, September 2026. The action vocabulary above is complete, and the pipeline
@@ -241,7 +291,9 @@ function readCommand(text) {
 }
 
 const MODEL_SCHEMA = Object.freeze({
-  actions: [{ type: 'one ACTION name', arguments: 'object containing only values stated by the user', reason: 'short explanation' }],
+  actions: [{ type: 'one ACTION name',
+    arguments: 'object using ONLY the keys that action declares in availableActions[].arguments, and only values the person actually stated',
+    reason: 'short explanation' }],
   /* ── WHETHER THEY DECLARED IT OR ASKED ABOUT IT, WHICH ONLY LANGUAGE CAN TELL ─────────────
      `create_focus` manufactures a commitment, so it is the one action that must not be staged
      from somebody merely wondering aloud. That test used to be an ENGLISH WORD LIST — "work on",
@@ -272,7 +324,11 @@ function available(context = {}) {
   return Object.entries(ACTIONS)
     .filter(([, a]) => a.contexts.includes(kind))
     .filter(([, a]) => !a.requiresBoundEvidence || boundEvidence)
-    .map(([type, a]) => ({ type, description: a.description, requiresConfirmation: a.confirmation }));
+    /* THE ARGUMENT NAMES TRAVEL WITH THE ACTION. Without this the model was asked to fill an
+       object whose keys it had never been told, and a wrong guess died silently one function
+       away — after a person had already confirmed it. */
+    .map(([type, a]) => ({ type, description: a.description, arguments: a.args || {},
+      requiresConfirmation: a.confirmation }));
 }
 
 function prompt({ text, context = {}, priorMessages = [] } = {}) {
@@ -320,14 +376,21 @@ function normalize(result, context = {}) {
     }
     const raw = row && row.arguments && typeof row.arguments === 'object' ? row.arguments : {};
     const args = {};
-    /* `relation` is retained and `evidenceRef` is DELIBERATELY NOT. The founder's law splits the
-       proposal in two: the server supplies the identifiers, the model may suggest one of three
-       words. Adding `evidenceRef` here -- the obvious one-line fix for the dead path -- would be
-       exactly the thing the law forbids. */
-    for (const key of ['text', 'target', 'reviewOn', 'visibility', 'outcome', 'because', 'folderName', 'folderId', 'materialId', 'groupId', 'relation']) {
-      if (typeof raw[key] === 'string' && raw[key].trim()) args[key] = raw[key].trim().slice(0, key === 'because' ? 600 : 300);
+    /* FILTERED FROM THE ACTION'S OWN DECLARATION, which is the same one the model was shown.
+       It used to be a hand-written union of every key any action might carry, which meant two
+       things: the vocabulary was written in two places and could drift (it had — nothing told
+       the model any of these names existed), and an argument belonging to one action rode along
+       on every other. `relation` is accepted where it is declared and `evidenceRef` is accepted
+       NOWHERE: the founder's law splits the proposal so the server supplies the identifiers and
+       the model may suggest one of three words. Adding `evidenceRef` to the declaration -- the
+       obvious one-line fix for the dead path -- would be exactly the thing the law forbids. */
+    for (const key of Object.keys(ACTIONS[type].args || {})) {
+      if (ARG_IS_LIST.has(key)) {
+        if (Array.isArray(raw[key])) args[key] = [...new Set(raw[key].map(String))].slice(0, 20);
+      } else if (typeof raw[key] === 'string' && raw[key].trim()) {
+        args[key] = raw[key].trim().slice(0, key === 'because' ? 600 : 300);
+      }
     }
-    if (Array.isArray(raw.participantIds)) args.participantIds = [...new Set(raw.participantIds.map(String))].slice(0, 20);
     actions.push({ type, arguments: args, reason: String(row.reason || '').slice(0, 240), requiresConfirmation: ACTIONS[type].confirmation });
   }
   /* AND THE MODEL'S READING OF THE SENTENCE, BOUNDED TO TWO WORDS. Anything else — free text, a
@@ -636,6 +699,13 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
       // A create_focus with no lawful wording is not a weaker proposal, it is an untitled
       // commitment. Dropped, with the clarification above explaining what would start one.
       : action.type === 'create_focus' ? ['text']
+      /* A FOLDER WITH NO NAME CANNOT BE CREATED, so it must not reach a card that says it can.
+         Driving this action for the first time produced the whole sequence — offered, proposed,
+         shown, CONFIRMED BY A PERSON — and then 400 "folder name required". Naming the argument
+         in the schema is the fix at the model boundary; this is the defence behind it, and it is
+         the same rule `create_focus` has carried since it was written: an action whose one
+         argument is missing is not a weaker proposal, it is one that cannot be carried out. */
+      : action.type === 'create_library_folder' ? ['folderName']
       : action.type === 'record_focus_outcome' ? ['outcome'] : [];
     if (required.some(k => !args[k])) continue;
     actions.push({ ...action, arguments: args, argumentSources: sources });
