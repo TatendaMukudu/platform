@@ -67,8 +67,43 @@ const AttachmentHandler = {
     '.pptx': 'pptx',
   },
 
+  /* ── AND A LIST IS ONLY TRUE IF THE THING THAT READS IT LOADED ────────────────────────────
+     THE HOLE THIS CLOSES. Three of the five kinds above are read by libraries that arrive from a
+     CDN — `JSZip` for Word and PowerPoint, `XLSX` for spreadsheets — and this file assumed they
+     were there. They are not always there. A phone on a stadium connection, a filtered network, a
+     second visit with the app installed and no signal: the page still runs, the picker still
+     offers .docx, and `_processDocx` reaches `JSZip.loadAsync` and throws `JSZip is not defined`
+     at somebody who picked a file. That is the hollow-control shape this file already names two
+     paragraphs up, arriving through the one gap the rule did not cover: what is ADVERTISED was
+     hard-coded, while what is POSSIBLE depends on a network request nobody checked.
+
+     So the lists are derived from what actually loaded. A kind whose reader is missing is not
+     offered, and if one is picked anyway — a drag, a share sheet, an older cached page — the
+     refusal says which thing is missing and what to do instead, rather than a library's
+     ReferenceError. Nothing is narrowed when the libraries ARE present, which is the ordinary
+     case; this only changes what somebody sees when they could not have been served anyway. */
+  KIND_NEEDS: { docx: 'JSZip', pptx: 'JSZip', xlsx: 'XLSX' },
+  KIND_NEEDS_LABEL: { JSZip: 'the Word and PowerPoint reader', XLSX: 'the spreadsheet reader' },
+  _readerFor(kind) { return this.KIND_NEEDS[kind] || null; },
+  _readerPresent(kind) {
+    const g = this._readerFor(kind);
+    if (!g) return true;
+    try { return typeof (typeof window !== 'undefined' ? window : globalThis)[g] !== 'undefined'; }
+    catch (_) { return false; }
+  },
+  /* The kinds this browser can turn into words RIGHT NOW, which is not the same question as the
+     kinds this handler knows how to read. */
+  readableMaterialKinds() { return this.MATERIAL_KINDS.filter(k => this._readerPresent(k)); },
+  materialExtensions() {
+    const out = {};
+    for (const [ext, kind] of Object.entries(this.MATERIAL_EXTENSIONS)) {
+      if (this._readerPresent(kind)) out[ext] = kind;
+    }
+    return out;
+  },
+
   /* Derived, never typed twice — the picker and the parser table cannot drift apart. */
-  materialAcceptAttr() { return Object.keys(this.MATERIAL_EXTENSIONS).join(','); },
+  materialAcceptAttr() { return Object.keys(this.materialExtensions()).join(','); },
 
   /* ── WHAT THE COMPOSER'S PICKER MAY OFFER, NOW THAT A PICTURE GOES SOMEWHERE ──────────────
      The Material list above is what this handler can turn into WORDS in the browser. An image
@@ -82,13 +117,22 @@ const AttachmentHandler = {
      finding. Named explicitly so the file chooser itself does the refusing, before anybody waits. */
   READABLE_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   composerAcceptAttr() {
-    return this.READABLE_IMAGE_TYPES.concat(Object.keys(this.MATERIAL_EXTENSIONS)).join(',');
+    return this.READABLE_IMAGE_TYPES.concat(Object.keys(this.materialExtensions())).join(',');
   },
 
   /* ── Main entry point ─────────────────────────────────── */
   async process(file) {
     const kind = this.ACCEPTED[file.type];
     if (!kind) throw new Error(`Unsupported file type: ${file.type}`);
+    /* THE PICKER SHOULD NOT HAVE OFFERED THIS, but a drag, a share sheet or a page cached before
+       the connection went can all get here anyway. Say which thing is missing and what still
+       works — never let a library's own ReferenceError be the message a person reads. */
+    if (!this._readerPresent(kind)) {
+      const need = this.KIND_NEEDS_LABEL[this._readerFor(kind)] || 'the reader for this format';
+      const what = { docx: 'Word', pptx: 'PowerPoint', xlsx: 'Spreadsheet' }[kind] || 'These';
+      throw new Error(`${what} files need ${need}, which did not load on this connection. `
+        + 'Paste the text in instead, or try again when you are back online.');
+    }
 
     switch (kind) {
       case 'image':  return this._processImage(file);

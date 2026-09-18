@@ -33,6 +33,14 @@ const appJs = R('js/app.js');
 /* The real object, evaluated — not a regex guess at what it contains. It is a plain top-level
    const with no DOM access at definition time, so it loads outside a browser unchanged. */
 let A = null;
+/* ── AND THE READERS ARE PRESENT WHILE THE OLD ASSERTIONS RUN ──────────────────────────────
+   Three of the five Material kinds are read by libraries that arrive from a CDN, and the handler
+   now derives what it OFFERS from what actually loaded (section N proves that both ways). In
+   Node neither library exists, so without this the whole file below would be measuring the
+   degraded list and would quietly stop testing the thing it was written for. Declared here, at
+   the top, rather than discovered later as three mysterious failures. */
+globalThis.JSZip = globalThis.JSZip || {};
+globalThis.XLSX  = globalThis.XLSX  || {};
 try { A = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { A = null; }
 ok('M0 the attachment handler loads outside a browser, so this suite is testing the real object rather than its source text',
   !!A && typeof A.materialAcceptAttr === 'function');
@@ -235,5 +243,73 @@ ok('M10c …and a FAILED attachment still speaks, because an error with no words
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
   /\/classification/.test(appJs));
 
-console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
-process.exit(fail ? 1 : 0);
+/* ── N — A LIST IS ONLY TRUE IF THE THING THAT READS IT LOADED ─────────────────────────────
+   THE HOLE. Word, PowerPoint and spreadsheets are read by libraries fetched from a CDN — JSZip
+   and SheetJS, two <script src="https://..."> tags in index.html. The whole of this file above
+   asks "does the picker offer only what the parsers can read", and every one of those assertions
+   passed while the answer depended on a network request nobody checked.
+
+   The founder's device is a phone on a stadium connection, and this is installable. Offline, on a
+   filtered network, or on a second visit with no signal, the page still runs and those globals do
+   not exist. The picker offered .docx anyway; `_processDocx` reached `JSZip.loadAsync` and threw
+   `JSZip is not defined` at somebody who had just chosen a file. That is the exact hollow-control
+   shape this file was written to prevent, arriving through the one gap the rule did not cover:
+   what is ADVERTISED was hard-coded while what is POSSIBLE was not.
+
+   ASSERTED BOTH WAYS, because a one-directional test here proves nothing. With the libraries
+   present the offer must be unchanged — a fix that quietly narrowed the product for everybody
+   would be worse than the bug. With them absent the format must not be offered AND, if it is
+   reached anyway by a drag or a share sheet, the refusal must be a sentence about what is missing
+   rather than a library's ReferenceError. */
+console.log('\n  N — AND WHAT IS OFFERED DEPENDS ON WHAT ACTUALLY LOADED');
+const handlerWith = present => {
+  const had = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
+  if (present) { globalThis.JSZip = {}; globalThis.XLSX = {}; }
+  else { delete globalThis.JSZip; delete globalThis.XLSX; }
+  let h = null;
+  try { h = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { h = null; }
+  const out = h && { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
+    kinds: h.readableMaterialKinds(),
+    refusal: (() => { try { const f = { name: 'plan.docx',
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+      const p = h.process(f); return p && typeof p.then === 'function'
+        ? p.then(() => null, e => String(e && e.message)) : null; } catch (e) { return String(e && e.message); } })() };
+  globalThis.JSZip = had.JSZip; globalThis.XLSX = had.XLSX;
+  if (had.JSZip === undefined) delete globalThis.JSZip;
+  if (had.XLSX === undefined) delete globalThis.XLSX;
+  return out;
+};
+const withLibs = handlerWith(true);
+const noLibs   = handlerWith(false);
+
+ok('N1 with the readers loaded, the offer is exactly what it always was',
+  !!withLibs && ['.docx', '.xlsx', '.pptx', '.txt', '.md', '.csv'].every(e => withLibs.material.includes(e)));
+ok('N1b …and the composer still offers them alongside the image types',
+  !!withLibs && withLibs.composer.includes('.pptx') && withLibs.composer.includes('image/png'));
+ok('N2 with the readers MISSING, the formats that need them are not offered',
+  !!noLibs && !noLibs.material.includes('.docx') && !noLibs.material.includes('.pptx')
+  && !noLibs.material.includes('.xlsx'));
+ok('N2b …and neither does the composer, which is the picker a person actually presses',
+  !!noLibs && !noLibs.composer.includes('.docx') && !noLibs.composer.includes('.xlsx'));
+ok('N3 …while the formats that need nothing are still offered, so a lost CDN does not take the whole door with it',
+  !!noLibs && noLibs.material.includes('.txt') && noLibs.material.includes('.csv')
+  && noLibs.material.includes('.md') && noLibs.composer.includes('image/jpeg'));
+ok('N3b …and the handler says which kinds it can actually read right now, not which it knows about',
+  !!noLibs && noLibs.kinds.length === 2 && !noLibs.kinds.includes('docx')
+  && !!withLibs && withLibs.kinds.length === 5);
+
+/* THE FILE THAT GETS THERE ANYWAY. A drag, a share sheet, or a page cached before the connection
+   went: the picker is not the only door, so the refusal has to be readable too. */
+(async () => {
+  const msg = noLibs && await noLibs.refusal;
+  ok('N4 a file picked anyway is refused with a sentence, not a library\'s ReferenceError',
+    typeof msg === 'string' && !/is not defined/.test(msg) && !/ReferenceError/.test(msg));
+  ok('N4b …that names what is missing and what still works',
+    typeof msg === 'string' && /did not load/i.test(msg) && /paste the text/i.test(msg));
+  const fine = withLibs && await withLibs.refusal;
+  ok('N4c …and with the readers present that refusal does not happen at all',
+    fine === null || !/did not load/i.test(String(fine)));
+
+  console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
+  process.exit(fail ? 1 : 0);
+})();
