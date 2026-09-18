@@ -195,8 +195,15 @@ const server = app.listen(0, async () => {
     ok('B1 the prompt names each action\'s arguments, so nothing has to be guessed',
       /folderName/.test(promptSent) && /reviewOn/.test(promptSent)
       && /materialId/.test(promptSent) && /because/.test(promptSent));
-    ok('B2 …and it never offers evidenceRef, which the model may not author',
-      !/evidenceRef/.test(promptSent));
+    /* AND THE ONE IDENTIFIER THE LAW KEEPS FROM THE MODEL IS DECLARED BY NOTHING. Asserted over
+       every action rather than over one captured prompt: the first version read a prompt from an
+       inquiry-bound turn, where `declare_focus_relation` -- the only action this could have gone
+       wrong on -- is not offered at all, so it was searching for a word that could not have been
+       there. The mutation that put `evidenceRef` back into the declaration walked straight past
+       it. What matters is that no action anywhere declares it, in any context. */
+    ok('B2 …and no action anywhere offers evidenceRef, which the model may not author',
+      Object.values(actions.ACTIONS).every(a => !('evidenceRef' in (a.args || {})))
+      && !/evidenceRef/.test(promptSent));
     /* ONE OWNER FOR THE VOCABULARY. The declaration the model is shown IS the filter, so the two
        cannot drift; asserted as a property over every action rather than against a copy of the
        list, which would just be the second copy again. */
