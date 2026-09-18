@@ -229,7 +229,7 @@ function _persistedStores() {
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, shelfFilings, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
-    materials, materialEngage, objectAudiences,
+    materials, materialEngage, materialSource, objectAudiences,
   };
 }
 
@@ -19065,10 +19065,16 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
    merge the buckets use, with the same _mayReadGroup gate inside it. A second permission model
    for attachments is how a file ends up visible to a room the focus was never shared with.
 
-   PARSING STAYS ON THE CLIENT, deliberately. AttachmentHandler already extracts text from pptx,
-   docx, xlsx, pdf and csv in the browser; sending the extracted TEXT rather than the file means
-   the server never holds the original, which is the smaller thing to be responsible for. What
-   arrives is text, and it is treated as text somebody typed.
+   PARSING STAYS ON THE CLIENT for documents. AttachmentHandler extracts text from pptx, docx,
+   xlsx and csv in the browser and sends the TEXT, so for those the server never receives the
+   original and there is nothing it could keep. What arrives is text, and it is treated as text
+   somebody typed.
+
+   AN IMAGE IS THE EXCEPTION, AND IT IS KEPT. The bytes have to reach the server for anything to
+   read the picture at all, and the founder's September 2026 decision is that IntelliQ may retain
+   the original: a description is a reading, and the thing it is a reading of must stay openable
+   or nobody can check it. See `materialSource` for the four rules that come with that — inherited
+   audience, retention is not admission, deletion leaves a tombstone, and no invented duration.
    ══════════════════════════════════════════════════════════════════════════════════════════ */
 
 /* ── ONE DOCUMENT, MANY PLACES IT IS USED ────────────────────────────────────────────────────
@@ -19087,6 +19093,41 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
    a document means, which is the thing this codebase removed one for. */
 const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], refs[], checksum, createdAt }
 const materialEngage = {};  // code → materialId → [ { personId, sectionId, state, at, ref } ]
+
+/* ── THE ORIGINAL, KEPT ───────────────────────────────────────────────────────────────────────
+   FOUNDER DECISION, September 2026, quoted because the distinctions are the whole of it:
+   IntelliQ MAY retain original attachments, and
+
+     attachment ≠ evidence, attachment ≠ organisational truth, attachment ≠ permission to share.
+
+   Four consequences, each of which is a line of code somewhere rather than a sentence in a doc:
+
+   THE AUDIENCE IS INHERITED, NOT DECLARED. A source is readable by exactly the people who may
+   read the material it belongs to, which is decided by the context it was contributed into. That
+   is expressed by the read route asking `_materialFor` and asking NOTHING ELSE — no second
+   permission model, no id-is-access shortcut. Holding a material id has never been access and
+   holding a source URL is not either.
+
+   RETAINING IS NOT ADMITTING. Nothing here touches evidenceLog, no signal is proposed, no
+   confidence moves. The bytes sit beside the material exactly as the material sits beside the
+   organisation's records: available to be looked at by the people it belongs to, and proving
+   nothing about anybody until a person deliberately contributes something.
+
+   DELETION REMOVES BYTES AND DOES NOT REWRITE HISTORY. The source goes; the material, its
+   sections, its refs and anything that ever cited it stay, and what a reader sees in its place
+   says plainly that it was deleted. A product that quietly made the record consistent with the
+   deletion would be editing the past.
+
+   NO DURATION IS INVENTED. There is no TTL field and no sweeper. Nothing here expires on its own,
+   because how long an organisation keeps its own documents is that organisation's decision and
+   not a default somebody has to discover.
+
+   WHAT IS ACTUALLY RETAINED TODAY is what the server actually receives: an IMAGE arrives as bytes
+   and is kept. A document does not — `AttachmentHandler` parses it in the browser and sends text —
+   so there is nothing to keep, and `source.retained` is false with `because: 'never_held'`, which
+   is the honest answer rather than a missing field. */
+const materialSource = {};  // code → materialId → { mimetype, data, bytes, at, byId }
+const _materialSources = code => (materialSource[code] || (materialSource[code] = {}));
 
 const _materials = code => (materials[code] || (materials[code] = {}));
 
@@ -19124,6 +19165,7 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   let text = String(b.text || '');
   let kind = 'text';
   let readFrom = null;
+  let _retainSource = null;
 
   /* AN IMAGE IS READ AT THE DOOR, ONCE, THROUGH THE GATEWAY THAT COULD ALREADY DO IT.
      `ai.understand` has built Claude image blocks and OpenAI `image_url` since it was written and
@@ -19170,6 +19212,12 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
     text = 'What this image appears to show (read from the picture, not observed by anyone):\n\n' + described;
     kind = 'image';
     readFrom = { mimetype, bytes: Math.round(data.length * 0.75) };
+    /* AND THE PICTURE ITSELF IS KEPT. Founder decision, September 2026: a coach who photographs a
+       whiteboard should be able to look at the whiteboard again, not only at a machine's account
+       of it — and a description is a reading, so the thing it is a reading OF has to remain
+       openable or nobody can check it. Held here and attached to the material below; who may open
+       it is decided entirely by who may read that material. */
+    _retainSource = { mimetype, data, bytes: Math.round(data.length * 0.75) };
   }
 
   if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
@@ -19251,8 +19299,26 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
         : (material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text'),
       sections: material.segment(text, { kind: kind === 'image' ? 'image' : String(b.kind || 'text') }),
       refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
-      checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
+      checksum, visibility: 'private', provenance: 'external', createdAt: Date.now(),
+      /* WHETHER THE ORIGINAL IS STILL OPENABLE, AND IF NOT, WHY NOT — as a state on the material
+         rather than as the absence of one, because "there is no source" and "the source was
+         deleted" are different facts and a reader is entitled to know which. */
+      sourceMedia: _retainSource
+        ? { retained: true, mimetype: _retainSource.mimetype, bytes: _retainSource.bytes }
+        : { retained: false, because: 'never_held' } };
     _materials(code)[id] = row;
+  }
+  /* A RETRY THAT RESOLVED TO AN EXISTING MATERIAL DOES NOT RESURRECT A DELETED SOURCE. The
+     checksum matches the TEXT, and the text of an image material is its description; somebody
+     re-sending the same picture after deleting the original is not a reason to quietly put the
+     bytes back, because the deletion was a decision. A material that never had one still gets it. */
+  if (_retainSource && row.sourceMedia && row.sourceMedia.retained !== true
+      && (row.sourceMedia.because || 'never_held') === 'never_held') {
+    row.sourceMedia = { retained: true, mimetype: _retainSource.mimetype, bytes: _retainSource.bytes };
+  }
+  if (_retainSource && row.sourceMedia && row.sourceMedia.retained === true) {
+    _materialSources(code)[row.materialId] = { mimetype: _retainSource.mimetype,
+      data: _retainSource.data, bytes: _retainSource.bytes, at: Date.now(), byId: userId };
   }
   scheduleSave();
   /* WHAT THE RECEIPT SAYS ABOUT A PICTURE IS DIFFERENT, and has to be. A document's note can say
@@ -19261,11 +19327,12 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
      that the reading came from a model rather than from anybody who was there. */
   res.json({ ok: true, materialId: row.materialId, conversationId: conv.id, attachedTo: { kind: ref.kind, id: ref.id },
     parts: row.sections.length, kind: row.kind, epistemicEffect: 'none',
-    ...(row.kind === 'image' ? { readFrom, imageRetained: false } : {}),
+    sourceMedia: row.sourceMedia || { retained: false, because: 'never_held' },
+    ...(row.kind === 'image' ? { readFrom, imageRetained: !!(row.sourceMedia && row.sourceMedia.retained) } : {}),
     note: row.kind === 'image'
-      ? 'I have read what the picture appears to show and kept that as context for this '
-        + 'conversation. The image itself is not stored, and what it appears to show is not '
-        + 'evidence about you or the organisation.'
+      ? 'I have read what the picture appears to show, and the picture itself is kept so you can '
+        + 'open it again. Only the people who can read this material can open it. What it appears '
+        + 'to show is not evidence about you or the organisation.'
       : 'Available to this conversation as external material. It is not evidence about you or the organisation.' });
 });
 /* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
@@ -19463,7 +19530,9 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
     .filter(m => _materialOn(m, kind, id) && _materialFor(code, userId, m.materialId).ok)
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
-      parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
+      parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt,
+      // So a list can show "Source attachment deleted" in its place rather than showing nothing.
+      sourceMedia: _sourceState(m) }));
   res.json({ ok: true, materials: list });
 });
 
@@ -19532,11 +19601,106 @@ app.get('/api/materials/:id', requireAuth, (req, res) => {
   const stateOf = sid => (mine.filter(e => e.sectionId === sid).sort((a, b) => b.at - a.at)[0] || {}).state || null;
   res.json({ ok: true,
     material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
-      by: _nameOf(code, m.byId), createdAt: m.createdAt, attachTo: m.attachTo },
+      /* WHO ATTACHED IT, as an id as well as a name — because deleting the original is theirs
+         alone and a surface cannot offer that control honestly without knowing whose it is.
+         The name alone is not an identity; two people can share one. */
+      by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt, attachTo: m.attachTo },
     sections: (m.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading, text: s.text,
       // WHERE YOU SAID YOU WERE, so somebody can change their mind rather than declare twice.
       you: stateOf(s.id) })),
+    /* WHETHER THE ORIGINAL IS STILL THERE, AND IF NOT, WHAT HAPPENED TO IT. A reader of a
+       description is entitled to know whether the thing it describes can still be opened, and to
+       be told plainly when somebody removed it rather than finding a control that does nothing. */
+    sourceMedia: _sourceState(m),
     note: 'Say where you are with each part. Nothing here is read for how confident you sounded — you say it, or it is not said.' });
+});
+
+/* THE ONE READING OF A SOURCE'S STATE, so the read route, the delete route and anything that
+   renders a material all say the same thing about it. A material that never had an original and
+   one whose original was deleted are different states with different sentences; collapsing them
+   into "no source" is how a deletion becomes invisible. */
+function _sourceState(m) {
+  const s = (m && m.sourceMedia) || { retained: false, because: 'never_held' };
+  if (s.retained) {
+    return { retained: true, mimetype: s.mimetype || null, bytes: s.bytes || null,
+      openAt: `/api/materials/${m.materialId}/source`,
+      note: 'The original is kept. Only the people who can read this material can open it.' };
+  }
+  if (s.because === 'deleted') {
+    return { retained: false, because: 'deleted', deletedAt: s.deletedAt || null,
+      label: 'Source attachment deleted',
+      note: 'The original file was deleted. What was read from it, and anything that cited it, still stands as it was.' };
+  }
+  return { retained: false, because: 'never_held',
+    note: 'IntelliQ never held the original of this one — it was read into text before it was sent.' };
+}
+
+/* GET /api/materials/:id/source — open the original.
+
+   THE AUDIENCE IS INHERITED, WHICH IS WHY THIS ROUTE DECIDES NOTHING. It asks `_materialFor` —
+   the same owner that decides who may read the material — and then it asks nothing else. That is
+   the founder's rule expressed as an absence: a source has no audience of its own, it has the
+   audience of the context it was contributed into, so there is no second permission model here to
+   drift out of step with the first one.
+
+   POSSESSING THE URL IS NOT ACCESS. The id in the path is checked on every request, by the
+   requester's own session, against their own authorised objects. A link somebody forwards is a
+   link to a route that will refuse them.
+
+   A DELETED SOURCE ANSWERS 410, NOT 404. "Gone" is the true thing; 404 would say it never existed
+   and quietly rewrite the history the deletion was not allowed to touch. */
+app.get('/api/materials/:id/source', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id, { requireObject: false });
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const m = r.material;
+  const state = _sourceState(m);
+  if (!state.retained) {
+    return res.status(state.because === 'deleted' ? 410 : 404).json({ error: state.because === 'deleted'
+      ? 'Source attachment deleted' : 'no original was kept for this', ...state });
+  }
+  const held = _materialSources(code)[String(m.materialId)];
+  if (!held || !held.data) {
+    // The descriptor says kept and the bytes are not here. Say so rather than serving nothing;
+    // an empty 200 would look like a broken image and teach somebody the file was corrupt.
+    return res.status(410).json({ error: 'Source attachment deleted', retained: false,
+      because: 'deleted', label: 'Source attachment deleted' });
+  }
+  const buf = Buffer.from(held.data, 'base64');
+  res.setHeader('Content-Type', held.mimetype || 'application/octet-stream');
+  res.setHeader('Content-Length', String(buf.length));
+  /* NEVER CACHED BY ANYTHING IN BETWEEN. The authority is re-checked per request, and a shared
+     cache that answered one of these on its own would be answering it without asking. */
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename="${String(m.filename || m.title || 'attachment').replace(/[^\w.\- ]/g, '_')}"`);
+  return res.end(buf);
+});
+
+/* DELETE /api/materials/:id/source — remove the original, and only the original.
+
+   DELETION REMOVES BYTES AND DOES NOT REWRITE HISTORY. The material stays, its sections stay, its
+   refs stay, every reference anything ever made to it stays, and what a reader sees where the
+   original was says "Source attachment deleted" rather than nothing. A product that tidied the
+   record to match the deletion would be editing the past on somebody's behalf.
+
+   WHOSE DECISION IT IS: the person who attached it. Being able to READ a document has never been
+   authority over it, and the founder's rule that an attachment is not organisational truth cuts
+   both ways — it is not the organisation's to delete either. */
+app.delete('/api/materials/:id/source', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id, { requireObject: false });
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const m = r.material;
+  if (String(m.byId) !== String(userId)) {
+    return res.status(403).json({ error: 'only the person who attached this can delete the original' });
+  }
+  const already = _sourceState(m);
+  if (!already.retained) return res.json({ ok: true, materialId: m.materialId, already: true, sourceMedia: already });
+  delete _materialSources(code)[String(m.materialId)];
+  m.sourceMedia = { retained: false, because: 'deleted', deletedAt: new Date().toISOString(), byId: userId };
+  scheduleSave();
+  res.json({ ok: true, materialId: m.materialId, sourceMedia: _sourceState(m),
+    note: 'The original file is gone. What was read from it stays, and so does anything that cited it — deleting a file does not change what was said about it.' });
 });
 
 /* POST /api/materials/:id/engaged — { sectionId, state: 'got_it'|'not_yet', because? }
@@ -25640,6 +25804,7 @@ function _loadAllStores(data) {
   Object.assign(raises,         data.raises         || {});
   Object.assign(materials,      data.materials      || {});
   Object.assign(materialEngage, data.materialEngage || {});
+  Object.assign(materialSource, data.materialSource || {});
   _rebuildEvidenceIndex();
   for (const code of Object.keys(evidenceLog)) {
     if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
@@ -25714,7 +25879,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _canManageNode, _mayChangeAnchor, _ledNodeIds, _isLeader, userPermissions,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
-  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
+  materials, materialEngage, materialSource, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
   // exported for the truth layer: who a person chose to let see each of their own objects
   objectAudiences, _objectAudience, _resolvePersonalAudience,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,

@@ -3171,6 +3171,19 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-tried-o{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
 .iqt-tried-n{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.35rem 0 0}
 .iqt-mat-empty,.iqt-mat-note,.iqt-mat-by{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;margin:.25rem 0}
+/* THE ORIGINAL FILE, AND THE TOMBSTONE WHERE IT WAS. The deleted state is deliberately as
+   visible as the live one: a deletion that renders as an absence is a deletion nobody can see. */
+.iqt-mat-src{margin:.5rem 0 .75rem;padding:.6rem .7rem;border:1px solid var(--border);
+  border-radius:12px;background:var(--bg-card);display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.iqt-mat-src-note{flex:1 1 100%;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45}
+.iqt-src-open,.iqt-src-del{background:var(--bg-hover);border:1px solid var(--border);
+  border-radius:10px;padding:.45rem .8rem;font-size:var(--fs-sm);color:var(--text-primary);cursor:pointer}
+.iqt-src-open:hover,.iqt-src-del:hover{background:var(--bg-card)}
+.iqt-src-del{color:var(--text-secondary)}
+.iqt-mat-src-gone{background:transparent;border-style:dashed}
+.iqt-src-tomb{flex:1 1 100%;font-size:var(--fs);color:var(--text-secondary)}
+/* A CONTROL ON A PHONE IS PRESSED WITH A THUMB. */
+@media (max-width:640px){.iqt-src-open,.iqt-src-del{min-height:44px}}
 .iqt-mat-row{margin:0 0 .4rem}
 .iqt-mat-open{display:block;width:100%;text-align:left;background:var(--bg-card);
   border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem;cursor:pointer}

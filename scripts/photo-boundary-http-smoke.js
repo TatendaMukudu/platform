@@ -135,18 +135,39 @@ const server = app.listen(0, async () => {
       && lastMedia.data === PNG && lastMedia.mimetype === 'image/png');
     ok('PH-B3 …and is held as an image, with its epistemic effect stated as none',
       up.j.kind === 'image' && up.j.epistemicEffect === 'none');
-    /* THE THING A PERSON CANNOT OTHERWISE KNOW. */
-    ok('PH-B4 …and the receipt says what is kept is a READING of the picture, not the picture',
-      up.j.imageRetained === false && /appears to show|read what the picture/i.test(String(up.j.note || '')));
+    /* THE THING A PERSON CANNOT OTHERWISE KNOW: that what IntelliQ can reason over is a reading
+       of the picture rather than the picture. That is still the point of the receipt.
+
+       WHAT CHANGED, AND WHY. Until September 2026 this asserted `imageRetained === false` and the
+       note said the image was not stored. The founder then settled source-media retention the
+       other way: IntelliQ MAY keep the original, because a description is a reading and the thing
+       it is a reading OF has to stay openable or nobody can ever check it. The receipt now has to
+       say the harder pair of facts together — the picture is kept, AND it is not evidence — so
+       neither of them can be read as the other. The epistemic half of this file is untouched: a
+       photograph still corroborates nothing, and section C still proves it. */
+    ok('PH-B4 …and the receipt says the picture is kept, and who may open it',
+      up.j.imageRetained === true && /the picture itself is kept/i.test(String(up.j.note || ''))
+      && /only the people who can read this material/i.test(String(up.j.note || '')));
+    ok('PH-B4b …and still says what IntelliQ worked from is a READING of it',
+      /read what the picture appears to show/i.test(String(up.j.note || '')));
     ok('PH-B5 …and says outright it is not evidence about anybody',
       /not evidence about you or the organisation/i.test(String(up.j.note || '')));
 
-    console.log('\n  B2 — AND THE BYTES ARE NOT KEPT');
+    console.log('\n  B2 — KEPT BESIDE THE MATERIAL, NEVER INSIDE IT');
     const stored = JSON.stringify(Object.values(S._materials ? S._materials(C) : {}));
-    ok('PH-B6 the stored material holds no image data at all',
+    ok('PH-B6 the material row itself still holds no image data',
       !stored.includes(PNG) && !/base64/i.test(stored));
-    ok('PH-B7 …and what it does hold says where it came from, in its own first line',
+    ok('PH-B6b …and what it does hold instead is the reading',
       /appears to show/i.test(stored) && /read from the picture, not observed/i.test(stored));
+    /* THE BYTES ARE SOMEWHERE, AND SOMEWHERE IS NOT THE MATERIAL. That separation is what keeps
+       every existing reader — the context builder, the Library shelf, the understanding report —
+       working on text and never on a file, which was the reason the old law existed. */
+    ok('PH-B7 the original is kept in its own store, reachable only through the governed route',
+      (S.materialSource[C] || {})[up.j.materialId]
+      && (S.materialSource[C] || {})[up.j.materialId].data === PNG);
+    ok('PH-B7b …and what the composer hands a model is still the reading, not the picture',
+      !JSON.stringify(require('../ai/material.js')
+        .contextFor((S._materials(C) || {})[up.j.materialId]) || {}).includes(PNG));
 
     /* ══ C — AND NOTHING THE SQUAD KNOWS HAS CHANGED ═══════════════════════════════════════
        The description deliberately shares vocabulary with the open question. If a picture could

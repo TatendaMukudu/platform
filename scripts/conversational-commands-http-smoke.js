@@ -244,6 +244,27 @@ const server = app.listen(0, async () => {
       { conversationId: evConv, about: { kind: 'focus', id: String(fid) } });
     ok('E6 another person\'s material id is not a way to attach their document',
       !JSON.stringify(props(stolen)).includes(String(hers.j.materialId)));
+    /* AND THE HARDER VERSION, ON AN OBJECT THEY BOTH HAVE OPEN. Above, Rudo's document is
+       somewhere Tendai cannot reach at all, so the refusal could come from the shape of the pool
+       rather than from a permission. Here it hangs on a Focus they are both in — it is in the
+       place the pool looks — and the ONLY thing keeping it out is that a private material belongs
+       to the person who uploaded it. Seeing where something is filed is not reading it. */
+    const shared = await call('POST', '/api/me/focus',
+      { text: 'Keep talking through the second half', groupId: 'first' }, 'coach');
+    const shid = shared.j.focus.id;
+    const hersHere = await call('POST', '/api/assistant/attachments',
+      { filename: 'rudo-notes.txt', about: { kind: 'focus', id: String(shid) },
+        text: 'Rudo: I stopped calling for it once we went behind.' }, 'mate');
+    ok('E6b a document of hers hangs on a Focus they are both in', hersHere.status === 200);
+    ok('E6c …and that Focus is open to him', (await call('GET',
+      `/api/objects/focus/${shid}/materials`, undefined, 'me')).status === 200);
+    modelPicks('attach_material', { materialId: hersHere.j.materialId });
+    const overReach = await say('use this as evidence', 'me',
+      { about: { kind: 'focus', id: String(shid) } });
+    ok('E6d …but it is still not his to name: nothing is proposed',
+      !props(overReach).some(p => p.actionType === 'attach_material'));
+    ok('E6e …and its id never appears in what he is offered',
+      !JSON.stringify(props(overReach)).includes(String(hersHere.j.materialId)));
 
     /* ══ E7 — AND WHEN SEVERAL THINGS ARE PLAUSIBLE, IT ASKS ═══════════════════════════════
        "Do not guess if several consequential referents are plausible." A second document on the

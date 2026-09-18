@@ -13621,6 +13621,7 @@ const MemberApp = {
         <div class="iqt-head"><div class="iqt-head-mid"><h1 class="iqt-title">${esc(m.title)}</h1></div></div>
         <div class="iqt-mat-by">Attached by ${esc(m.by)}</div>
         <div class="iqt-mat-note">${esc(j.note)}</div>
+        ${this._sourceStrip(materialId, m, j.sourceMedia)}
         ${(j.sections || []).map(s => `
           <div class="iqt-sec" id="sec-${esc(s.id)}">
             <div class="iqt-sec-h">${esc(s.heading)}</div>
@@ -13635,6 +13636,69 @@ const MemberApp = {
         <div class="iqt-mat-report" id="iqt-mat-report"></div>
       </div>`;
     this._renderMaterialReport(materialId);
+  },
+
+  /* ── THE ORIGINAL, AND WHAT IS SAID WHERE IT USED TO BE ────────────────────────────────────
+     A description is a reading. Somebody reading it is entitled to open the thing it is a reading
+     of — and, when it is gone, to be told it was deleted rather than to find nothing and wonder.
+     The three states are different sentences on purpose: KEPT offers the original, DELETED says
+     so in words, and NEVER HELD explains why there is nothing to offer instead of staying silent
+     and looking broken. */
+  _sourceStrip(materialId, m, src) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const s = src || { retained: false, because: 'never_held' };
+    if (s.retained) {
+      const mine = String(m.byId || '') === String(Auth.currentUser?.id || '');
+      return `<div class="iqt-mat-src">
+        <button type="button" class="iqt-src-open" onclick="MemberApp.openSource('${esc(materialId)}')">Open the original</button>
+        ${mine ? `<button type="button" class="iqt-src-del" onclick="MemberApp.deleteSource('${esc(materialId)}')">Delete the original</button>` : ''}
+        <div class="iqt-mat-src-note">${esc(s.note || '')}</div>
+      </div>`;
+    }
+    if (s.because === 'deleted') {
+      return `<div class="iqt-mat-src iqt-mat-src-gone">
+        <div class="iqt-src-tomb">${esc(s.label || 'Source attachment deleted')}</div>
+        <div class="iqt-mat-src-note">${esc(s.note || '')}</div>
+      </div>`;
+    }
+    return `<div class="iqt-mat-src"><div class="iqt-mat-src-note">${esc(s.note || '')}</div></div>`;
+  },
+
+  /* THE REQUEST CARRIES THE SESSION, which is the whole point: the URL on its own opens nothing.
+     So the file cannot be an <img src> or a plain link — it is fetched with the person's own
+     credentials and handed to the browser as a blob it already holds. */
+  async openSource(materialId) {
+    let r = null;
+    try {
+      r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/source`,
+        { headers: this._authHeaders() });
+    } catch (_) { showToast('Could not open that just now.', 'warning'); return; }
+    if (!r.ok) {
+      // 410 is the deletion, and it has its own sentence. Anything else is a refusal or an
+      // outage, and saying "deleted" for those would be a lie about what happened.
+      showToast(r.status === 410
+        ? 'The original was deleted.' : 'That original is not available to you.', 'warning');
+      if (r.status === 410) this.openMaterial(materialId);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    // Revoked once the browser has had it; a blob URL left alive is a copy nobody asked for.
+    setTimeout(() => URL.revokeObjectURL(url), w ? 60000 : 1000);
+  },
+
+  /* DELETION IS NOT UNDOABLE AND IS NOT ASKED FOR TWICE, so it is confirmed once, in words that
+     say what survives it. The record is not being deleted; the file is. */
+  async deleteSource(materialId) {
+    if (!window.confirm('Delete the original file? What IntelliQ read from it stays, and so does '
+      + 'anything that referred to it — only the file goes, and it cannot be brought back.')) return;
+    try {
+      const r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/source`,
+        { method: 'DELETE', headers: this._authHeaders() }).then(x => x.json());
+      if (!r || !r.ok) { showToast('That could not be deleted.', 'warning'); return; }
+    } catch (_) { showToast('That could not be deleted.', 'warning'); return; }
+    this.openMaterial(materialId);
   },
 
   /* DECLARED, NEVER INFERRED. "Not yet" opens a box for their own words, and the box is optional
