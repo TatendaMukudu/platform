@@ -106,6 +106,40 @@ The Focus/object page should lead with human meaning:
 
 Technical relationship/provenance/confidence machinery should be progressive disclosure or conversationally answerable rather than a day-one wall. Do not weaken epistemic truth to simplify presentation.
 
+### 2b. High / Low production path is currently inconsistent and must be reconciled
+
+Repository audit finding: the High/Low implementation contains **conflicting generations of product law**.
+
+Current `ai/team-state.js` says evidence may determine direction when direction itself was explicitly recorded at the evidence boundary (for example independent origins marking improvement/decline, documented metric movement, or recorded Focus outcomes). `combinedValence` then treats the person's own call as a second account: evidence can file a High/Low, disagreement becomes more important, and a person's call cannot erase an evidence-backed Low.
+
+But `scripts/highs-lows-smoke.js` still opens with the older law that "NOBODY BUT THE PERSON CALLS IT" and later asserts an uncalled strong belief produces no polarity. Parts of that suite therefore describe an earlier implementation and may conflict with the current owner. Do not patch around this contradiction. Establish the production call graph and update tests/comments only after proving which owner the live routes use.
+
+Founder-ratified target semantics:
+- High/Low are sibling discovery standings alongside Inquiry, not sentiment buttons and not LLM labels over prose.
+- The system may surface a High/Low autonomously **only when governed evidence contains a defensible direction**. It must not infer "good/bad" merely from positive/negative wording.
+- Direction can come from explicit attributed observations/contributions, measured change, recorded outcomes, or other canonical evidence whose semantics genuinely establish direction.
+- Independent origins vote; repeated echoes do not.
+- Thin/tentative evidence stays Inquiry/unknown rather than being forced into High/Low.
+- Conflicting direction is a contested finding / Inquiry-worthy state, not an averaged verdict.
+- Human calls are attributed accounts and may seed/strengthen understanding, but do not overwrite contrary canonical evidence.
+- Human-created High/Low remains an attributed observation until evidence standing supports a broader claim.
+- LLM may interpret a contribution into a **candidate** direction when language is genuinely semantic/ambiguous, but the kernel must validate provenance/standing before any High/Low is canonical. Do not implement a keyword sentiment classifier.
+- High/Low must retain the underlying Inquiry/evidence identity so conversation, Forum, provenance and later Focus continuity do not fork into parallel truth.
+
+Trace end-to-end:
+raw conversation/onboarding/contribution/metric/outcome -> proposal/evidence envelope -> direction field (if justified) -> Inquiry/kernel standing -> combined/evidence valence -> polarity owner -> object index -> High/Low bucket -> openable thread -> Forum -> Focus origin -> outcome/learning.
+
+Prove at least:
+1. two+ independent directed origins can surface a High/Low without a manual tap when standing permits;
+2. repeated statements from one origin cannot;
+3. undirected evidence cannot be guessed into a bucket;
+4. human call alone cannot promote thin evidence to organizational truth;
+5. contrary human call cannot erase evidence-backed Low;
+6. conflicting independent directions remain contested;
+7. machine-detected/metric/outcome direction reaches the same canonical polarity owner;
+8. surfaced High/Low is actually present in `/api/objects`, opens, can be discussed privately, can have governed Forum context, and can become the origin of a Focus without losing lineage;
+9. privacy/cohort gates remain identical at every surface.
+
 ### 3. Onboarding can legitimately seed Inquiries, Highs and Lows
 
 Founder correction: do **not** assume onboarding-derived objects such as "What they say they bring" or "Where they are trying to get to" are unwanted merely because they originated during onboarding.
