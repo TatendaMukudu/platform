@@ -44,7 +44,13 @@ const POLARITY_BUCKET = Object.freeze({
 });
 const BUCKETS = Object.freeze(['high', 'low']);
 const PRIORITIES = Object.freeze(['urgent', 'high', 'medium', 'low', 'none']);
-const CONFIDENCES = Object.freeze(['confirmed', 'clear', 'reliable', 'well_supported', 'supported', 'emerging', 'promising', 'tentative', 'calibrating', 'low', 'none']);
+/* Evidence standing and delivery reliability answer different questions. Evidence standing says
+   how well the claim is supported. Delivery reliability says whether people have found this kind
+   of noticing useful to surface. The latter may suppress a notification; it must never become
+   support for the underlying claim. `CONFIDENCES` remains an evidence-only compatibility export. */
+const EVIDENCE_STANDINGS = Object.freeze(['confirmed', 'clear', 'well_supported', 'supported', 'emerging', 'tentative', 'low', 'none']);
+const DELIVERY_RELIABILITIES = Object.freeze(['reliable_here', 'promising_here', 'unproven_here', 'reliable', 'promising', 'unproven', 'calibrating', 'none']);
+const CONFIDENCES = EVIDENCE_STANDINGS;
 
 const SOURCE_KIND = Object.freeze({
   reasoner: 'belief',
@@ -109,7 +115,12 @@ function normalizeArtifact(item = {}, opts = {}) {
   const kind = _key(opts.kind || item.feedKind || item.itemKind || item.kind || SOURCE_KIND[source] || 'artifact');
   const patternType = _key(item.patternType || item.type || item.kind || item.action || kind);
   const priority = _oneOf(PRIORITIES, item.priority || item.severity, _priorityFromUrgency(item.urgency, 'low'));
-  const confidence = _oneOf(CONFIDENCES, item.confidence || item.kernelConfidence || item.reliability || item.confidenceLabel, 'none');
+  const evidenceStanding = _oneOf(EVIDENCE_STANDINGS,
+    item.evidenceStanding || item.kernelStanding || item.kernelConfidence || item.confidence || item.confidenceLabel,
+    'none');
+  const deliveryReliability = _oneOf(DELIVERY_RELIABILITIES,
+    item.deliveryReliability || item.reliabilityLabel || item.reliability,
+    'none');
   const suggestion = _proposal(item.suggestion || item.suggestedNextStep || item.proposal);
   const title = _s(item.title || item.headline || item.signal || item.claim || item.statement || item.question || patternType.replace(/_/g, ' '), 180);
   const body = _s(item.body || item.outcomeLine || item.why || item.text || item.line || item.reason || '', 500);
@@ -125,7 +136,10 @@ function normalizeArtifact(item = {}, opts = {}) {
     patternType,
     polarity: normalizePolarity(item.polarity),
     priority,
-    confidence,
+    evidenceStanding,
+    deliveryReliability,
+    // Compatibility adapter for consumers not yet renamed. It is evidence-only by construction.
+    confidence: evidenceStanding,
     title,
     body,
     question: item.question ? _s(item.question, 360) : null,
@@ -175,7 +189,8 @@ function fromProactive(insights = []) {
     kind: 'surface',
     title: i.headline,
     body: i.body,
-    confidence: i.kernelConfidence || i.reliabilityLabel,
+    evidenceStanding: i.kernelConfidence,
+    deliveryReliability: i.reliabilityLabel,
   }, { source: 'proactive', kind: 'surface' }));
 }
 
@@ -339,7 +354,8 @@ function toPriorityInput(feed = {}) {
 
 module.exports = {
   SOURCES, LEVELS, POLARITIES, POLARITY_ALIASES, POLARITY_BUCKET, BUCKETS,
-  PRIORITIES, CONFIDENCES, SOURCE_KIND, normalizePolarity, bucketOf,
+  PRIORITIES, CONFIDENCES, EVIDENCE_STANDINGS, DELIVERY_RELIABILITIES,
+  SOURCE_KIND, normalizePolarity, bucketOf,
   normalizeArtifact, collect, finalize, toPriorityInput,
   fromReasoner, fromProactive, fromOutcomeBriefs, fromProcessReflections, fromSelfModel, fromOrgPlaybook,
   _key,
