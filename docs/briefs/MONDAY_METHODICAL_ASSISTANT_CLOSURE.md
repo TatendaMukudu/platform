@@ -286,3 +286,19 @@ Key acceptance:
 
 Do not create a second presentation/intelligence engine to achieve this. Reuse the existing presentation/read models and Composer. Prefer subtraction and progressive disclosure.
 
+### Newly uncovered attention-layer conflicts
+
+Repository audit found older engagement-oriented behavior that conflicts with the ratified intelligence-experience law:
+
+- `ai/proactive.js::milestoneFinding` turns **check-in streaks** into Highs ("Nice streak going", "A personal best") and tells leaders consistent checking-in is a moment to acknowledge. `scripts/proactive-smoke.js` explicitly protects this behavior.
+- `ai/intelligence-feed.js` maps generic `opportunity` to **High**. `scripts/intelligence-feed-smoke.js` explicitly asserts opportunity => High. Under the current product law a High means evidence that something appears to be going well; an opportunity/candidate direction is not automatically evidence of that.
+- `ai/behaviour.js` says Home should "lead with a win" and the old proactive test describes Home as "needs / celebrate / opportunity". Reconcile this with the newer rule that Home shows what matters now and does not manufacture engagement.
+
+Do not mechanically delete all milestones or opportunities. Reclassify by meaning:
+- a genuine outcome/performance milestone supported by canonical evidence may be a High;
+- an app-usage/check-in streak is not inherently human/organizational improvement and must not become a High merely to reward engagement;
+- an opportunity/suggested direction belongs in the governed option/next-step layer unless evidence independently establishes a High;
+- priority is about human consequence/information value, not product engagement.
+
+Update the old tests only after tracing every live caller and proving the replacement behavior end-to-end. Add a regression that app-usage frequency alone cannot manufacture a High or notification.
+
