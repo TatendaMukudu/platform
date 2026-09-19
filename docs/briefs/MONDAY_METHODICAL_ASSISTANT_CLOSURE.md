@@ -302,3 +302,31 @@ Do not mechanically delete all milestones or opportunities. Reclassify by meanin
 
 Update the old tests only after tracing every live caller and proving the replacement behavior end-to-end. Add a regression that app-usage frequency alone cannot manufacture a High or notification.
 
+### Newly uncovered privacy semantics: dynamic audiences can expand historical readership
+
+`ai/audience.js` deliberately stores audiences as references and resolves them against **current** node membership. That correctly removes access when somebody leaves, but it also means a newly added member/leader can become able to read historical material that was shared before they joined. The file currently presents this as structurally avoiding stale permissions, but that is only one side of the policy.
+
+Do not change this blindly. Founder/product law is required per audience kind:
+- Does "the team" mean **whoever is on the team now**, including access to historical shared records?
+- Or **the people who were in the audience when it was contributed**, with future members seeing only later organizational learning/derived evidence?
+- Are Forum history, contributed evidence, canonical High/Low/Inquiry/Focus state, and raw shared conversation governed by the same temporal rule? They probably should not be assumed to be.
+
+Until ratified, add adversarial coverage documenting current behavior for join-after-share and leave-after-share. Treat relationship/history access separately from organizational learning. A new member must never gain private source conversation merely because current node membership resolves them into a shared object's audience.
+
+### Newly uncovered privacy weakness: regex sensitivity is not a sufficient semantic privacy classifier
+
+`ai/privacy.js::classifyText` uses English regex/topic lists for restricted/sensitive classification and `redact` only strips exact private strings of length >=16. These are useful last-line heuristics, not a complete privacy boundary. They can miss:
+- non-English/code-switched sensitive disclosures;
+- euphemisms/novel wording;
+- model paraphrases of private content;
+- short identifying fragments;
+- sensitive facts inferred by combining otherwise-normal facts.
+
+Do not remove these defenses, but do not treat their passing tests as proof that private meaning cannot leak. Provider-backed adversarial fixtures must include paraphrase attacks and multilingual/code-switched sensitive material. Structural audience/scope/provenance gates remain primary; output redaction is defense-in-depth only.
+
+### Newly uncovered confidence naming collision
+
+`ai/confidence.js` computes **reliability of a noticing type based on whether users found prior notices useful/dismissed**. Other layers also carry kernel/evidence confidence about whether a claim/pattern is supported. These are different concepts and must never collapse into one human-facing "confidence".
+
+Audit every `confidence`, `kernelConfidence`, `reliabilityLabel`, and ranking use. User feedback can calibrate whether a class of notification is useful to surface; it must not increase/decrease the truth standing of the underlying evidence. Prefer explicit internal names such as `evidenceStanding` vs `deliveryReliability` where ambiguity exists, without gratuitous schema churn.
+
