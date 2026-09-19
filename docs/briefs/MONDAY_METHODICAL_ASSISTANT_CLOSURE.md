@@ -70,7 +70,7 @@ Each candidate should retain why it exists and its source class. Do not rank a w
 
 Current repo finding: `scripts/decision-intelligence-http-smoke.js` deliberately asserts that generated Q6/Q7 options do **not** exist yet. That was an earlier safety decision, not evidence that the founder's current product direction is implemented. Replace that absence only through the existing governed suggestion/proposal architecture, with provenance and no automatic action/ranking.
 
-### 1b. Preserve journey conversation, never transfer another person's chat### 1b. Preserve journey conversation, never transfer another person's chat
+### 1b. Preserve journey conversation, never transfer another person's chat
 
 When a High/Low/Inquiry produces a deliberate B and becomes the basis for a Focus, preserve the conversation/Forum journey for the **same authorized participant set**. The human experience should be continuous rather than "old object closed, new empty chat."
 
@@ -84,7 +84,7 @@ Add adversarial tests for:
 - different person with similar A: prior B/learning can be available when admissible, predecessor chat cannot;
 - leaving/removal/audience change does not create durable conversation access through the Focus edge.
 
-### 2. Simplify object thread UI without deleting capability### 2. Simplify object thread UI without deleting capability
+### 2. Simplify object thread UI without deleting capability
 
 Static inspection shows `openObjectThread` still permanently renders a verdict row:
 - Work on this
