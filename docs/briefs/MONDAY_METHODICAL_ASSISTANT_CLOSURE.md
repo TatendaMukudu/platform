@@ -106,6 +106,44 @@ The Focus/object page should lead with human meaning:
 
 Technical relationship/provenance/confidence machinery should be progressive disclosure or conversationally answerable rather than a day-one wall. Do not weaken epistemic truth to simplify presentation.
 
+### 2a. Whole-stack adversarial closure: prove the layers, do not trust the architecture diagram
+
+Before Coach-ready, trace representative messy real-language turns through the **actual production call graph**, not isolated pure functions. For each fixture record the state at every boundary:
+
+raw turn / attachment / onboarding -> semantic interpretation -> proposal -> privacy classification -> admissibility -> evidence/provenance -> Inquiry/kernel standing -> polarity/curiosity -> scoped read model -> Composer response/object surface -> persistence/reload.
+
+Required fixture families:
+- useful ordinary conversation that should become evidence;
+- same claim repeated by one origin vs independent corroboration;
+- ambiguous language that must remain unresolved;
+- contradiction/correction;
+- private contribution related to a shared object;
+- shared/team Inquiry with individual private threads plus Forum;
+- High and Low candidates with explicit direction;
+- externally informed suggestion with citation/provenance;
+- malicious prompt injection in user text and attachment-derived text;
+- cross-org identifiers and forged body identity;
+- removed/unauthorized participant attempting to follow relationship edges;
+- provider failure/recovery and reload.
+
+For provider-backed tests, use realistic paraphrases/code-switching rather than test-keyword strings. Capture the model's proposed semantics, then prove deterministic/kernel governance can reject, narrow or withhold them. A passing LLM response alone is not a truth-layer pass.
+
+Run the existing security/privacy families together and report exact pass/fail counts, including at minimum auth-boundary, tenant-boundary, cross-org-isolation, object/forum audience, composer privacy law, org-tree authority, prompt injection, provider boundary, safeguarding, attachment/photo boundaries, scope parity and Web scope. Mutation-test the gates whose removal would create disclosure or unauthorized mutation. Do not call the product "secure", "private", or "compliant" merely because these tests pass; report the threat model and untested boundaries.
+
+### 2aa. Compliance is a requirements matrix, not a universal pass/fail test
+
+Do **not** claim IntelliQ "passes every country's educational/organizational laws." Law depends on jurisdiction, age, institution type, data category, role (controller/processor/etc.), deployment, contracts, retention, cross-border transfers, safeguarding duties and actual operations outside this repository.
+
+Build/maintain a jurisdictional requirements matrix from authoritative current sources, beginning with the pilot's actual jurisdictions and then expanding by market. Each requirement must map to: jurisdiction, sector/population, applicability trigger, product/control requirement, repository evidence/test, operational/non-code requirement, owner, status, source URL/title/date checked, and legal-review-needed flag.
+
+Separate:
+1. code-verifiable controls (access, deletion mechanics, auditability, consent/authorization enforcement, minimization, export, retention enforcement, child/guardian gates where applicable);
+2. configuration/deployment controls;
+3. contracts/policies/process/training/vendor obligations;
+4. questions requiring qualified local counsel.
+
+Never turn absence of a failing test into a legal-compliance assertion.
+
 ### 2b. High / Low production path is currently inconsistent and must be reconciled
 
 Repository audit finding: the High/Low implementation contains **conflicting generations of product law**.
