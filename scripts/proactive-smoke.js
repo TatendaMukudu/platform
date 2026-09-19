@@ -149,34 +149,40 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   ok('19 · a risk and a win land in the canonical Low and High buckets', behaviour.bucketOf(risk) === 'low' && behaviour.bucketOf(prog) === 'high');
 }
 
-/* ── PURE: 20 · Home groups into "Your Attention" — needs / celebrate / opportunity */
+/* ── PURE: 20 · Home spends attention on meaning, not usage or candidate directions */
 {
   const risk = proactive.toInsight({ type: 'overload', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
   const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
   const mile = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'self', subjectId: 'u' });
   const opp  = proactive.toInsight(proactive.opportunityFinding({ key: 'ready', subjectId: 'u', headline: 'Ready for more?', body: 'You have finished early several weeks.', suggestion: 'Talk it through.' }), { audience: 'self', subjectId: 'u' });
   const g = behaviour.plan([risk, win, mile, opp], { audience: 'self' }).groups;
-  ok('20 · only High and Low exist, correctly populated', Object.keys(g).sort().join(',') === 'high,low' && g.low.insights.length === 1 && g.high.insights.length === 3);
+  ok('20 · only evidence-backed progress becomes a High; usage and opportunity stay out of attention',
+    Object.keys(g).sort().join(',') === 'high,low' && g.low.insights.length === 1 && g.high.insights.length === 1
+      && g.high.insights[0].patternType === 'recovering');
+  ok('20 · app check-in frequency alone cannot manufacture a High or notification',
+    behaviour.plan([mile], { audience: 'self' }).empty === true
+      && behaviour.bucketOf(mile) === null && behaviour.bucketOf(opp) === null);
   ok('20 · an empty bucket is a first-class calm state, not an error', behaviour.plan([win], { audience: 'self' }).groups.low.empty === true);
   ok('20 · all-empty is a valid, calm whole-surface result', behaviour.plan([], { audience: 'self' }).empty === true);
 }
 
 /* ── PURE: 21 · priority is INDEPENDENT of polarity ──────────────────────────── */
 {
-  const bigWin  = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
+  const bigWin  = proactive.toInsight(proactive.milestoneFinding({ key: 'performance_milestone', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
   const lowRisk = proactive.toInsight({ type: 'plateau', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'v' });
   ok('21 · a high-priority milestone can outrank a low-priority risk', behaviour.SEV_RANK[bigWin.priority] < behaviour.SEV_RANK[lowRisk.priority]);
   // within a bucket, ranking is by priority, not by polarity/sentiment
-  const a = proactive.toInsight(proactive.milestoneFinding({ key: 'k1', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
-  const b = proactive.toInsight(proactive.milestoneFinding({ key: 'k2', subjectId: 'u2', days: 15, best: false }), { audience: 'self', subjectId: 'u2' });
-  ok('21 · within a bucket, higher priority sorts first', behaviour.plan([b, a], { audience: 'self' }).groups.high.insights[0].priority === 'high');
+  const a = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
+  const b = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u2', days: 15, best: false }), { audience: 'self', subjectId: 'u2' });
+  ok('21 · usage milestones remain outside High regardless of priority',
+    behaviour.plan([b, a], { audience: 'self' }).groups.high.insights.length === 0);
 }
 
 /* ── PURE: 22 · milestone is deterministic + leader-safe; opportunity is self-only */
 {
   const selfM = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'self', subjectId: 'u' });
   const leadM = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'leader', subjectId: 'u', subjectName: 'Mia' });
-  ok('22 · the owner milestone celebrates the specific streak', /21 days/.test(selfM.body) && selfM.polarity === 'milestone');
+  ok('22 · the owner can see the recorded streak without it becoming a High', /21 days/.test(selfM.body) && selfM.polarity === 'neutral' && behaviour.bucketOf(selfM) === null);
   ok('22 · the leader milestone is directional + numberless + safe', proactive.audienceSafe(leadM).ok && !/\d/.test(leadM.body));
   ok('22 · a leader surface uses only High and Low', Object.keys(behaviour.plan([leadM], { audience: 'leader' }).groups).sort().join(',') === 'high,low');
   // opportunity is framed as a question, never a verdict/prediction
@@ -201,7 +207,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const morning = behaviour.opening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T08:00:00').getTime() });
   const evening = behaviour.opening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T20:00:00').getTime() });
   ok('24 · greeting is deterministic + time-aware', /^Good morning, Mia\./.test(morning.greeting) && /^Good evening, Mia\./.test(evening.greeting));
-  ok('24 · the opening LEADS with a High when there is one', morning.sections[0].label === 'High');
+  ok('24 · the opening leads with the higher-priority record, not a forced High', morning.sections[0].label === 'Low');
   ok('24 · it carries an invitation to explore', /explore/i.test(morning.invitation || ''));
   // grounding: every item in the opening is one of the input insights — nothing invented.
   const inputKeys = new Set([risk, win].map(i => i.dedupeKey));

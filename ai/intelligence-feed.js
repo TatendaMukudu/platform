@@ -38,7 +38,9 @@ const POLARITY_BUCKET = Object.freeze({
   friction: 'low',
   progress: 'high',
   milestone: 'high',
-  opportunity: 'high',
+  // A possible direction is not evidence that something is already going well.
+  // Keep it in the feed/option layer until evidence independently establishes a High.
+  opportunity: null,
   strength: 'high',
   neutral: null,
 });
