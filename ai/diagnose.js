@@ -234,10 +234,34 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, a
   // believe. Counting it would mean a claim the person has since withdrawn still holds the
   // picture up — see supersede().
   const list = all.filter(s => isActive(s));
+  /* ── THE SHAPE OF THE EVIDENCE, RETURNED RATHER THAN LEFT TO BE GUESSED AT ──────────────────
+     `because` is prose the kernel composes for a reader, and a caller that needs to say something
+     true about the evidence had no choice but to parse it — or, as the client did, to invent a
+     sentence from the BAND alone. The badge tooltip claimed "several separate accounts point the
+     same way" for every band from `supported` upwards, which the band cannot support: a picture
+     assembled from several reports whose origin was never established reaches the same band while
+     `known.size` is zero, and the product then asserted independence it had specifically failed to
+     establish. That is the one claim in the whole confidence model that must never be made loosely,
+     since the entire origin/occasion distinction exists to stop a room agreeing with itself from
+     reading as corroboration.
+
+     So the counts the score was computed from are returned beside it. Structure, not English:
+     the words are the presentation layer's job, and now it has facts to write them from. */
+  const shapeOf = ({ origins = 0, unestablished = 0, occasions = 0, signals = 0,
+    contradictions = 0, retired = 0 }) => ({
+    independentOrigins: origins,     // established, distinct, currently active
+    unestablishedSources: unestablished, // reports we could not trace to an origin
+    occasions,                       // tellings — the same person twice in one breath is one
+    signals,                         // current records, whatever they trace to
+    contradictions,                  // signals that contradict or dissent
+    retired,                         // superseded or withdrawn, kept in the record, not counted
+  });
+
   if (!list.length) {
     return all.length
-      ? { score: 0, band: 'tentative', because: [`${all.length} signal${all.length === 1 ? '' : 's'}, all superseded or withdrawn`] }
-      : { score: 0, band: 'tentative', because: ['nothing recorded yet'] };
+      ? { score: 0, band: 'tentative', because: [`${all.length} signal${all.length === 1 ? '' : 's'}, all superseded or withdrawn`],
+          origin: shapeOf({ retired: all.length }) }
+      : { score: 0, band: 'tentative', because: ['nothing recorded yet'], origin: shapeOf({}) };
   }
 
   const because = [];
@@ -331,7 +355,14 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, a
   ) * contradictionPenalty * singleOccasionCeiling * singleOriginCeiling;
 
   const band = (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band;
-  return { score: Math.round(score * 100) / 100, band, because };
+  return {
+    score: Math.round(score * 100) / 100, band, because,
+    // The counts this score was actually computed from — see shapeOf above.
+    origin: shapeOf({
+      origins: known.size, unestablished: unknownSources.size, occasions: occasions.size,
+      signals: list.length, contradictions, retired: all.length - list.length,
+    }),
+  };
 }
 
 /* ── 3. THE INQUIRY STATE ────────────────────────────────────────────────────
@@ -527,6 +558,22 @@ const DIRECTIONS = Object.freeze(['improvement', 'decline', 'neutral']);
 
 function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
+  /* ── A MISSING LIST IS AN EMPTY LIST, NOT A CRASH ─────────────────────────────────────────
+     `newHypothesis` has always set `supportRefs` and `challengeRefs`, so an inquiry grown in this
+     process always has them. A record RESTORED FROM STORAGE need not: this state is persisted and
+     reloaded across deploys, and a hypothesis written before those fields existed comes back
+     without them. The confidence pass below then reached `h.supportRefs.map` and threw, which the
+     R5 audit caught by driving a disagreement against exactly that shape — the evidence record was
+     created and the reply never came.
+
+     This normalises rather than decides: an absent list of supporting refs means nothing supports
+     the hypothesis yet, which is what an empty list already means everywhere else in this file.
+     No confidence moves, no signal is invented, and a hypothesis that HAS refs is untouched. */
+  for (const h of (next.hypotheses = Array.isArray(next.hypotheses) ? next.hypotheses : [])) {
+    if (!Array.isArray(h.supportRefs)) h.supportRefs = [];
+    if (!Array.isArray(h.challengeRefs)) h.challengeRefs = [];
+  }
+  if (!Array.isArray(next.signals)) next.signals = [];
   // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
   // this turn produced), we hold the proposal's own id — still a reference, never the content.
   const refOf = typeof evidenceRefOf === 'function' ? evidenceRefOf : (p => String(p.id));

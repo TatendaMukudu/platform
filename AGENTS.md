@@ -21,6 +21,12 @@ npm test        # syntax-check all sources + run every suite. One verdict.
 No DB and no API key are needed to run it — everything in the truth layer is
 pure and deterministic on purpose.
 
+Before implementing, also read **`ENGINEERING_STANDARD.md`**. It is the construction
+standard for one-pass durable work: trace the canonical owner, state the positive and
+negative law, preserve privacy/provenance, build the vertical slice, mutation-prove the
+assertions, and only then claim completion. `AGENTS.md` defines product law;
+`TESTING.md` defines proof; `ENGINEERING_STANDARD.md` defines implementation discipline.
+
 ---
 
 ## 1. What this product is (so you don't drift)

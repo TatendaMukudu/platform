@@ -1,0 +1,216 @@
+/* ============================================================
+   ai/language.js — WHAT LANGUAGE IS THIS PERSON SPEAKING (PURE)
+
+   The product had no notion of language at all. Not a preference, not a detection, not a
+   directive — `ai/report.js` hard-codes `lang="en"` and nothing else ever asked. A person
+   writing in Spanish was answered in English, every turn, with no acknowledgement that anything
+   had been ignored, because nothing in the system had noticed.
+
+   THIS IS A READER, NOT A TRANSLATOR. It answers one question — which language did somebody just
+   write in — so that two other things can be true:
+
+     · the model, which writes the prose, can be told to answer in it (see `directive`);
+     · the DETERMINISTIC fallback copy, which is English and will stay English, can say so
+       instead of silently answering a Spanish question in English and looking broken.
+
+   The second is the honest half and the reason this is deliberately small. Detecting a language
+   is cheap; translating a product is not, and pretending otherwise by shipping a detector with no
+   fallback story would make the product worse at the moment it is least able to explain itself.
+
+   DETERMINISTIC AND MODEL-FREE. The founder's law is that deterministic code decides and the LLM
+   writes the prose; a detector that needed a provider would be unable to decide anything exactly
+   when the provider was down, which is when the fallback copy is what a person sees.
+
+   FAILS CLOSED TO NULL. "I do not know" is a first-class answer and the common one for short
+   text: two words are not evidence of a language. A null means every caller behaves exactly as it
+   did before this file existed, which is what makes adding it safe.
+   ============================================================ */
+
+'use strict';
+
+/* Scripts first, because they are decisive where they apply — a line in Greek is Greek, and no
+   stopword list is needed to say so. Latin script proves nothing on its own and falls through. */
+const SCRIPTS = [
+  ['el', 'Greek',      /[Ͱ-Ͽἀ-῿]/],
+  ['ru', 'Russian',    /[Ѐ-ӿ]/],
+  ['he', 'Hebrew',     /[֐-׿]/],
+  ['ar', 'Arabic',     /[؀-ۿ]/],
+  ['hi', 'Hindi',      /[ऀ-ॿ]/],
+  ['th', 'Thai',       /[฀-๿]/],
+  ['ko', 'Korean',     /[가-힯ᄀ-ᇿ]/],
+  ['ja', 'Japanese',   /[぀-ゟ゠-ヿ]/],
+  ['zh', 'Chinese',    /[一-鿿]/],
+];
+
+/* Function words, which is what actually separates the Latin-script languages in short text.
+   Content words are the ones a bilingual speaker borrows; function words are not. Each list is
+   deliberately short and high-frequency — a longer list would win more often and be wrong more
+   often, because rare words overlap across languages far more than common ones do. */
+const STOPWORDS = {
+  en: ['the', 'and', 'is', 'to', 'of', 'in', 'it', 'that', 'for', 'with', 'not', 'but', 'this',
+    'have', 'was', 'are', 'my', 'we', 'you', 'be', 'i', 'a', 'an', 'on', 'at', 'before', 'after',
+    'can', 'cannot', 'me', 'so', 'do', 'am', 'if', 'when', 'about', 'from', 'they', 'he', 'she'],
+  es: ['el', 'la', 'los', 'las', 'de', 'del', 'que', 'y', 'en', 'un', 'una', 'es', 'por', 'con',
+    'no', 'para', 'mi', 'se', 'más', 'pero', 'está', 'al', 'antes', 'yo', 'muy', 'o', 'si', 'ya',
+    'cuando', 'porque', 'como', 'me', 'lo', 'su', 'sus', 'este', 'esta', 'puedo', 'tengo', 'hay'],
+  fr: ['le', 'la', 'les', 'de', 'des', 'et', 'est', 'en', 'un', 'une', 'que', 'pour', 'pas',
+    'dans', 'qui', 'sur', 'avec', 'je', 'mais', 'plus', 'ne', 'du', 'au', 'aux', 'ce', 'cette',
+    'il', 'elle', 'nous', 'vous', 'avant', 'après', 'peux', 'ai', 'très', 'si', 'quand', 'parce'],
+  de: ['der', 'die', 'das', 'und', 'ist', 'ich', 'nicht', 'zu', 'den', 'mit', 'ein', 'eine',
+    'für', 'auf', 'dem', 'aber', 'wir', 'auch', 'sich', 'von', 'im', 'am', 'kann', 'vor', 'nach',
+    'es', 'sie', 'er', 'wenn', 'weil', 'sehr', 'noch', 'schon', 'mir', 'mein', 'meine', 'habe'],
+  pt: ['o', 'a', 'os', 'as', 'de', 'do', 'da', 'dos', 'das', 'que', 'e', 'em', 'um', 'uma',
+    'não', 'para', 'com', 'por', 'mais', 'mas', 'eu', 'está', 'no', 'na', 'ao', 'antes', 'depois',
+    'se', 'muito', 'quando', 'porque', 'como', 'me', 'meu', 'minha', 'consigo', 'tenho', 'há'],
+  it: ['il', 'la', 'lo', 'gli', 'le', 'di', 'che', 'e', 'in', 'un', 'una', 'non', 'per', 'con',
+    'sono', 'più', 'ma', 'mi', 'si', 'come', 'del', 'della', 'al', 'alla', 'nel', 'prima', 'dopo',
+    'io', 'molto', 'quando', 'perché', 'posso', 'ho', 'anche', 'se', 'da', 'suo', 'sua'],
+  nl: ['de', 'het', 'een', 'en', 'is', 'van', 'ik', 'niet', 'dat', 'te', 'op', 'met', 'voor',
+    'maar', 'ze', 'er', 'aan', 'ook', 'zijn', 'naar', 'in', 'om', 'kan', 'heb', 'mijn', 'wij',
+    'hij', 'zij', 'als', 'omdat', 'heel', 'nog', 'al', 'dan', 'wel', 'bij', 'over'],
+  pl: ['i', 'w', 'nie', 'to', 'jest', 'na', 'że', 'się', 'do', 'z', 'ale', 'jak', 'co', 'tak',
+    'po', 'dla', 'od', 'przez', 'jego', 'być', 'mnie', 'mój', 'moja', 'przed', 'bardzo', 'już',
+    'kiedy', 'bo', 'mam', 'mogę', 'jeszcze', 'tylko', 'czy', 'ten', 'ta', 'o'],
+
+  /* ── SHONA AND NDEBELE ────────────────────────────────────────────────────────────────────
+     Added because the pilot is in Zimbabwe and neither existed here. Both are Latin-script, so
+     the script table above cannot see them, and with no entry in this table `detect` returned
+     null for every Shona and Ndebele sentence — no language, therefore no directive, therefore
+     an English answer to somebody writing Shona, every single turn. Measured before the fix:
+     "Ndinofunga kuti tinonyarara kana tabayiwa zvibodzwa" detected as nothing at all.
+
+     THEY ARE LISTED SEPARATELY AND CHOSEN TO SEPARATE, which is the founder's explicit warning:
+     do not confuse closely related languages because a model can approximately understand both.
+     Shona is a Shona-group language and Ndebele is Nguni, so their FUNCTION words diverge sharply
+     even where speakers share vocabulary — the classic pair being Shona `kuti` against Ndebele
+     `ukuthi`, which are different words and never collide under whole-word matching. Words that
+     genuinely occur in both with reasonable frequency are in neither list, because a word that
+     scores for both separates nothing and only adds noise. */
+  sn: ['kuti', 'uye', 'asi', 'nokuti', 'nekuti', 'kwete', 'chete', 'saka', 'pamwe', 'hapana',
+    'zvino', 'izvi', 'izvo', 'ndiri', 'tiri', 'vari', 'ndine', 'tine', 'vane', 'handina',
+    'hazvina', 'zvakanaka', 'zvakare', 'sei', 'nei', 'chii', 'vanhu', 'munhu', 'ini', 'isu',
+    'imi', 'ivo', 'iwe', 'pane', 'kune', 'ndinofunga', 'tinofanira', 'zvose', 'kana', 'ndati'],
+  nd: ['ukuthi', 'kodwa', 'ngoba', 'njalo', 'lokhu', 'lokho', 'yebo', 'hatshi', 'khona', 'lapho',
+    'manje', 'ngakho', 'kuphela', 'abantu', 'umuntu', 'ngicabanga', 'sengathi', 'kakhulu',
+    'kanti', 'yini', 'ngani', 'njani', 'nxa', 'futhi', 'bonke', 'lami', 'lakhe', 'wami',
+    'sithi', 'bathi', 'kuhle', 'angithi', 'akula', 'siyathula', 'ngithi', 'wena', 'mina',
+    'thina', 'lina', 'bona'],
+};
+
+const NAMES = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', pt: 'Portuguese',
+  it: 'Italian', nl: 'Dutch', pl: 'Polish', el: 'Greek', ru: 'Russian', he: 'Hebrew',
+  ar: 'Arabic', hi: 'Hindi', th: 'Thai', ko: 'Korean', ja: 'Japanese', zh: 'Chinese',
+  sn: 'Shona', nd: 'Ndebele' };
+
+/* The floor. Below this many words, a guess is a coin toss dressed as a finding — "ok thanks"
+   is not evidence of anything — so the honest answer is that we do not know. */
+const MIN_WORDS = 4;
+
+function nameOf(code) { return NAMES[String(code || '')] || null; }
+
+/* Which language is this, if it can be told? Returns { code, name, confident } or null.
+   `confident` is separate from returning an answer at all: a clear winner among function words
+   is confident, a narrow one is a lean, and a caller that will CHANGE the product's behaviour
+   should ask for confidence while one that is merely labelling need not. */
+function detect(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return null;
+
+  for (const [code, name, re] of SCRIPTS) {
+    if (re.test(raw)) return { code, name, confident: true };
+  }
+
+  const words = raw.toLowerCase()
+    .replace(/[^\p{L}\p{M}\s']/gu, ' ')
+    .split(/\s+/).filter(Boolean);
+  if (words.length < MIN_WORDS) return null;
+
+  const set = new Set(words);
+  const scores = [];
+  for (const [code, list] of Object.entries(STOPWORDS)) {
+    let hits = 0;
+    for (const w of list) if (set.has(w)) hits++;
+    if (hits) scores.push([code, hits]);
+  }
+  if (!scores.length) return null;
+  scores.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [code, top] = scores[0];
+  const runnerUp = scores[1] ? scores[1][1] : 0;
+  // One hit on one list is a word, not a language. Two clear of the field is a language.
+  if (top < 2) return null;
+  return { code, name: NAMES[code], confident: top - runnerUp >= 2 };
+}
+
+/* THE DIRECTIVE THE MODEL RECEIVES. Nothing here decides anything about content — it says which
+   language the prose should be in, which is a property OF prose and therefore the model's job
+   under the founder's law. Empty for English and for an unknown, so the ordinary path is
+   unchanged and costs no tokens. */
+/* ── THE CLAUSES EVERY LANGUAGE DIRECTIVE CARRIES ─────────────────────────────────────────────
+   Shared so the named and unnamed forms cannot drift apart — they are the same law, and the only
+   difference between them is whether deterministic code was able to put a name to the language. */
+const _COMMON =
+    'Stay in one language for the whole of this reply; do not drift part-way through it, and do '
+  + 'not switch back to English to explain yourself. If they mix languages, it is natural to '
+  + 'mirror the way they mix rather than forcing everything into one. If they ASK you to answer '
+  + 'in a particular language, do that, and keep doing it until they say otherwise. The language '
+  + 'of a document they attach, or of a source you cite, does not decide the language you answer '
+  + 'in — say what a source means in their language, and do not imply the source was written in '
+  + 'it. Do not translate names of people, groups or organisations. If you are quoting something '
+  + 'they wrote, quote it as they wrote it.';
+
+/* ── AND THE CASE THAT USED TO BE SILENT ──────────────────────────────────────────────────────
+   When deterministic code cannot NAME the language, it used to emit nothing — and nothing means
+   the model answers in English. Measured at e4d647a: Swahili, Xhosa, Turkish, Indonesian and
+   Vietnamese all produced no directive, so a person writing any of them was answered in English
+   with nothing in the system noticing. Adding each of them to the word table would fix those
+   five and leave the next language broken, which is an allowlist rather than an architecture.
+
+   THE OWNERSHIP BOUNDARY IS THE FIX. Identifying a language is something a language model does
+   well and a stopword table does badly — it read Zulu as Ndebele here, which is the same
+   close-language confusion the table was extended to avoid. So deterministic code stops trying to
+   name every language and instead states the LAW, which it does own: answer this person in the
+   language they are writing in. That sentence is correct for every language the model supports,
+   including ones nobody has thought about, and it needs no code change when the next one arrives.
+
+   The named form below is kept for two things a model cannot do from one message: CONTINUITY
+   (somebody writes "ok" and must not be dropped back to English) and pilot protection for Shona
+   and Ndebele, which is where this was found. */
+function unnamedDirective() {
+  return 'LANGUAGE — answer this person in the language they are writing in. '
+    + 'Work out which language that is from their own words; do not default to English. '
+    + _COMMON;
+}
+
+function directive(lang) {
+  /* Unknown is NOT English. It is the case where we have nothing stored for this person yet, or
+     their last message was too short to read, and it is the one that used to fall through to an
+     English answer. English proper still adds nothing, so the ordinary path costs no tokens. */
+  if (!lang || !lang.code) return unnamedDirective();
+  if (lang.code === 'en') return '';
+  /* THE ANTI-DRIFT CLAUSE USED TO READ "do not switch language part-way through", FULL STOP, and
+     that forbade the thing the product is supposed to do. A person who starts in English and
+     moves to Shona has not made a mistake to be corrected; they have changed language, and
+     IntelliQ follows them. What must not happen is drift WITHIN one reply, or a silent reset to
+     English at a system boundary. So the rule is scoped to the reply rather than the
+     conversation, and which language to use is decided per turn by the caller from their most
+     recent words — never by this sentence. */
+  /* NAMED, because we could tell — and naming it is what carries CONTINUITY across a short
+     message, a provider outage or an attachment. "If they have moved on" is here because a name
+     remembered from an earlier turn must never override what they are writing NOW. */
+  return `LANGUAGE — this person has been writing in ${lang.name}, so reply in ${lang.name} `
+    + 'unless their latest message is plainly in another language, in which case follow them. '
+    + _COMMON;
+}
+
+/* AND THE HONEST LINE WHEN THE PROSE IS NOT AVAILABLE. The deterministic copy in this product is
+   English and will stay English: it is not model-written, so there is nothing to instruct. A
+   person writing in Spanish who gets an English sentence back is owed the reason, because the
+   alternative is a product that looks broken rather than one that is limited. Empty for English
+   and for an unknown, so nothing is said where nothing needs saying. */
+function fallbackNote(lang) {
+  if (!lang || !lang.code || lang.code === 'en') return '';
+  return `This part of IntelliQ can only answer in English at the moment, so this reply is in `
+    + `English rather than ${lang.name}.`;
+}
+
+module.exports = { detect, directive, unnamedDirective, fallbackNote, nameOf, MIN_WORDS, STOPWORDS, NAMES };

@@ -1,7 +1,8 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `f844c3a`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `c63215f` (restamped at the start of the methodical-assistant closure pass). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
+**Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -21,7 +22,7 @@
 
 | Question | Document |
 |---|---|
-| **What must I build next?** | `briefs/codex-pilot-programme.md` — **the work order: seven lanes, a conflict matrix, and the run order** |
+| **What must I build next?** | `briefs/MONDAY_METHODICAL_ASSISTANT_CLOSURE.md` — **the current pilot-closure handoff; use with the founder-ratified conversational and intelligence-experience laws** |
 | What is the reasoning behind those lanes? | `ttd/pilot-blocker-challenge-and-packets.md` |
 | What is IntelliQ / what is broken? | `ttd/intelliq-constitution.md` §1, §12, §13 |
 | Is a law enforced? | `ttd/intelliq-ttd-v1.md` |
@@ -346,6 +347,282 @@ produced — so the app reported *"Nothing needs your attention right now, you'r
 place"* to a person it could not see at all. Zero highs and zero lows across 28 seeded players
 who had real evidence in the system. Guard: `highs-lows-smoke`.
 
+## 11 · September 2026 — the A-to-B spine, creation, and the final product pass
+
+The line from `159c05a` to `b8d2c9e` on `gpt/ab-decision-spine-r1`. Not merged; the founder
+decides what lands.
+
+> **The human-surface pass** (`72f2ca4` → `b8d2c9e`) closes this line and is recorded in
+> `docs/reviews/HUMAN_SURFACE_PASS_R1.md`. Two things worth knowing before touching the client:
+>
+> - **The composer lives in the shell**, in `#iq-shell-composer`, a sibling of `<main>` — not
+>   inside any page. It was inside `#page-home`, so it existed on Home and on none of the other
+>   seven member pages. `MemberApp._renderShellComposer` owns it and it stands down for a page
+>   that brought its own composer (an object thread, the Forum), because on the Forum the
+>   difference between the two boxes decides who reads what you type.
+> - **A Library shelf entry is a REFERENCE, never a copy** — `(kind, id)` and nothing else, every
+>   word resolved live from the object at the moment somebody looks.
+>   `library-reference-http-smoke.js` holds that law, including the half that matters most: a
+>   filing refusal must be identical for an id that never existed and a real id belonging to
+>   another team, or the refusal enumerates their shelf one guess at a time.
+>
+> That report left one open question — the composer's Private/Public button reached nothing — and
+> the founder has since **decided it**, in `docs/reviews/COMPOSER_PRIVACY_CORRECTION_R1.md`:
+>
+> - **Talking to IntelliQ is not contributing to the organisation.** The generic Composer is the
+>   person's own private conversation, always, with no visibility mode to get wrong. The
+>   Private/Public pill, `toggleVisibility` and `_wsShare` are **gone** — removed rather than wired
+>   up, because a global public mode means sharing one sentence silently changes the audience of
+>   every sentence after it.
+> - **Contributing is a separate deliberate act.** `share_to_forum` (audience, exact words,
+>   confirmation), `openAudience` on an object's own thread, `POST /api/me/focus/:id/visibility`
+>   and `/api/me/audiences` are all untouched and all asserted.
+>
+> `composer-privacy-law-http-smoke.js` holds the law, including the injection test: a turn that
+> asserts `visibility: 'public'` is read as the ordinary private turn it is, so the mode cannot be
+> reintroduced from a client.
+
+> **The conversation-first pass** (`b6dfaaa` onward) is recorded in
+> `docs/reviews/CONVERSATION_FIRST_R1.md`, and **it completed four of the brief's areas, not all
+> of them** — §0 and §6 of that report say exactly which. Three things to know before touching
+> this code:
+>
+> - **Shona and Ndebele exist.** They did not: both are Latin-script, and with no entry in
+>   `ai/language.js` STOPWORDS the detector returned null for every sentence, so a Shona speaker
+>   got English every turn. Their word lists are chosen to SEPARATE (`kuti` vs `ukuthi`) and
+>   `A7b` asserts they share no word at all.
+> - **A language switch is FOLLOWED.** The directive used to say "do not switch language part-way
+>   through" without qualification, which instructed the opposite. Anti-drift is now scoped to one
+>   reply; mixing is mirrored rather than forced.
+> - **A Focus heading is a LEAD, never a summary** (`present.focusLead`). Summarising is the
+>   model's half; deterministic code takes the person's own opening words and keeps the full text
+>   beside them in `full`/`leadIsWhole`. The class that links these rounds is the same one §8 and §10 name, arrived at from
+a third direction: **a capability that exists in source, passes hermetic tests, and produces nothing
+or something false on a real screen.**
+
+> **The conversational command layer and source retention** (`12a2051` onward) is recorded in
+> `docs/reviews/CONVERSATION_FIRST_R4.md`. Four things to know before touching this code:
+>
+> - **`readCommand` is a models-off FALLBACK, not the language layer.** It covers *create focus /
+>   create inquiry / high / low* and nothing else, and `conversational-commands-http-smoke` H1–H4
+>   pin that size on purpose. Understanding arbitrary language belongs to the model with a bounded
+>   action schema (`prompt` → `completeJSON` → `normalize` → `ground`); deterministic code
+>   validates, proposes, confirms and executes. Growing the regex list would rebuild, at the intent
+>   layer, the allowlist problem the language layer just lost.
+> - **"This" is resolved from a server-side pool, not from the current turn.**
+>   `_composerActionMaterials` is the referent pool for `attach_material`; one safe referent
+>   resolves, two ask by name, and an id outside the pool asks rather than substituting another
+>   document. Two authority gaps were closed underneath it: the executor asked `_materialFor` in
+>   its `requireObject` form (404 for every composer upload) and never asked `_mayAttach` at all.
+> - **A source is kept, and its audience is inherited.** `materialSource` holds the original bytes
+>   for what the server actually receives, which today is an image. The read route asks
+>   `_materialFor` and asks nothing else — a source has no audience of its own. Deleting removes
+>   bytes and answers **410, not 404**, leaving "Source attachment deleted" on the material and in
+>   every list. There is no TTL and no sweeper, deliberately.
+> - **`openedBy` is why an inquiry somebody asked for is visible.** `_objectBucket` hides a
+>   signal-less inquiry because a derived shell is noise; it could not tell that from a question a
+>   person had just confirmed, so "Inquiry opened" was true about a write that appeared on no
+>   screen at any scope. `openedBy` is set only by the governed confirmation path.
+
+> **The product-connectivity audit** (`fb3ea1c` onward) is recorded in
+> `docs/reviews/PRODUCT_CONNECTIVITY_R5.md`. It answers one question: was the invisible Inquiry an
+> Inquiry bug, or does IntelliQ generally write truth it cannot find again? **It was specific.**
+> Every one of the eighteen consequential Composer actions was driven end to end — promise,
+> canonical id, the surface that lists it, the thread that reopens it, the continuation, and the
+> outsider who must find nothing — and all the others were already connected. Four things to know:
+>
+> - **`scripts/product-promise-http-smoke.js` is the gate for this class.** It refuses as proof a
+>   200, a row in persistence, prose on a screen, or a card that renders anything other than the id
+>   that was written. Every assertion is an id or a reader's behaviour. Adding a consequential
+>   Composer action means adding its section here.
+> - **`_confirmProposal` runs inside an error boundary.** The one mutation path is `async` and
+>   nothing caught a throw, so a bad record shape in any branch left the person watching a spinner
+>   after a possible partial write. It now answers, says nothing was taken as done, and leaves the
+>   proposal retryable. `applyProposals` also reads a missing `supportRefs` as an empty one, because
+>   persisted records predate that field.
+> - **A bound object answers about itself** (`_objectSelfRead`). A question asked from inside a
+>   Focus used to dead-end on the free-text bundle — the seventh instance of that — while the
+>   answer was on the card. It reads from the same presenter the card renders from, matches no
+>   question words, and a reported outcome carries the limitation that it is not a cause.
+> - **The browser check's excuse list is empty, deliberately.** It held
+>   `/^Chart is not defined$/`, called a harness artifact; it never was one. `js/charts.js` touched
+>   `Chart.defaults` at module load, so a connection that could not fetch the CDN threw and took
+>   every chart helper with it. Charts degrade honestly now. Do not put anything back on that list.
+
+**The A-to-B spine.** The loop already ran end to end; three of eight coach-facing sections were
+structurally empty and the loop's last arrow did not close. `AB_SPINE_TRUTH_MAP_R1.md` is the record,
+including where Part I turned out to be wrong. A human may now propose a candidate explanation for a
+group inquiry through the existing governed boundary (founder adjudication, option b), and
+`hypothesisStanding` travels with the projection so an unevidenced theory can never be rendered at the
+band the OBSERVATION earned.
+
+**Creation.** The intent machinery was never missing -- `ai/composer-actions.js` has held an
+eighteen-action vocabulary all along, and only the INTERPRETATION step is model-gated. A narrow
+deterministic command parser (`readCommand`) routes a typed instruction through the existing
+`requestedAction` branch. `CREATION_OWNER_MAP_R1.md` has the owner table; a High and a Low have no
+creator because they are projections, and the product now says so in a coach's words.
+
+**The final product pass.** Two connections, both through owners that already existed:
+
+| Correction | Canonical owner |
+|---|---|
+| The Composer received no org values, no success definition, no language directive and no member goals -- `_domainDirective` was built and used as a truthiness test | `_composeTurn` system prompt, assembled like the other nine AI entry points |
+| A document attached to a chat reached no turn: `_materialFor` requires an OBJECT in `_allObjectsFor`, and a conversation is not one | `_conversationMaterialContext` |
+
+**The boundary that used to be an absence.** Declared context -- org goals, values, metrics, node
+descriptions, onboarding self-descriptions -- may now steer relevance, interpretation, question
+selection and language, and may never touch origin counts, evidence, confidence or causal standing.
+That held before only because the kernel never received these fields, which is not a boundary but an
+accident waiting for someone with a good reason. `scripts/org-context-boundary-http-smoke.js` asserts
+it, and its own shape was corrected by mutation: re-reading after a context change proves there is no
+READ-time contamination and misses admission-time contamination entirely.
+
+---
+
+## 10 · September 10-11, 2026 — the pilot passes
+
+Forty-seven commits between `f844c3a` and `a270a9b`, in six rounds. The class that links them is the
+one §8 named and this index exists to stop an agent rediscovering: **the suite was green and the
+person holding the phone was not getting it.**
+
+**PR #86, #87 — the pilot stack.** Cross-evidence, the Priority Office, surfacing and closure.
+`ai/cross-evidence.js` is a READER over canonical fields (`focus.addresses`, `raw.inquiryId`,
+`signal.supersededBy`, shared `signal.ref`) and takes no identity at all, so it cannot decide
+access even by accident. It is not a relationship store and must not become one.
+
+**PR #88 — crackdown R2 and two adversarial gates.** What it corrected, and where the owner is:
+
+| Correction | Canonical owner |
+|---|---|
+| Four metric-record builders converged to one; name uniqueness; derived ids stay stable | `ai/metric-record.js` |
+| Invite, Add Member and CSV import all ask `edit_members`; tree position confers nothing | `requirePermission` |
+| An invite may only activate an account at or below its own role (closed an admin→superadmin escalation) | `join-invite` activation branch |
+| A CSV import is atomic at the tree boundary: a failed commit un-mints every account it made | `bulk-import` + `_commitTreeMutation` |
+| Imported group nodes go through the one node writer | `_addTreeNode` |
+| The question gate covers model-supplied Focus text, not only the fallback path | `ai/composer-actions.js` |
+| An invite address is DECLARED, so a typo is a refusal rather than an open join link | `POST /api/auth/invite` |
+
+**PR #89 (open) — live recovery.** The founder used the deployed product on a phone and found
+thirty-one things. **Twenty-one dispositioned** across six rounds; see
+`docs/reviews/CLAUDE_PILOT_LIVE_RECOVERY_R1.md` for the full table including what is NOT done, which
+is the half of it worth reading. Rounds 5 and 6 answer an independent gate rather than the founder
+directly, and the pattern they keep finding is one thing: a capability that exists in the source,
+passes every hermetic test, and produces nothing on a real screen.
+
+`docs/reviews/FOUNDER_PHONE_RESTART_SCRIPT.md` is the other half — everything no container can
+check, as steps with expected results: reading aloud on an actual iPhone, two-member Forums across
+two devices, an attachment retried on a dropped connection, onboarding across a restart, and Neon.
+Nothing in this repository has tested Neon, iOS Safari, or a deployed build.
+
+| Correction | Canonical owner |
+|---|---|
+| One bounded reader; a failed read can never be mistaken for an empty record | `MemberApp._read` |
+| One failure state with exactly one retry control | `MemberApp._readFailedHTML` |
+| A render ticket per container, so a slow earlier request cannot repaint the page you are on | `_claimRender` / `_stillCurrent` |
+| One terminal signed-out state that disables every composer | `MemberApp._sessionEnded` |
+| Settings reports what the server says is on, not a tier | `_renderRealCapabilities` |
+| The group half of the A→B loop gets a door at both ends | `openGroupNode` / `_renderGroupNoticings` |
+| "Does this object have a Forum" is asked in one place and counts current readable members | `_forumAudience` |
+| Forum informs private conversation for the same object only, and never the reverse without a confirmation | `_forumContext` / `share_to_forum` |
+| A line is a claim about change over time, so one distinct timestamp may not be drawn as one | `ai/chart.js` `timeShape` |
+| What five channels may say is declared once and verified against | `ai/manifest.js` |
+| An attached file's class is earned, not asserted: permission, provenance, confirmation | `ai/material.js` `classifyRequest` |
+| Settings is three tiers with three audiences, and a tier you may not use is absent rather than greyed out | `SETTINGS_TAB_ACCESS` / `_maySeeSettingsTab` |
+| External reading is scoped to the object it was asked from, and a focus with no concept refuses | reading route + `_objectBucket` |
+
+**PR #90 (open) — rounds 7 and 8, and the A→B spine.** Recovery continued on
+`codex/pilot-recovery-gate-r7`, then convergence on `gpt/ab-decision-spine-r1`. Full tables in
+`docs/reviews/CLAUDE_PILOT_RECOVERY_R8.md` and `docs/reviews/AB_SPINE_TRUTH_MAP_R1.md`. **PR #90
+carries PR #89's wider delta and must not be merged independently.**
+
+| Correction | Canonical owner |
+|---|---|
+| One authorisation owner; a token is not a person and a session is not a standing permission | `_authoriseRequest` |
+| The organisation you can change is the one you are signed in to | `PUT /api/org/profile` |
+| The host is not a tenant — instance-wide operations need the platform key | `requirePlatformOperator` |
+| Being in a node is not running it; one owner for org-tree authority, downward only | `_canManageNode` / `_mayChangeAnchor` |
+| A pack declares its own ontology; the kernel reads it and holds no industry noun | `ai/org-state.js` PACKS + `ai/org-context.js` |
+| A Focus is a commitment, not a belief, and is never rendered with a confidence band | `present.focusCard` |
+| Who can see each of your own objects — one store, one resolver, one reader | `_resolvePersonalAudience` + `objectAudiences` |
+| A long conversation is compressed, not truncated: a message something points at is not spare capacity | `_compactConversation` |
+| Which language to answer in is decided deterministically; the words are the model's | `ai/language.js` |
+| A substitute says it is one, through the vocabulary the product already had | `COMPOSER_DEGRADED` / `_degraded` |
+| **One inquiry has two names — a High or Low is a projection of it — so an edge resolves by identity** | `ai/cross-evidence.js` `edges()` |
+| **The A→B loop reads from whichever end you stand at, because a coach stands on the question** | `/api/objects/:kind/:id/related` |
+
+**What the A→B truth map established, so it is not rediscovered:** the loop already runs —
+contribution → Inquiry → Focus carrying `origin.inquiryId` → outcome → `learn`. There is no
+`ai/curiosity.js`; that capability is `ai/inquiry.js` and must not be duplicated.
+`outcome-intelligence.bestForPattern` ranks but has **no production caller**; the live surface is
+`earlySignalBrief`, which says "review before acting" and computes `safe` through the language
+guard. `prediction-boundary-smoke` was not retired — `8406d08` absorbed it into
+`language-guard-smoke` and strengthened it with `PERSON_FUTURE`.
+
+**Round 4 — the independent gate's eight items, and three DEAD CAPABILITIES.** The gate accepted
+eight of round 3's claims and returned seven items, with an objection worth keeping: *a verifier
+nothing calls on the way to a screen is a verifier that will be correct about an answer nobody was
+shown.* Acting on it found three things that were reported PASS and were not happening at all:
+
+| Dead capability | Why nothing failed |
+|---|---|
+| `_forumContext` returned null on **every** call | it parsed `_turnAbout(about)` and read `a.kind`; `_turnAbout` returns `{headline, body}` |
+| `_crossEvidenceContext` returned null on **every** call | the same line, in the function beside it |
+| the card's Forum indicator could never be true | it read fields the objects projection strips |
+
+Also in round 4: `manifest.approve()` as a **runtime** gate over every channel an answer leaves by,
+with the spoken rendering composed on the server (it had been assembled in the browser); the member
+half of the A→B loop driven from the personal composer rather than from a seeded candidate, which
+found that a candidate's label was the raw canonical key (`football.press_shape`) because the intake
+contract never asks for one; a third file-accept list on the composer's paperclip that offered four
+formats guaranteed to fail and omitted the two the capability exists for; `durableStore` reporting
+TRUE in memory-only mode; and the universality claim in AGENTS.md law 9 finally checked — four
+domains, byte-identical evidence, byte-identical epistemic answer.
+
+**Three rounds, and the class did not change.** Round 3's worst finding was not a wrong rule but a
+correct one drawn into `display:none`: `#me-group` carried a `hidden` attribute nothing ever
+removed, so a member's only way to offer a noticing did not exist, so no group inquiry could open
+from the product at all. Sibling shapes: `_objectBucket` reading `state.focuses`, which the
+projection has never returned; `forumAvailable` computed three different ways in three files;
+`text.trim()` used to ask whether anything readable came out of a file, which a NUL passes. Each was
+green in the suite and broken in the hand. **Six false-green tests were found this pass, all
+written by the agent that found them**, and each is named in the report rather than quietly
+re-spelled.
+
+**Removed, because it claimed what did not exist:** the Platform Grade tier system — a client-side
+constant listing nine "Active Features" including *Complete security*, selected by a switcher that
+toasted success for a change that never left the browser. The server has no notion of a grade. The
+same removal took a letter-grade badge off a person's profile (product law 1).
+
+**A reachability hole, and what it hid.** `reachability-smoke` accepted a route as reached if its
+last path segment appeared anywhere in the client. `/api/group` is a prefix of `/api/groups`, so
+every `/api/group/:nodeId/…` route passed on a stranger's words. Tightened, it exposed 26 routes —
+including **`/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry`, which had no client caller
+at all.** Group-level Focus and Inquiry creation was server-side only, so the node half of the A→B
+loop was reachable by nothing a person could tap: fully built, fully governed, fully tested, and a
+capability nobody had. **PR #89 closed those three** (the two above and `/focus/:id/outcome`) by
+giving the team card somewhere to go, and the list has a shrink check now — it previously had none,
+so a route on it could quietly gain a caller and stay billed as debt. That set is dated and counted;
+it is **not** a parking space.
+
+**Suites added in these passes:** `metric-lifecycle-smoke`, `import-conflict-smoke`,
+`onboard-invite-smoke` (extended), `pilot-crackdown-smoke` (extended). Browser-only, outside
+`npm test` because they need a binary: `live-recovery-repro`, `onboard-browser-check`,
+`stack-browser-check`, `priority-surface-browser-check`, `library-browser-check`,
+`group-loop-browser-check`, **`pilot-coach-browser-check`**.
+
+`pilot-coach-browser-check` is the September 26 Alma walkthrough, driven at 390px with models
+off. It exists because of one rule: *the previous outcome bug survived because tests called the
+route correctly while the UI sent the wrong value.* Every consequential action in it is performed
+by clicking the rendered control, and each is checked at four places — what the screen offered,
+what the browser emitted, what the canonical store holds, and what the screen says next. It also
+asserts the negative half of the ten-second test: no canonical key, no object id, no architecture
+vocabulary, no raw band, no causal claim. Restoring the outcome-vocabulary bug, the canonical-key
+leak or the hypothesis-standing rule each turns it red.
+
+**Still not verified by anybody:** live Neon, restart durability, deployed build identity, and real
+iPhone/Safari behaviour. Every report in `docs/reviews/` that touches these says so; do not read a
+green suite as any of them.
+
 ## 9 · The person decides, the machine holds the gates
 
 What replaced the check-in is worth stating as a rule, because four features now share it and
@@ -415,4 +692,3 @@ assertions that passed because they were standing on nothing:
 The last one is not a defect and the others were mine. All five are now written where the next
 person will look for them, because a green suite that cannot go red is worse than no suite: it
 is a claim that something is protected when nothing is.
-

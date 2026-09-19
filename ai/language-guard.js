@@ -31,17 +31,39 @@ const PREDICTIVE = new RegExp([
 // personal outcomes rather than every possible future-tense action.
 const PERSON_FUTURE = /\b(?:[Hh]e|[Ss]he|[Tt]hey|(?:(?:[Tt]his|[Tt]he|[Tt]hat|[Yy]our|[Oo]ur|[Aa]n?)\s+)?(?:player|member|person|student|employee|athlete)|[A-Z][a-z]+)\s+(?:will|won't|will\s+not)\s+(?:quit|drop\s+out|fail|burn\s+out|leave|decline|recover|disengage|withdraw|struggle)\b/;
 
+/* ── A PROMISE THAT SOMETHING WILL WORK ───────────────────────────────────────────────────────
+   Found by attack, September 2026: "a captain-led debrief will fix this and is guaranteed to
+   improve communication" passed `describesOnly` cleanly. Every pattern above is about a claim
+   concerning a PERSON or a trajectory; none of them is about a claim concerning an ACTION. So
+   the one sentence a decision-support product must never write — this option will work — was the
+   one shape the guard had no opinion on.
+
+   It is the same lie as a prediction, aimed at an option instead of a person, and it is more
+   dangerous here because it is what a leader acts on. IntelliQ can say an action has recorded
+   outcome history and what that history was. It cannot say it will work, is guaranteed to, is
+   the answer, or will solve anything, because nothing in the record establishes that and the
+   whole architecture exists to keep the difference visible.
+
+   "Fix" and "solve" earn their place by being outcome verbs rather than ordinary future tense:
+   "the report will open" stays allowed, as the boundary above already intends. */
+const GUARANTEE = new RegExp([
+  'guarantee', 'guaranteed\\s+to', 'sure\\s+to', 'certain\\s+to', 'bound\\s+to\\s+work',
+  'will\\s+(?:fix|solve|resolve|work|help|prevent|stop|ensure|guarantee|eliminate|cure)',
+  "will\\s+(?:definitely|certainly|surely)", 'this\\s+works', 'proven\\s+to\\s+(?:work|fix|help)',
+  'the\\s+(?:answer|solution|fix)\\s+is', 'all\\s+you\\s+need\\s+to\\s+do',
+].join('|'), 'i');
+
 // Diagnosis — naming a clinical condition. IntelliQ never does this. These are STEMS
 // (diagnos → diagnose/diagnosis/diagnostic), so they don't take a trailing word boundary.
 const DIAGNOSTIC = /diagnos|clinically|depress(?:ion|ed)|anxiety\s+disorder|bipolar|\badhd\b|autis(?:m|tic)|ptsd|\bdisorder\b|syndrome|patholog/i;
 
-/* Does this text predict the future or name a condition? */
+/* Does this text predict the future, promise that an action will work, or name a condition? */
 function predictsOrDiagnoses(text) {
   const t = String(text == null ? '' : text);
-  return PREDICTIVE.test(t) || PERSON_FUTURE.test(t) || DIAGNOSTIC.test(t);
+  return PREDICTIVE.test(t) || PERSON_FUTURE.test(t) || GUARANTEE.test(t) || DIAGNOSTIC.test(t);
 }
 
 /* Convenience: true when the text is SAFE to show (describes, doesn't predict/diagnose). */
 function describesOnly(text) { return !predictsOrDiagnoses(text); }
 
-module.exports = { predictsOrDiagnoses, describesOnly, PREDICTIVE, PERSON_FUTURE, DIAGNOSTIC };
+module.exports = { predictsOrDiagnoses, describesOnly, PREDICTIVE, PERSON_FUTURE, GUARANTEE, DIAGNOSTIC };

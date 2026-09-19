@@ -2869,7 +2869,17 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
   .iq-mic.is-listening{animation:iq-mic-pulse 1.6s ease-in-out infinite}
 }
 @keyframes iq-mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.30)}50%{box-shadow:0 0 0 6px rgba(185,28,28,0)}}
+/* ── AN EMPTY LINE RESERVING SPACE FOR TEXT THAT IS NOT THERE ────────────────────────────────
+   `min-height:1rem` plus `margin-top:.35rem` held roughly 20px under every composer in the app,
+   permanently, for a status line that is EMPTY at rest and only fills while the microphone is
+   live or has something to report. Measured at 390px: the composer's own input was 61px and the
+   furniture around it was 93px, so most of what a person saw was chrome.
+
+   `:empty` collapses it to nothing and the rules below restore it the moment it has content, so
+   the live dot and the error state are unaffected. Nothing is hidden: there is nothing to hide
+   until there is something to say. */
 .iq-voice-state{font-size:var(--fs);color:var(--text-secondary);margin-top:.35rem;min-height:1rem;line-height:1.4}
+.iq-voice-state:empty{min-height:0;margin-top:0;line-height:0}
 /* The state line while listening: brighter, and with a live dot in front of it. */
 .iq-voice-state.is-live{color:var(--text-primary);display:flex;align-items:center;gap:.45rem;font-weight:600}
 .iq-voice-state.is-live::before{content:'';width:.55rem;height:.55rem;border-radius:50%;
@@ -2919,8 +2929,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-make:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 .iq-more-objects{display:block;width:100%;margin:.6rem 0 0;padding:.7rem;min-height:44px;border-radius:12px;
   border:1px dashed var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-md)}
-.iq-inq-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;
-  color:var(--text-secondary);border:1px solid var(--border);border-radius:999px;padding:.1rem .5rem}
+/* The indicator that this thread has a room, as a glyph rather than the word. Text-shaped rules
+   (uppercase, letter-spacing, a pill border) were describing a label that is no longer there. */
+.iq-inq-forum{margin-left:auto;display:inline-flex;align-items:center;color:var(--text-secondary)}
 
 /* ── HOME IS ONE QUESTION ────────────────────────────────────────────────────
    Founder decision, September 2026. Greeting, the single highest-priority thing IntelliQ wants
@@ -3012,6 +3023,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   padding:.22rem .6rem;border-radius:999px;color:var(--text-muted);
   border:1px solid color-mix(in srgb, currentColor 22%, transparent);opacity:.85}
 .iq-inq-hyp{font-size:var(--fs-lg);line-height:1.58;margin:0 0 .55rem}
+/* A SUGGESTION READS QUIETER THAN A FINDING, and what it rests on is on the next line rather
+   than in a footnote — an unsupported claim and the fact that it is unsupported have to be read
+   in the same glance or the second one does not get read at all. */
+.iq-inq-maybe{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:0 0 .55rem;
+  overflow-wrap:anywhere}
+.iq-inq-maybe-w{display:block;font-size:var(--fs-sm);color:var(--text-muted);margin:.15rem 0 0}
 .iq-inq-why{font-size:var(--fs);color:var(--text-muted);line-height:1.5}
 /* The open question is separated by space and a hairline — the only rule on the card, so it
    lands as the turn in the thought rather than as a divider between two fields. */
@@ -3028,11 +3045,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-back{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;padding:0;
   border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md)}
 .iqt-back:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-.iqt-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;
-  min-height:36px;padding:.3rem .75rem;border-radius:999px;cursor:pointer;
-  color:var(--accent);background:transparent;
-  border:1px solid color-mix(in srgb, var(--accent) 45%, transparent)}
+/* An icon control, not a word: 44px so it is reachable with a thumb, and visibly pressed. */
+.iqt-forum{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;
+  min-width:44px;min-height:44px;padding:0;border:0;background:none;cursor:pointer;
+  color:var(--text-secondary);border-radius:10px}
 .iqt-forum:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-forum:hover,.iqt-forum[aria-pressed="true"]{color:var(--text-primary);background:var(--surface-2)}
 .iqf-you{font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)}
 .iq-msg-gone{opacity:.45;font-style:italic}
 
@@ -3137,7 +3155,35 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-mat:empty{display:none}
 .iqt-mat-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
   color:var(--text-secondary);margin:.85rem 0 .45rem}
+/* THE JOURNEY'S LATER HALVES, ON THE QUESTION'S OWN SCREEN. A suggestion reads quieter than a
+   finding; what was tried wraps rather than scrolls at 390px; and the readiness line carries no
+   colour that ranks one answer above another, because "not enough evidence yet" is not a worse
+   answer than "worth trying". */
+.iqt-maybe{color:var(--text-secondary)}
+.iqt-ready{margin:.7rem 0 .2rem}
+.iqt-ready-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+.iqt-tried{margin:.8rem 0 0;padding:.7rem 0 0;border-top:1px solid var(--border)}
+.iqt-tried-h{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .4rem}
+.iqt-tried-r{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;margin:0 0 .35rem}
+.iqt-tried-t{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqt-tried-o{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-tried-n{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.35rem 0 0}
 .iqt-mat-empty,.iqt-mat-note,.iqt-mat-by{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;margin:.25rem 0}
+/* THE ORIGINAL FILE, AND THE TOMBSTONE WHERE IT WAS. The deleted state is deliberately as
+   visible as the live one: a deletion that renders as an absence is a deletion nobody can see. */
+.iqt-mat-src{margin:.5rem 0 .75rem;padding:.6rem .7rem;border:1px solid var(--border);
+  border-radius:12px;background:var(--bg-card);display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.iqt-mat-src-note{flex:1 1 100%;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45}
+.iqt-src-open,.iqt-src-del{background:var(--bg-hover);border:1px solid var(--border);
+  border-radius:10px;padding:.45rem .8rem;font-size:var(--fs-sm);color:var(--text-primary);cursor:pointer}
+.iqt-src-open:hover,.iqt-src-del:hover{background:var(--bg-card)}
+.iqt-src-del{color:var(--text-secondary)}
+.iqt-mat-src-gone{background:transparent;border-style:dashed}
+.iqt-src-tomb{flex:1 1 100%;font-size:var(--fs);color:var(--text-secondary)}
+/* A CONTROL ON A PHONE IS PRESSED WITH A THUMB. */
+@media (max-width:640px){.iqt-src-open,.iqt-src-del{min-height:44px}}
 .iqt-mat-row{margin:0 0 .4rem}
 .iqt-mat-open{display:block;width:100%;text-align:left;background:var(--bg-card);
   border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem;cursor:pointer}
@@ -3269,14 +3315,17 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-msg-user{background:var(--accent);color:#fff;align-self:flex-end;max-width:85%}
 .iqt-turns{align-items:stretch}
 
-/* WHO THIS IS FOR — chosen before speaking, visible while typing. Private is the resting state
-   and looks like it; shared is deliberately the one that draws the eye, because widening an
-   audience is the act worth noticing. */
+/* WHAT THIS ROW SAYS NOW. `.iq-vis` was a Private/Public pill here, styled so that "shared" drew
+   the eye — the right styling for the wrong control. It set a flag that reached nothing, and a
+   mode is the wrong shape for this decision anyway: talking to IntelliQ is private conversation,
+   and contributing to other people is a separate deliberate act with its own audience, its own
+   words and its own confirmation.
+
+   What replaces it is a statement rather than a control, because there is nothing here to choose.
+   Deliberately quiet — it is a standing fact about this surface, not a thing to act on, and the
+   link beside it is where somebody goes to read the whole rule. */
 .iq-composer-hint{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
-.iq-vis{min-height:36px;padding:.22rem .7rem;border-radius:999px;cursor:pointer;font-size:var(--fs-sm);
-  letter-spacing:.02em;color:var(--text-secondary);background:transparent;border:1px solid var(--border)}
-.iq-vis.is-shared{color:var(--accent);border-color:var(--accent)}
-.iq-vis:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iq-hint-note{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:.02em}
 
 .iq-make-row{display:flex;gap:.45rem;flex-wrap:wrap;margin:.7rem 0 0}
 .iq-make-chip{min-height:40px;padding:.4rem .85rem;border-radius:999px;cursor:pointer;font-size:var(--fs);
@@ -3429,3 +3478,171 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
 .shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
 .shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+/* THE THING YOU CAME TO READ GETS THE ROW. Measured on a 390px screen: the row is 369px wide and
+   the item's own words were given 153px of it, because a folder select (86px) and Remove (60px)
+   sat beside them and never moved. Nothing was cut off — it wrapped, which is worse to read and
+   easier to miss: a one-sentence label became a four-line ribbon 126px wide, in the one place
+   whose entire job is recognising something again at a glance. 126px and four lines, against
+   321px and two once the controls step aside.
+
+   Both controls are filing machinery: you choose a folder once and remove something once, while
+   you read the label every single time you open the page. So they drop to a second line and the
+   words take the full width. Nothing is hidden and nothing is removed — this is only an argument
+   about which of them gets the space, and the answer is the one you came for.
+
+   Wrapping rather than a separate mobile layout: one row, one rule, and the wide screen keeps the
+   side-by-side arrangement it has room for. */
+@media (max-width:640px){
+  .shelf-row{flex-wrap:wrap}
+  .shelf-open{flex:1 1 100%}
+  /* Secondary, and pushed away from the text edge so the eye reaches the label first. */
+  .shelf-move{margin-left:auto}
+  /* align-self:stretch borrowed its height from the tall card next to it; on its own line it has
+     to state the tap target itself. */
+  .shelf-x{min-height:44px}
+}
+
+/* The stale-shell notice: one line, above the safe area, never covering the composer. */
+.iq-stale-build{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-wrap:wrap;
+  align-items:center;justify-content:center;gap:.6rem;padding:.6rem 1rem;
+  padding-bottom:calc(.6rem + env(safe-area-inset-bottom,0px));
+  background:var(--surface-2);border-top:1px solid var(--border);
+  font-size:var(--fs);color:var(--text-primary)}
+
+/* ── CONNECTIONS, AND THE A → B LOOP ────────────────────────────────────────────────────────
+   The relationships the records already carried, read back onto the screen. Drawn quietly and
+   below the belief rather than beside it: a connection is context for what you are reading, and
+   putting it level with the claim would let "related to" start looking like "supported by".
+
+   The caveat under the loop is not small print. It is the sentence that stops a count of what
+   was recorded afterwards being read as a verdict on cause, so it sits in the flow at the same
+   size as the rest of the section rather than shrinking away under it. */
+.iqt-related{margin:.85rem 0 0}
+.iqt-related:empty{display:none}
+.iqt-rel{padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqt-rel-head,.iqt-loop-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .45rem}
+.iqt-rel-list{display:flex;flex-direction:column;gap:.3rem}
+/* A whole row is the target. 44px is the floor the typography guard enforces, and a row of two
+   spans is exactly the shape that ends up 28px tall if nobody says otherwise. */
+.iqt-rel-row{display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;width:100%;
+  min-height:44px;padding:.4rem .5rem;border:0;border-radius:10px;background:none;cursor:pointer;
+  text-align:left;color:var(--text-primary);font:inherit}
+.iqt-rel-row:hover{background:var(--surface-2)}
+.iqt-rel-row:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-rel-type{font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-rel-label{font-size:var(--fs-md);line-height:1.4;overflow-wrap:anywhere}
+.iqt-rel-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.5rem 0 0}
+.iqt-loop{margin:.7rem 0 0;padding-top:.7rem;border-top:1px solid var(--border)}
+.iqt-loop-step{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;padding:.2rem 0}
+.iqt-loop-k{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-loop-v{flex:1 1 12ch;font-size:var(--fs-md);color:var(--text-primary);overflow-wrap:anywhere}
+.iqt-loop-caveat,.iqt-loop-open{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.5rem 0 0}
+
+/* ── A GROUP, OPENED ────────────────────────────────────────────────────────────────────────
+   The same thread shape an object gets, because a group IS a subject here and giving it a
+   different-looking screen would teach that it is a different kind of thing. */
+.tstate-open{cursor:pointer}
+.tstate-open:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqg-count{font-size:var(--fs-sm);color:var(--text-secondary);white-space:nowrap}
+.iqg-state{margin:.5rem 0 1rem}
+.iqg-line{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-label{flex:0 0 auto;min-width:5rem;font-size:var(--fs-sm);letter-spacing:.04em;
+  text-transform:uppercase;color:var(--text-secondary)}
+.iqg-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-sub{display:block;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqg-withheld,.iqg-note,.iqg-empty{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.55rem 0 0}
+.iqg-says{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);margin:.7rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-focus{margin:1rem 0;padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqg-focus-head,.iqg-inq-head,.iqg-hist-head{font-size:var(--fs-sm);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-focus-text{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-focus-ask{font-size:var(--fs-md);color:var(--text-primary);margin:.7rem 0 .4rem}
+/* Wraps rather than scrolls: three outcome words at 390px do not fit on one line, and a control
+   a person has to drag sideways to find is a control that does not get used. */
+.iqg-outcome-btns,.iqg-start-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iqg-inq{margin:1rem 0}
+.iqg-inq-row{padding:.7rem 0;border-bottom:1px solid var(--border)}
+.iqg-inq-topic{font-size:var(--fs-lg);line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere}
+/* The question is the door into its own screen, so it is a real control: full width, left
+   aligned like the text it replaced, and 44px of thumb at 390px. */
+.iqg-inq-open{display:block;width:100%;text-align:left;background:none;border:0;padding:.4rem 0;
+  min-height:44px;font:inherit;font-size:var(--fs-lg);cursor:pointer}
+.iqg-inq-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.iqg-inq-claim{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:.2rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-inq-meta,.iqg-inq-open,.iqg-inq-help{font-size:var(--fs-sm);color:var(--text-secondary);margin:.3rem 0 .45rem}
+/* THE SEVEN THINGS ARE SEVEN THINGS. What we're seeing, what might explain it, what we still
+   don't know and what would help us learn are drawn as separate blocks with their own headings
+   because running them together is how a candidate explanation turns into a finding by layout
+   alone. The rule is typographic here and epistemic everywhere else, and it is the same rule. */
+.iqg-inq-sec{margin:.55rem 0 0}
+.iqg-inq-sec-h{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .3rem}
+.iqg-inq-exp{margin:0 0 .45rem}
+.iqg-inq-exp-t{display:block;font-size:var(--fs-md);line-height:1.5;color:var(--text-primary);
+  overflow-wrap:anywhere}
+/* "Nothing supports this yet" sits WITH the explanation, not in a footnote — an unsupported
+   claim and the fact that it is unsupported have to be read in the same glance or the second
+   one does not get read at all. */
+.iqg-inq-exp-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+.iqg-inq-none{font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-inq-out{font-size:var(--fs-sm);color:var(--text-secondary);margin:.45rem 0 0;
+  overflow-wrap:anywhere}
+/* Wraps at phone width: a focus sentence and its outcome word do not share a line at 390px,
+   and a row that scrolls sideways is a row nobody reads the right-hand end of. */
+.iqg-inq-tried{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;margin:0 0 .35rem}
+.iqg-inq-tried-t{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-inq-tried-o{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+/* The readiness line carries no colour that ranks it. "Not enough evidence yet" is not a worse
+   answer than "worth trying", and styling it as a warning would make it one. */
+.iqg-inq-ready{margin:.6rem 0 .5rem;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary)}
+.iqg-inq-ready-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+.iqg-exp-panel,.iqg-start{margin:.6rem 0 0}
+.iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
+.iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}
+.iqg-hist{margin:1rem 0}
+.iqg-hist-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-hist-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-hist-out{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+
+/* L-CH6 — ONE MOMENT IS NOT A MOVEMENT. A `state` series is drawn as points and no line, so a
+   larger dot is what carries it: at 3px an unconnected point reads as a speck of dust, and the
+   whole picture reads as a chart that failed to render rather than as a record that is young. */
+.iqt-dot-state{r:5}
+.iqt-chart-axis-state{justify-content:flex-start;gap:.6rem}
+
+/* External reading, and how it stands to what it sits under. Set apart from the answer itself so
+   the boundary between "what the outside world says" and "what IntelliQ holds" is visible rather
+   than merely stated. */
+.iqt-reading-rel{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;
+  margin:.35rem 0 .5rem;padding-left:.6rem;border-left:2px solid var(--border)}
+.iqt-reading-none{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;padding:.5rem 0}
+
+/* WHAT KIND OF THING THIS IS. Set apart from the attachment row, because it is a question about
+   the material rather than a property of it, and a person answers it once. */
+.iqt-mat-class{margin:.6rem 0 0;padding:.7rem;border:1px solid var(--border);border-radius:12px}
+.iqt-mat-class-now{font-size:var(--fs-md);color:var(--text-primary)}
+.iqt-mat-class-means,.iqt-mat-class-why{font-size:var(--fs-sm);color:var(--text-secondary);
+  line-height:1.5;margin:.3rem 0 0}
+.iqt-mat-class-ask{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:.6rem 0 .35rem}
+.iqt-mat-class-btns{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.45rem}
+
+/* WHERE A CHART WOULD HAVE BEEN. Chart.js is a CDN dependency; on a connection that could not
+   fetch it the drawing cannot happen, and an empty box would teach somebody the data is missing
+   rather than that the library is. This says which. */
+.iq-chart-off{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;
+  padding:.7rem .8rem;border:1px dashed var(--border);border-radius:12px;margin:.4rem 0}
+
+/* WHAT CONNECTING SOMETHING DOES NOT DO. Shown on a confirmation card when the destination has a
+   wider audience than the file: the original stays where it is, and sharing it is a separate act. */
+.iq-eff-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.3rem 0 0}

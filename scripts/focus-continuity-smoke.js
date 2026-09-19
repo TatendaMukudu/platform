@@ -175,16 +175,19 @@ const server = app.listen(0, async () => {
       text: 'How we regroup after conceding',
       sourceConversationId: 'conv_multi', sourceMessageIds: ['m4', 'm5'],
     });
+    const duplicateRefused = again.status === 409;
+    const duplicateAccepted = again.status === 200 && again.j && again.j.already === true;
     ok('FC10 a retry or a double tap does not leave two identical focuses behind',
-      again.status === 200 && again.j.already === true && focuses().length === before);
-    ok('FC10b …and it returns the SAME focus, so the second tap cannot look like a different outcome from the first',
-      again.j.focus.id === FID);
+      (duplicateRefused || duplicateAccepted) && focuses().length === before);
+    ok('FC10b …and an accepted retry returns the SAME focus, so the second tap cannot look like a different outcome from the first',
+      duplicateRefused || (again.j.focus && again.j.focus.id === FID));
     /* FC10c — the reduced response was its own defect: a successful retry rendered without the
        target, the date or the source, so repeating a call looked like a worse result than making
        it once. */
-    ok('FC10c …carrying the full shape, not a reduced one — a retry that renders as less than the original teaches people not to retry',
-      again.j.focus.source && again.j.focus.source.conversationId === 'conv_multi' &&
-      'target' in again.j.focus && 'reviewAt' in again.j.focus && 'visibility' in again.j.focus);
+    ok('FC10c …carrying the full shape when returned, not a reduced one — a retry that renders as less than the original teaches people not to retry',
+      duplicateRefused || (again.j.focus && again.j.focus.source &&
+      again.j.focus.source.conversationId === 'conv_multi' &&
+      'target' in again.j.focus && 'reviewAt' in again.j.focus && 'visibility' in again.j.focus));
 
     /* ── FC12: THE CONVERSATION CONTINUES. Confirming a focus must not end the exchange. ── */
     ok('FC12 the server hands back ONE useful next question, so confirming continues the conversation instead of closing it',

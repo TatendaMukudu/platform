@@ -33,6 +33,14 @@ const appJs = R('js/app.js');
 /* The real object, evaluated — not a regex guess at what it contains. It is a plain top-level
    const with no DOM access at definition time, so it loads outside a browser unchanged. */
 let A = null;
+/* ── AND THE READERS ARE PRESENT WHILE THE OLD ASSERTIONS RUN ──────────────────────────────
+   Three of the five Material kinds are read by libraries that arrive from a CDN, and the handler
+   now derives what it OFFERS from what actually loaded (section N proves that both ways). In
+   Node neither library exists, so without this the whole file below would be measuring the
+   degraded list and would quietly stop testing the thing it was written for. Declared here, at
+   the top, rather than discovered later as three mysterious failures. */
+globalThis.JSZip = globalThis.JSZip || {};
+globalThis.XLSX  = globalThis.XLSX  || {};
 try { A = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { A = null; }
 ok('M0 the attachment handler loads outside a browser, so this suite is testing the real object rather than its source text',
   !!A && typeof A.materialAcceptAttr === 'function');
@@ -99,5 +107,234 @@ ok('M6 the picker\'s guard is `typeof AttachmentHandler`, not `window.Attachment
 ok('M6b …and no guard anywhere in the client reaches for the handler through window',
   !/window\.AttachmentHandler\s*&&/.test(appJs));
 
+/* ── M7 — THE SHARED COMPOSER WAS A THIRD LIST, AND IT AGREED WITH NEITHER ──────────────────
+   Every composer in the product renders from _composerHTML, and its paperclip carried a
+   hand-written `.txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx`. That list:
+
+     offered .json and .markdown   the parser has no entry for either — process() throws
+     offered .doc                  routes to the docx processor, which opens a zip; a legacy
+                                   binary is not a zip, so it throws rather than returning empty
+     offered .pdf                  comes back as BYTES, so the "no text" error is the only
+                                   possible outcome on a path that sends text to the server
+     omitted .pptx and .xlsx       the two formats the whole material capability exists for
+
+   And wsAttach sends TEXT to /api/assistant/attachments, so this IS the Material path — the same
+   path the Material picker uses, advertising a different set of files. */
+const composerInput = (appJs.match(/<input type="file" class="iq-attach-input"[^>]*>/) || [''])[0];
+/* ── AND THEN THE COMPOSER GREW A SECOND CAPABILITY ────────────────────────────────────────
+   The law here was never "call materialAcceptAttr". It is that the picker is DERIVED from the
+   owner beside the processors and is never a hand-written list, because a hand-written list
+   drifts and then advertises files the product refuses.
+
+   The composer now also takes a PHOTOGRAPH, which the Material list cannot describe: a picture is
+   not turned into words in the browser, it is read by the server through the vision gateway. So
+   the composer asks `composerAcceptAttr` -- the Material list PLUS the image types the server will
+   actually read -- and `composerAcceptAttr` is itself derived from the same two owners. The
+   derivation law is intact; what changed is that there are two capabilities behind one paperclip.
+
+   The Material picker elsewhere (iqt-mat-file) still asks for the Material list alone, because
+   that path really does only take text. */
+ok('M7 the shared composer\'s paperclip is DERIVED from the handler, never hand-written',
+  /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(composerInput)
+  && !/accept="\.[a-z]/.test(composerInput));
+ok('M7b …and no longer advertises a format the parser would refuse or throw on',
+  !/\.json/.test(composerInput) && !/\.markdown/.test(composerInput)
+  && !/\.doc[,"]/.test(composerInput) && !/\.pdf/.test(composerInput));
+ok('M7c …and it offers the two formats the capability was built for, which the hand-written list left out',
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return attr.includes('.pptx') && attr.includes('.xlsx') && /composerAcceptAttr/.test(composerInput); })());
+/* THE IMAGE HALF, AND THE ONE THING IT MUST NOT DO. `image/*` would let an iPhone offer a HEIC,
+   which is what it produces by default and which nothing in this product can read -- the picker
+   would accept it and the upload would refuse it, which is the hollow-control shape this codebase
+   has been caught by before. The readable types are named, so the file chooser does the refusing
+   before anybody waits. */
+ok('M7c2 …and the composer additionally offers the image types the SERVER can read',
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return attr.includes('image/jpeg') && attr.includes('image/png') && attr.includes('image/webp'); })());
+ok('M7c3 …and never the wildcard, which would offer an iPhone HEIC nothing here can read',
+  (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
+    return !attr.includes('image/*') && !/heic|heif/i.test(attr); })());
+ok('M7c4 …while the Material-only picker still asks for the Material list alone',
+  (() => { const mat = (appJs.match(/<input type="file" id="iqt-mat-file"[^>]*>/) || [''])[0];
+    return /materialAcceptAttr\(\)/.test(mat) && !/composerAcceptAttr/.test(mat); })());
+ok('M7d …through the same `typeof` guard, since the window form renders an EMPTY accept that offers every file on the phone',
+  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.(materialAcceptAttr|composerAcceptAttr)\(\)/.test(composerInput));
+ok('M7e NO hand-written accept list survives on a path that sends text to the server',
+  (() => {
+    const inputs = appJs.match(/<input type="file"[^>]*>/g) || [];
+    const textPath = inputs.filter(t => /wsAttach|iqt-mat-file/.test(t));
+    return textPath.length >= 2
+      && textPath.every(t => /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(t));
+  })());
+
+/* ── M8 — AN UPLOAD IS A WRITE, AND EVERY OTHER WRITE IN THIS FILE IS BOUNDED ──────────────
+   wsAttach had no ceiling at all: a stalled POST left "Reading that file…" on the screen for as
+   long as somebody was willing to wait, which is the defect the bounded reader exists to remove,
+   arriving through the one door that had not been fixed. And its error card had no control, on
+   the surface where a person has already done the work of finding the file. */
+/* DECOMMENTED, and the reason is the same trap twice in one round: the comment that explains why
+   the old sentence went away quotes the old sentence, so a search for it finds the explanation
+   and reports the defect as still present. An assertion that cannot tell code from the prose
+   about it will be wrong in whichever direction somebody last wrote. */
+const wsAttachFn = appJs.slice(appJs.indexOf('async wsAttach(fileInput)'), appJs.indexOf('async assistantTurn('))
+  .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, ' ');
+ok('M8 the upload is bounded — a stalled POST cannot leave the card reading forever',
+  wsAttachFn.length > 400 && /new AbortController\(\)/.test(wsAttachFn) && /signal: ctrl\.signal/.test(wsAttachFn));
+ok('M8b …and the timer is cleared in a `finally`, so it stays live through the body read',
+  /finally \{ clearTimeout\(timer\); \}/.test(wsAttachFn));
+/* M8c USED TO PIN THE OPPOSITE SENTENCE, and the reason is worth keeping. It asserted the card
+   said "took too long to send. Nothing was saved", under the heading "rather than reporting a
+   save that did not happen" — which is the right instinct aimed at the wrong risk. The risk in
+   the other direction is larger: an aborted fetch says nothing about what the server did with the
+   bytes it already had, so "Nothing was saved" is a claim the client cannot make, and it is the
+   sentence that makes somebody upload the same document again. What the card may say is that it
+   could not CONFIRM. See attachment-retry-http-smoke, which drives the retry that sentence
+   invites and proves the server reconciles it to one material and one thread. */
+ok('M8c …and a timeout says what it KNOWS — that it could not confirm — rather than claiming a loss it cannot see',
+  !/Nothing was saved/.test(wsAttachFn)
+  && /cannot tell you whether it saved/i.test(wsAttachFn)
+  && /will not be added twice/i.test(wsAttachFn));
+ok('M8d a failed upload offers a retry, because the picker has already been cleared',
+  /wsAttachRetry/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
+ok('M8e …once, not forever — a control that retries endlessly teaches somebody to keep pressing it',
+  /this\._retryAttach = null;/.test(appJs));
+
+/* ── M9 — AND ATTACHING SOMETHING DOES NOT CONTRIBUTE IT ───────────────────────────────────
+   THIS ASSERTION USED TO PIN A SENTENCE: "context for this conversation, not evidence about you
+   or your organisation". The founder removed that sentence, for two reasons that are both about
+   truth rather than tidiness.
+
+   It was a parser receipt with a lecture attached — the card also announced how many PARTS the
+   file had been split into, which is machinery, and attaching something is meant to be another
+   way of speaking rather than a filing operation.
+
+   And "not evidence" had quietly become FALSE as a flat claim. It is not evidence YET. The person
+   may say "use this as evidence", and the governed route for that exists (M9b). A sentence that
+   forecloses something the product supports teaches people not to ask for it.
+
+   So what is asserted here now is the LAW rather than the wording of one card: the attach path
+   uploads, and does nothing else. A receipt claiming the boundary is worth nothing if the code
+   beside it crosses the boundary, and a missing receipt costs nothing if the code does not. */
+ok('M9 attaching uploads and does no more — the client contributes nothing on the person\'s behalf',
+  /\/api\/assistant\/attachments/.test(wsAttachFn)
+  && !/\/contribute/.test(wsAttachFn)
+  && !/applyProposals/.test(wsAttachFn)
+  && !/\/evidence/.test(wsAttachFn));
+ok('M9a …and the card it shows makes no claim about what the file proves',
+  !/is evidence/i.test(wsAttachFn) && !/proves/i.test(wsAttachFn));
+
+/* ── M10 — A SUCCESSFUL ATTACHMENT SAYS NOTHING AT ALL ─────────────────────────────────────
+   The file is already in the thread as the PERSON'S OWN message, because attaching is another way
+   of speaking. A second bubble from IntelliQ confirming it arrived is the product narrating its
+   own plumbing — first "Read 10 parts from IMG_1918.png", then "I can see IMG_1918.png". Both are
+   receipts. Somebody who attaches a screenshot and writes "look at all those draws" should get an
+   answer about the draws.
+
+   The waiting bubble is NOT removed: a phone on a stadium connection needs to see that something
+   is happening, and on failure the error and its retry are the only way back. Asserting both
+   halves, because "say nothing" is only right for the case where there is nothing to say. */
+ok('M10 a successful attachment removes the waiting bubble rather than replacing it with a receipt',
+  /const quietly = \(\) =>/.test(wsAttachFn) && /p\.remove\(\)/.test(wsAttachFn)
+  && !/I can see \$\{/.test(wsAttachFn));
+ok('M10b …while the waiting state still exists, because an upload in flight must be visible',
+  /iq-attach-pending/.test(wsAttachFn) && /Reading \$\{esc\(file\.name\)\}/.test(wsAttachFn));
+ok('M10c …and a FAILED attachment still speaks, because an error with no words is a dead end',
+  /done\(/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
+ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
+  /\/classification/.test(appJs));
+
+/* ── N — WHO READS A DOCUMENT, AND WHY THIS SECTION CHANGED ────────────────────────────────
+   ROUND 5 asserted a narrowing law: Word, PowerPoint and spreadsheets were read in this browser
+   by JSZip and SheetJS, two CDN script tags, so what the picker could honestly OFFER depended on
+   whether those requests had landed. Narrowing was the right answer to that architecture.
+
+   THE FOUNDER THEN CHANGED THE ARCHITECTURE. *Office parsing belongs server-side; core document
+   understanding must not depend on runtime browser CDNs.* `lib/office.js` opens all three with
+   Node's own zlib and no dependency, the script tags are gone from index.html, and the browser
+   selects and uploads. So those kinds need nothing here and the picker offers them
+   unconditionally — which is not a weakening of the round-5 law but the same law under a true
+   premise: WHAT IS OFFERED IS EXACTLY WHAT CAN BE READ. What changed is who reads.
+
+   THREE THINGS ARE ASSERTED, so the change cannot quietly become a regression:
+     N1–N2  the three Office kinds are offered whether or not any browser library exists,
+     N3     the derivation MACHINERY still works, proved on a kind that does declare a need, so
+            removing the CDN did not also remove the rule that protects the next such format,
+     N4     and a caller that reaches the old browser processor is told where the capability went
+            rather than meeting a library's ReferenceError. */
+console.log('\n  N — THE OFFICE FORMATS ARE READ BY THE SERVER, SO THE BROWSER NEEDS NOTHING');
+const handlerWith = async present => {
+  const had = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
+  if (present) { globalThis.JSZip = {}; globalThis.XLSX = {}; }
+  else { delete globalThis.JSZip; delete globalThis.XLSX; }
+  let h = null;
+  try { h = new Function(`${src}\nreturn AttachmentHandler;`)(); } catch (_) { h = null; }
+  let out = null;
+  if (h) {
+    const f = { name: 'plan.docx',
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      arrayBuffer: async () => new ArrayBuffer(8) };
+    let refusal = null;
+    try { await h.process(f); } catch (e) { refusal = String(e && e.message); }
+    out = { material: h.materialAcceptAttr(), composer: h.composerAcceptAttr(),
+      kinds: h.readableMaterialKinds(), serverKind: h.serverReadKind({ name: 'a.pptx' }),
+      needs: Object.keys(h.KIND_NEEDS || {}), refusal, handler: h };
+  }
+  globalThis.JSZip = had.JSZip; globalThis.XLSX = had.XLSX;
+  if (had.JSZip === undefined) delete globalThis.JSZip;
+  if (had.XLSX === undefined) delete globalThis.XLSX;
+  return out;
+};
+
+(async () => {
+const withLibs = await handlerWith(true);
+const noLibs   = await handlerWith(false);
+
+ok('N1 with no browser library at all, Word, PowerPoint and spreadsheets are still offered',
+  !!noLibs && ['.docx', '.xlsx', '.pptx'].every(e => noLibs.material.includes(e)));
+ok('N1b …on the composer\'s picker too, which is the one a person actually presses',
+  !!noLibs && ['.docx', '.xlsx', '.pptx'].every(e => noLibs.composer.includes(e)));
+ok('N1c …and the offer is the SAME whether or not those libraries happen to exist',
+  !!withLibs && !!noLibs && withLibs.composer === noLibs.composer);
+ok('N2 …because the handler routes them to the server rather than reading them',
+  !!noLibs && noLibs.serverKind === 'pptx' && noLibs.needs.length === 0);
+ok('N2b …while the formats the browser really does read on its own are still offered',
+  !!noLibs && ['.txt', '.md', '.csv'].every(e => noLibs.material.includes(e)));
+
+/* THE MACHINERY, NOT THE CASE. Emptying KIND_NEEDS was the right answer for these three formats,
+   and it would be easy for the RULE to rot now that nothing exercises it. This declares a
+   hypothetical kind that does need a browser library and asserts the derivation still narrows —
+   so the protection survives for the next format that needs it. */
+const rule = withLibs && withLibs.handler;
+ok('N3 the derivation rule still narrows a kind that genuinely needs a browser library',
+  (() => {
+    if (!rule) return false;
+    const saved = rule.KIND_NEEDS;
+    try {
+      rule.KIND_NEEDS = { csv: 'SomeLibraryNobodyLoaded' };
+      const narrowed = rule.materialAcceptAttr();
+      return !narrowed.includes('.csv') && narrowed.includes('.txt');
+    } finally { rule.KIND_NEEDS = saved; }
+  })());
+ok('N3b …and offers it again when that library is present',
+  (() => {
+    if (!rule) return false;
+    const saved = rule.KIND_NEEDS;
+    try {
+      globalThis.SomeLibraryNobodyLoaded = {};
+      rule.KIND_NEEDS = { csv: 'SomeLibraryNobodyLoaded' };
+      return rule.materialAcceptAttr().includes('.csv');
+    } finally { rule.KIND_NEEDS = saved; delete globalThis.SomeLibraryNobodyLoaded; }
+  })());
+
+/* AND THE OLD ROAD SAYS WHERE THE CAPABILITY WENT. Three surfaces outside the pilot journey still
+   call `process()` directly; with the CDN gone they would otherwise meet `JSZip is not defined`. */
+ok('N4 a caller reaching the old browser processor is told where documents are read now',
+  !!noLibs && typeof noLibs.refusal === 'string'
+  && !/is not defined|ReferenceError/.test(noLibs.refusal));
+ok('N4b …in a sentence that says what to do instead',
+  !!noLibs && /read by IntelliQ itself now/i.test(String(noLibs.refusal))
+  && /attach it in a conversation/i.test(String(noLibs.refusal)));
+
 console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
+})();

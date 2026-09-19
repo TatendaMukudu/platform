@@ -16,9 +16,26 @@ const now = Date.parse('2026-07-23T09:00:00Z'); // a Thursday
 
 // 1 · SCENARIO 1 — "We play Saturday at 3. The head coach owns the game plan, and it must be ready 24 hours before kickoff."
 {
-  const a = OC.extract('Our first team plays Saturday at 3pm.', { now });
+  /* THIS USED TO ASSERT `ev.fields.type === 'match'` WITH NO VOCABULARY SUPPLIED — pinning a
+     football noun as the kernel's answer for every organisation, which is the defect rather than
+     the law. The kernel now decides a universal KIND and the org's pack supplies the word, so
+     the sports vocabulary is passed in and `match` is asserted as the SPORTS answer. Case 1b
+     below runs the identical sentence through a school and gets a school's word, which is what
+     makes this a rule rather than a rename. */
+  const sportsVocab = require('../ai/packs.js').resolveDomain('sports').vocab;
+  const a = OC.extract('Our first team plays Saturday at 3pm.', { now, vocab: sportsVocab });
   const ev = a.proposals.find(p => p.type === 'event');
-  ok('1 · a match sentence extracts an event proposal', ev && ev.fields.type === 'match' && ev.fields.startAt);
+  ok('1 · a match sentence extracts an event proposal',
+    ev && ev.fields.kind === 'performance' && ev.fields.type === 'match' && ev.fields.startAt);
+  const school = OC.extract('Our first team plays Saturday at 3pm.',
+    { now, vocab: require('../ai/packs.js').resolveDomain('education').vocab });
+  const schoolEv = school.proposals.find(p => p.type === 'event');
+  ok('1b · …and the same sentence in a SCHOOL is the same kind in the school\'s own word',
+    schoolEv && schoolEv.fields.kind === 'performance' && schoolEv.fields.type === 'exam');
+  const bare = OC.extract('The product launch is on Friday at 3pm.', { now });
+  const bareEv = bare.proposals.find(p => p.type === 'event');
+  ok('1c · …and an occasion nobody has a word for is never titled "Default" at a person',
+    bareEv && bareEv.fields.title === 'Launch' && !/default/i.test(bareEv.fields.title));
   ok('1 · the event is the NEXT Saturday at 15:00', new Date(ev.fields.startAt).getDay() === 6 && new Date(ev.fields.startAt).getHours() === 15);
 
   const r = OC.extract('The head coach owns the game plan.', { now });
@@ -51,9 +68,13 @@ const now = Date.parse('2026-07-23T09:00:00Z'); // a Thursday
 {
   ok('4 · a leader confirming makes authoritative organisation context', OC.authorityFor('superadmin') === 'organisation');
   ok('4 · a member’s operating context stays shared-but-unverified', OC.authorityFor('member') === 'shared_unverified');
-  const s = OC.extract('Training is at 5 tomorrow.', { now });
+  /* The KIND is what this assertion was always about — who said it changes the authority, not
+     the shape. The word is the organisation's, so the kind is what stays constant. */
+  const s = OC.extract('Training is at 5 tomorrow.', { now, vocab: require('../ai/packs.js').resolveDomain('sports').vocab });
   const ev = s.proposals.find(p => p.type === 'event');
-  ok('4 · a member schedule still extracts an event (its AUTHORITY differs, not its shape)', ev && ev.fields.type === 'training' && new Date(ev.fields.startAt).getHours() === 17);
+  ok('4 · a member schedule still extracts an event (its AUTHORITY differs, not its shape)',
+    ev && ev.fields.kind === 'preparation' && ev.fields.type === 'training session'
+    && new Date(ev.fields.startAt).getHours() === 17);
 }
 
 // 5 · SCENARIO 3 — a recurring rhythm with an expected output

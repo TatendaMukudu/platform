@@ -91,6 +91,21 @@ function _s(v, n = 240) { return String(v == null ? '' : v).trim().slice(0, n); 
 function _num(v) { return Number.isFinite(Number(v)) ? Number(v) : 0; }
 function _arr(v) { return Array.isArray(v) ? v.filter(Boolean) : []; }
 
+/* ── HAS THE LEADING EXPLANATION EARNED ANY STANDING OF ITS OWN? ──────────────────────────────
+   L-DC1 says confidence is DERIVED, never asserted — so this reads the band the kernel computed
+   for the hypothesis and does not recount its refs. `ai/diagnose.js newHypothesis` births one at
+   `tentative` with the reason "nothing supports this yet", and `applyProposals` raises it only
+   from evidence, so `tentative` is exactly "nobody has evidenced this".
+
+   It matters because a human may now propose an explanation. Without this, an unevidenced theory
+   would be rendered as the group's FINDING at the band the OBSERVATION earned — five people who
+   described the thing, dressed up as five people who endorsed the reason for it. Absent standing
+   is read as unsupported, which is the safe direction and the one an older projection gets. */
+function _explanationHasStanding(inq) {
+  const band = _s((inq && inq.hypothesisStanding && inq.hypothesisStanding.band) || '', 32);
+  return !!band && band !== 'tentative';
+}
+
 /* ── 1. VALENCE OF A GROUP INQUIRY ───────────────────────────────────────────
    Derived from the valences the contributors declared, never from the text.
 
@@ -480,13 +495,36 @@ function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
     return _num(b.lastUpdatedAt) - _num(a.lastUpdatedAt);
   });
   const top = sorted[0];
+  /* ── A QUESTION AND AN UNKNOWN ARE NOT THE SAME SENTENCE ──────────────────────────────────
+     This slot took `stillUnknown[0]` and called it the question, which was harmless while every
+     unknown was written by the member intake path as an interrogative. It stopped being harmless
+     the moment a group inquiry's frontier began deriving unknowns from its own state, because
+     those are DECLARATIVE by construction: "One explanation has been offered, and nothing
+     recorded supports it yet" is a true statement about the record and is not a question.
+
+     Fed through the caller's sentence it produced, on Home and on the group screen: "The open
+     question is one explanation has been offered, and nothing recorded supports it yet." Broken
+     English on the first screen a coach sees, and worse than broken — it presents a statement of
+     what the record does not establish as though somebody had been asked something.
+
+     So the slot says WHICH IT IS. `wouldHelp` carries the questions the value gate and critic
+     actually passed, and those are real questions; everything else is an unknown and is labelled
+     as one. No new store and no new judgement: both fields are already computed upstream, and
+     this only stops the two being conflated. */
+  const asked = _arr(top.wouldHelp)
+    .map(w => _s((w && (w.question || w.text || w.statement)) || w, 300))
+    .filter(Boolean)[0] || '';
+  const unknown = _s(_arr(top.stillUnknown)[0], 300);
   return {
     inquiryId: _s(top.inquiryId, 64),
-    question: _s(_arr(top.stillUnknown)[0], 300),
+    question: asked || unknown,
+    // 'question' when somebody could actually be asked it; 'unknown' when it is a statement
+    // about what the record does not establish. The caller's wording depends on this.
+    kind: asked ? 'question' : 'unknown',
     about: _s((top.topic && (top.topic.label || top.topic.canonicalConcept)) || '', 120),
     band: _s((top.confidence || {}).band || 'tentative', 32),
     contested: top.contested === true,
-    otherUnknowns: _arr(top.stillUnknown).slice(1, 4).map(u => _s(u, 300)),
+    otherUnknowns: _arr(top.stillUnknown).slice(asked ? 0 : 1, 4).map(u => _s(u, 300)),
   };
 }
 
@@ -511,7 +549,16 @@ function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
 function newFocus({ focusId, nodeId, text, by, now = Date.now(), reviewAt = null, inquiry = null } = {}) {
   return {
     focusId: _s(focusId, 64), nodeId: _s(nodeId, 64), text: _s(text, 300), status: 'active',
-    createdAt: now, reviewAt: Number.isFinite(Number(reviewAt)) ? Number(reviewAt) : null,
+    /* `Number(null)` is 0 and 0 is finite, so EVERY Focus set without a review date was stored
+       with `reviewAt: 0` — a review due on 1 January 1970. It stayed invisible because
+       `normalizeFocus` reads it through `_num(x) || null`, which turns 0 back into null on the
+       wire, and the two surfaces that read it (`Number(f.reviewAt) || 0`, `if (raw.reviewAt)`)
+       both treat 0 as absent. The stored record and its own wire shape disagreed, and the first
+       surface to ask "is this overdue" rather than "does it have a date" said yes for all of
+       them. Absence is checked before the number is. */
+    createdAt: now,
+    reviewAt: reviewAt == null || reviewAt === '' || !Number.isFinite(Number(reviewAt))
+      ? null : Number(reviewAt),
     origin: { by: _s(by, 64) || null, at: now, from: inquiry ? 'inquiry' : 'leader',
       inquiryId: inquiry ? _s(inquiry.inquiryId, 64) : null }, outcome: null,
   };
@@ -577,8 +624,18 @@ function statementFor({ high, low, question, focus, withheld = [] } = {}) {
     return `${_cap(high.about)} and ${_lower(low.about)} are moving in opposite directions. Whether they are connected is not something we can tell from what we have.`;
   }
   if (question) {
-    return question.contested
-      ? `People here are describing ${_lower(question.about || 'this')} differently. That disagreement is the useful part — it is worth resolving before acting on either account.`
+    if (question.contested) {
+      return `People here are describing ${_lower(question.about || 'this')} differently. That disagreement is the useful part — it is worth resolving before acting on either account.`;
+    }
+    /* AN UNKNOWN IS REPORTED AS AN UNKNOWN. "The open question is one explanation has been
+       offered, and nothing recorded supports it yet" was this sentence swallowing a declarative
+       statement, and it read as a grammar failure because it was one. */
+    /* AND IT DOES NOT SAY IT TWICE. Every surface that renders this statement renders the
+       question line directly above it, so restating the sentence verbatim spent the closing line
+       — the one sentence that sounds like the system speaking — on an echo. It says what the
+       state MEANS instead, which is what the line is for. */
+    return question.kind === 'unknown'
+      ? `That is what we do not know yet. It is a real answer rather than a gap, and it is the thing worth closing before anything is tried.`
       : `The open question is ${_lower(question.question)} Nothing we hold answers it yet.`;
   }
   if (high) {
@@ -657,7 +714,37 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
       about: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
       // L-D27: a leader-subject projection cannot repeat contributed phrasing. The topic and
       // kernel standing remain useful; the contributed account itself stays behind the boundary.
-      claim: leaderSubject ? null : (_s(inq.hypothesis, 300) || null),
+      /* ── WHAT WE ARE SEEING IS NOT WHAT MIGHT EXPLAIN IT ──────────────────────────────────
+         `claim` is the group's FINDING, rendered at the band the observation earned. An
+         explanation nobody has evidenced is not that, and putting one here dressed it in a
+         standing five other people paid for.
+
+         A hypothesis is admitted as the claim only when the kernel has actually attached support
+         to it (`hypothesisStanding.supportedBy`). Otherwise the finding is the observation
+         itself — carried by `about` and `basis` — and the candidate explanation travels in
+         `explanations` below, at its own standing, where a reader cannot mistake the two.
+         `hypothesisStanding` is absent on an older projection, and absence is read as unsupported,
+         which is the safe direction. */
+      claim: leaderSubject ? null : (_explanationHasStanding(inq) ? (_s(inq.hypothesis, 300) || null) : null),
+
+      /* EVERY CANDIDATE EXPLANATION, EACH AT ITS OWN STANDING — the leading one and its rivals in
+         one list, because they are the same kind of thing and splitting them is what let the
+         leading one lose its band. `supported` says whether the kernel has anything behind it;
+         a human proposing an explanation produces `false`, and should. */
+      explanations: leaderSubject ? [] : [
+        ...(inq.hypothesis ? [{
+          statement: _s(inq.hypothesis, 300),
+          band: _s((inq.hypothesisStanding || {}).band, 32) || 'tentative',
+          status: _s((inq.hypothesisStanding || {}).status, 32) || 'open',
+          supported: _explanationHasStanding(inq),
+        }] : []),
+        ..._arr(inq.alternatives).map(a => ({
+          statement: _s(a && a.statement, 300),
+          band: _s(a && a.band, 32) || 'tentative',
+          status: _s(a && a.status, 32) || 'open',
+          supported: false,
+        })),
+      ].filter(e => e.statement).slice(0, 4),
       band: fit.band,
       status: _s(inq.status, 32),
       // Counts survive here only because fitForSurface already put them through the
@@ -675,7 +762,10 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
          leader-subject finding instead uses the banded L-D27 projection. */
       explained: voice.explainObject({
         kind, label: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
-        claim: leaderSubject ? '' : (_s(inq.hypothesis, 300) || ''),
+        /* SAME RULE FOR THE COMPOSED SENTENCE. `explainObject` renders `claim` at `band`, so
+           handing it an unsupported explanation beside the observation's band is the same error
+           one layer further on — and this is the copy a person actually reads. */
+        claim: leaderSubject ? '' : (_explanationHasStanding(inq) ? (_s(inq.hypothesis, 300) || '') : ''),
         band: fit.band,
         independentOrigins: fit.origins, contributors: fit.contributors,
         stillUnknown: leaderSubject ? [] : _arr(inq.stillUnknown).slice(0, 3),
