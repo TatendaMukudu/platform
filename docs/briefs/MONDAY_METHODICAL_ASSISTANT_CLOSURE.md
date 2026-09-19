@@ -62,6 +62,14 @@ External evidence can justify proposing a B/path when research or another organi
 
 Do not copy another organization's/private person's chat as precedent. Cross-org/public examples enter only through an authorized external-knowledge path with appropriate sourcing.
 
+### 1aa. Offer options from more than one evidence base
+
+Do not force IntelliQ to collapse its reasoning into one suggestion. When useful, present a **small option set** whose members may come from different bases at the same time: current/internal evidence, prior organizational learning, and cited external knowledge/research. "Learn more / do not act yet" may itself be a legitimate option when uncertainty is material.
+
+Each candidate should retain why it exists and its source class. Do not rank a winner merely because several candidates exist. The person/authorized group chooses which B, if any, becomes deliberate work.
+
+Current repo finding: `scripts/decision-intelligence-http-smoke.js` deliberately asserts that generated Q6/Q7 options do **not** exist yet. That was an earlier safety decision, not evidence that the founder's current product direction is implemented. Replace that absence only through the existing governed suggestion/proposal architecture, with provenance and no automatic action/ranking.
+
 ### 1b. Preserve journey conversation, never transfer another person's chat### 1b. Preserve journey conversation, never transfer another person's chat
 
 When a High/Low/Inquiry produces a deliberate B and becomes the basis for a Focus, preserve the conversation/Forum journey for the **same authorized participant set**. The human experience should be continuous rather than "old object closed, new empty chat."
