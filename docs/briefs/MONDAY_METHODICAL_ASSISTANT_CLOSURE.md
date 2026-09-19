@@ -330,3 +330,17 @@ Do not remove these defenses, but do not treat their passing tests as proof that
 
 Audit every `confidence`, `kernelConfidence`, `reliabilityLabel`, and ranking use. User feedback can calibrate whether a class of notification is useful to surface; it must not increase/decrease the truth standing of the underlying evidence. Prefer explicit internal names such as `evidenceStanding` vs `deliveryReliability` where ambiguity exists, without gratuitous schema churn.
 
+### Confirmed confidence conflation in the intelligence feed
+
+The naming collision is not merely theoretical. `ai/proactive.js` correctly emits separate `kernelConfidence` and `reliabilityLabel`, but `ai/intelligence-feed.js::normalizeArtifact` collapses `item.confidence || item.kernelConfidence || item.reliability || item.confidenceLabel` into one `confidence` field, and `fromProactive` explicitly chooses `i.kernelConfidence || i.reliabilityLabel`. When kernel confidence is absent, delivery/usefulness reliability can therefore occupy a field downstream consumers may read as epistemic confidence.
+
+Reconcile this without broad schema churn:
+- reserve **evidenceStanding** (or kernelStanding) for support/truth standing;
+- reserve **deliveryReliability** for learned usefulness of surfacing a noticing type;
+- never use deliveryReliability as fallback evidenceStanding;
+- Priority/notification suppression may use deliveryReliability;
+- High/Low/Inquiry standing, claims, evidence language and causal/uncertainty prose may use only evidenceStanding/kernel state;
+- add a mutation-backed regression where a highly useful notification type with no evidence standing remains epistemically unconfirmed, and a well-supported finding with poor delivery feedback remains well-supported even if not proactively surfaced.
+
+Audit current consumers before renaming persisted/public fields; adapters are preferable to unsafe schema migration this week.
+
