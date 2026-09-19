@@ -268,3 +268,21 @@ For Monday, stop adding capability when Coach can:
 7. do this through a polished UI that does not require understanding IntelliQ's machinery.
 
 Anything not required for that acceptance path goes to priority R&D unless it is a safety/privacy/authority/data-integrity defect.
+
+## Intelligence experience / attention law
+
+Implement the core human-facing rules in `docs/rnd/INTELLIGENCE_EXPERIENCE_LAW.md` this week. Treat it as founder-ratified direction for the Coach/player experience, not optional visual polish.
+
+Key acceptance:
+- show meaning before machinery; reasoning/provenance is progressive disclosure;
+- Home shows what matters now and is allowed to show nothing;
+- High/Low/Inquiry/Focus use the minimal human grammar in that law;
+- prose is concise, direct and naturally uncertainty-aware;
+- numbers earn their pixels; internal scores do not become dashboard decoration;
+- notifications are attention events, not database events: changed understanding, meaningful Focus movement/outcome, contradiction, required decision/action, or newly relevant learning;
+- notification audience/privacy is no wider than the underlying object and lock-screen text must not leak private evidence;
+- dedupe/coalesce related notification events;
+- no engagement-driven reminders/streak behavior.
+
+Do not create a second presentation/intelligence engine to achieve this. Reuse the existing presentation/read models and Composer. Prefer subtraction and progressive disclosure.
+
