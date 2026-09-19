@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `219e369` (restamped by the product-connectivity audit; see §11). **Branch:** `claude/platform-work-summary-nmb0cm` is where work lands; this stamp was taken on `gpt/ab-decision-spine-r1`, the pilot recovery + convergence line (see §10 and §11).
+**Written against:** `c63215f` (restamped at the start of the methodical-assistant closure pass). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -22,7 +22,7 @@
 
 | Question | Document |
 |---|---|
-| **What must I build next?** | `briefs/codex-pilot-programme.md` — **the work order: seven lanes, a conflict matrix, and the run order** |
+| **What must I build next?** | `briefs/MONDAY_METHODICAL_ASSISTANT_CLOSURE.md` — **the current pilot-closure handoff; use with the founder-ratified conversational and intelligence-experience laws** |
 | What is the reasoning behind those lanes? | `ttd/pilot-blocker-challenge-and-packets.md` |
 | What is IntelliQ / what is broken? | `ttd/intelliq-constitution.md` §1, §12, §13 |
 | Is a law enforced? | `ttd/intelliq-ttd-v1.md` |
@@ -692,4 +692,3 @@ assertions that passed because they were standing on nothing:
 The last one is not a defect and the others were mine. All five are now written where the next
 person will look for them, because a green suite that cannot go red is worse than no suite: it
 is a claim that something is protected when nothing is.
-
