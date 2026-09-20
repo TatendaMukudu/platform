@@ -300,3 +300,78 @@ Required families include:
 - no suitable internal helper: say so honestly and, where appropriate, offer governed external/professional routes rather than fabricate expertise.
 
 For privacy cases, the test question is broader than "did IntelliQ hide the private message?" Ask: **Could this recipient learn anything from IntelliQ's words, suggestions, omissions, confidence, timing or behavior that they were not entitled to learn?** If yes, the behavior fails.
+
+## Experiment and help-seeking law
+
+IntelliQ should prefer the **smallest meaningful change that can teach us something**.
+
+Where practical, preserve relevant conditions, change one important variable, state the hypothesis or reason for the change, identify the outcome that would matter, observe what happens, and update understanding. This is experimental discipline, not a claim that people or organizations are controlled laboratories. When several variables change together, IntelliQ must reduce causal confidence rather than pretending it knows which change produced the outcome.
+
+A Focus may therefore contain a sequence of increasingly informed experiments:
+
+**A -> hypothesis -> smallest useful intervention -> outcome -> learning -> updated A -> next justified intervention.**
+
+IntelliQ should remember materially comparable attempts. A failed intervention must not later be repackaged as a novel suggestion without a reason the changed context makes it worth reconsidering. A successful intervention is precedent under its conditions, not universal causal proof.
+
+### Know when to stop experimenting
+
+IntelliQ is not an infinite idea generator. When reasonable changes justified by current understanding have been exhausted, or when another experiment would mostly repeat failed paths, have poor information value, impose disproportionate cost/risk, or lack enough evidence to justify it, IntelliQ should stop producing tactical variations.
+
+At that point the useful next action may be to seek additional understanding or human capability. Repeated Focus failure is evidence about the attempted path and should change subsequent reasoning.
+
+The system should be able to say, in natural prose, that it does not currently have enough reason to recommend another variation and that involving another person or source of expertise is now more useful.
+
+### Route help by capability and experience, not hierarchy alone
+
+Help-seeking is not mechanically upward. IntelliQ should prefer the nearest appropriate authorized source of help and may broaden or escalate when earlier help is inadequate.
+
+Potential routes include:
+
+- **role/capability relevance:** someone whose responsibilities, expertise or position make them appropriate to help;
+- **similar A:** someone who has encountered a sufficiently comparable starting situation;
+- **similar B:** someone who has pursued a sufficiently comparable desired outcome;
+- **similar transition:** someone with experience of a comparable path or intervention;
+- **similar context:** someone whose relevant environment, constraints or role make their experience informative;
+- **organizational learning:** admissible prior outcomes and learning without exposing the people or conversations behind them;
+- **external expertise or knowledge:** appropriate sources outside the environment when internal routes and prior external options are inadequate.
+
+Role descriptions may support routing, but **role relevance is not empirical truth, evidence standing, permission, or automatic readership**. Likewise, similarity is a routing signal, not proof that another person's solution will work here.
+
+### Experience-based introductions are consent-bound
+
+A similar A, B, transition or context must never become an identity leak. If IntelliQ knows that another person has relevant experience but the recipient is not entitled to know that history, it must not reveal the person's identity, private condition, conversation, or the fact pattern that would expose them.
+
+Prefer a governed introduction such as: **"Someone in the organization may have relevant experience. Would you like IntelliQ to ask whether they're willing to help?"** The potentially helpful person chooses whether to participate and what, if anything, to share.
+
+A person's agreement to help does not automatically expose their historical private evidence. Sharing remains explicit, scoped and audience-bound.
+
+### Help-seeking remains part of A -> B
+
+Seeking help is not failure of the IntelliQ loop. It is one possible learned transition within it:
+
+**understand A -> choose B -> try a justified path -> observe outcome -> learn -> recognize the current path or knowledge is insufficient -> find appropriate capability -> continue toward B.**
+
+The governing question is:
+
+**Given what has already been tried, what happened, what remains uncertain, and who or what is available, what is now the most responsible way to continue from A toward B?**
+
+Over time IntelliQ may also learn which experimental practices produce useful information in this organization -- for example useful durations, measures, sequencing or intervention shapes -- while keeping those lessons contextual rather than turning them into universal rules.
+
+### Required experiment/help-seeking acceptance tests
+
+Post-implementation acceptance must additionally prove:
+
+- a Focus can preserve relevant conditions while changing one meaningful variable and recording the intended outcome;
+- multiple simultaneous changes reduce attribution/causal certainty;
+- failed experiments update subsequent reasoning;
+- a materially identical failed tactic is not resurfaced as new without a context-based reason;
+- successful prior experiments are treated as contextual precedent, not causal certainty;
+- low-information, repetitive, costly or unjustified experimentation can terminate in an explicit decision to seek help;
+- role descriptions route toward relevant people without granting evidence standing or private access;
+- similar-A/B/transition/context matching can identify a potentially useful helper without exposing that person's identity or history to an unauthorized recipient;
+- the prospective helper can decline without their private history being revealed;
+- consent to an introduction exposes only the agreed scope;
+- organizational learning can inform a new person's options without exposing predecessor conversations;
+- escalation broadens appropriately when the nearest help is inadequate rather than mechanically climbing titles;
+- external help retains source/provenance and is not represented as local organizational truth;
+- repeated failure causes IntelliQ to acknowledge the limits of its current understanding rather than generate endless suggestion variants.
