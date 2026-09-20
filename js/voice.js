@@ -43,6 +43,7 @@
     listening: 'Listening — tap to stop',
     processing: 'Just a moment…',
     ready: 'Ready to send, or keep typing',
+    interrupted: 'Stopped here — listening moved to another composer.',
     unsupported: 'Voice input is not available in this browser — typing works as normal.',
   };
 
@@ -57,16 +58,40 @@
 
   function IQVoice() {}
 
-  /* One live session at a time, tracked per target so two microphones cannot both be running. */
+  /* `_sessions` answers target-specific UI questions. `_active` is the app-wide microphone
+     lease: a map alone cannot stop target A merely because target B has a different id. */
   IQVoice._sessions = {};
+  IQVoice._active = null;
 
   IQVoice.isSupported = support;
   IQVoice.STATES = STATES;
 
   IQVoice.isListening = function (targetId) {
     var s = IQVoice._sessions[targetId];
-    return !!(s && s.rec);
+    return !!(s && s.rec && IQVoice._active === s);
   };
+
+  function isLive(targetId, session) {
+    return IQVoice._sessions[targetId] === session && IQVoice._active === session;
+  }
+
+  function release(targetId, session) {
+    if (IQVoice._sessions[targetId] === session) IQVoice._sessions[targetId] = null;
+    if (IQVoice._active === session) IQVoice._active = null;
+  }
+
+  /* Starting in another Composer revokes the previous microphone lease BEFORE aborting it.
+     Browsers may synchronously or belatedly emit result/error/end from abort(); those callbacks
+     must see an already-dead session and become inert. Keep the visible draft already produced,
+     but tell the old control why it stopped. */
+  function interruptActive(nextTargetId) {
+    var old = IQVoice._active;
+    if (!old) return;
+    release(old.targetId, old);
+    try { old.rec.abort(); } catch (e) {}
+    old.onState('idle', old.targetId === nextTargetId
+      ? 'Stopped here — listening restarted.' : TEXT.interrupted, old.ta.value);
+  }
 
   /* start/stop is a TOGGLE from one user gesture. Everything below is driven by that gesture
      and by the browser's own events — nothing here schedules itself. */
@@ -84,6 +109,8 @@
     if (!SR) { onState('unsupported', TEXT.unsupported, ''); return false; }
     if (!ta) { onState('error', 'Nothing to write into.', ''); return false; }
 
+    interruptActive(targetId);
+
     // What was already typed is kept. Voice ADDS to a draft; it never replaces one, because
     // silently clearing somebody's half-written sentence is unforgivable and easy to do.
     var base = String(ta.value || '');
@@ -94,8 +121,10 @@
     rec.interimResults = true;
     rec.lang = opts.lang || (global.document && global.document.documentElement && global.document.documentElement.lang) || 'en-GB';
 
-    var session = { rec: rec, base: base, final: '', errored: false };
+    var session = { targetId: targetId, rec: rec, ta: ta, onState: onState,
+      base: base, final: '', errored: false };
     IQVoice._sessions[targetId] = session;
+    IQVoice._active = session;
 
     rec.onresult = function (e) {
       /* A CANCELLED SESSION DOES NOT GET TO WRITE. `cancel()` aborts the recogniser and clears
@@ -105,7 +134,7 @@
          somebody was mid-sentence could put their words into a composer afterwards, on a page
          that had already told them to sign in. The session registry is the authority: if this
          session is no longer the live one, nothing is written. */
-      if (IQVoice._sessions[targetId] !== session) return;
+      if (!isLive(targetId, session)) return;
       var text = '';
       for (var i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript;
       session.final = text;
@@ -117,6 +146,7 @@
     };
 
     rec.onerror = function (e) {
+      if (!isLive(targetId, session)) return;
       session.errored = true;
       var code = (e && e.error) || 'unknown';
       var msg = Object.prototype.hasOwnProperty.call(ERRORS, code)
@@ -128,7 +158,8 @@
     };
 
     rec.onend = function () {
-      IQVoice._sessions[targetId] = null;
+      if (!isLive(targetId, session)) return;
+      release(targetId, session);
       if (session.errored) return;                       // onerror already said what happened
       if (!session.final) { onState('error', ERRORS['no-speech'], ta.value); return; }
       onState('ready', TEXT.ready, ta.value);
@@ -138,7 +169,7 @@
     try {
       rec.start();
     } catch (e) {
-      IQVoice._sessions[targetId] = null;
+      release(targetId, session);
       onState('error', 'Voice could not start. Typing works as normal.', ta.value);
       return false;
     }
@@ -160,8 +191,9 @@
     if (!s) return false;
     var ta = global.document && global.document.getElementById(targetId);
     if (ta) ta.value = s.base;
+    // Invalidate first: abort() is allowed to synchronously invoke callbacks.
+    release(targetId, s);
     if (s.rec) { try { s.rec.abort(); } catch (e) {} }
-    IQVoice._sessions[targetId] = null;
     return true;
   };
 

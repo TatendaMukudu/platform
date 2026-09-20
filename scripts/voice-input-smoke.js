@@ -186,6 +186,52 @@ for (const [code, expect] of [['not-allowed', /declined/i], ['no-speech', /did n
     V.isListening('box') === false && env._instances.length === 1);
 }
 
+/* ── ONE MICROPHONE ACROSS EVERY COMPOSER ─────────────────────────────────
+   A target-keyed registry is not exclusivity: Home and Forum use different target ids. The
+   second gesture must revoke the first browser recognizer before it becomes live, and callbacks
+   already queued by the first recognizer must be unable to alter either draft or either state. */
+{
+  const env = makeEnv(); const V = load(env);
+  const a = area(env, 'home-box', 'Home draft');
+  const b = area(env, 'forum-box', 'Forum draft');
+  const aStates = [], bStates = [];
+  const stateA = (name, message, value) => aStates.push({ name, message, value });
+  const stateB = (name, message, value) => bStates.push({ name, message, value });
+
+  V.start('home-box', { onState: stateA });
+  const old = env._instances[0];
+  old._say('first words');
+  const aAtSwitch = a.value;
+  V.start('forum-box', { onState: stateB });
+  const current = env._instances[1];
+
+  ok('V20a starting Composer B aborts A before B becomes the one active microphone',
+    old.aborted === true && V.isListening('home-box') === false
+      && V.isListening('forum-box') === true);
+  ok('V20b exactly one recognizer remains live across the whole app',
+    env._instances.filter(r => r.started && !r.aborted).length === 1 && current.started === true);
+  ok('V20c Composer A truthfully says it was interrupted rather than remaining visibly live',
+    aStates[aStates.length - 1].name === 'idle'
+      && /another composer/i.test(aStates[aStates.length - 1].message));
+
+  // These are callbacks that a browser is permitted to deliver after abort(). They belong to A
+  // and may update neither the old draft nor the new one, nor replace A's interrupted state.
+  old._say('late words from the old microphone');
+  old._fail('network');
+  ok('V20d late result/error/end callbacks from A cannot change A after interruption',
+    a.value === aAtSwitch && aStates[aStates.length - 1].name === 'idle');
+  ok('V20e …and can never write into B or disturb B’s live state',
+    b.value === 'Forum draft' && bStates[bStates.length - 1].name === 'listening'
+      && V.isListening('forum-box') === true);
+
+  current._say('the current words');
+  V.stop('forum-box');
+  ok('V20f B can still transcribe and finish normally after replacing A',
+    b.value === 'Forum draft the current words'
+      && bStates[bStates.length - 1].name === 'ready'
+      && V.isListening('forum-box') === false);
+}
+
 /* ══ INPUT AND OUTPUT ARE TWO CAPABILITIES, AND NEITHER IMPLIES THE OTHER ═══════════════════
    Three different things get called "voice" in this product and they share nothing but the word:
 
