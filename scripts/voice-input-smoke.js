@@ -232,6 +232,47 @@ for (const [code, expect] of [['not-allowed', /declined/i], ['no-speech', /did n
       && V.isListening('forum-box') === false);
 }
 
+/* ── AND THE LEASE IS RELEASED EVEN WHEN STOPPING FAILS ───────────────────
+   `stop()` catches a throwing `rec.stop()` and clears that target's session. It did not clear
+   the APP-WIDE lease, and the two are different facts: after a failed stop the target looked
+   idle while `_active` still pointed at the dead session.
+
+   Two consequences, both reachable from an ordinary tap. `cancelAll` — what sign-out and every
+   navigation calls — iterates the session registry, finds nothing for that target, and returns
+   having released nothing, so the lease outlives the page it belonged to. And the next Composer
+   to start interrupts a session that already ended, telling a control that stopped a moment ago
+   that listening "moved to another composer".
+
+   A browser throws here for real: `stop()` on a recognizer whose service has already gone away
+   raises InvalidStateError, which is exactly the flaky-network case voice input exists in. */
+{
+  const env = makeEnv(); const V = load(env);
+  const a = area(env, 'home-box', 'draft');
+  const b = area(env, 'forum-box', '');
+  const aStates = [], bStates = [];
+  V.start('home-box', { onState: (n, m, v) => aStates.push({ name: n, message: m, value: v }) });
+  const dead = env._instances[0];
+  dead.stop = function () { throw new Error('InvalidStateError'); };
+  ok('V20g a stop() the browser refuses still reports that it tried', V.stop('home-box') === true);
+  ok('V20h …and that composer is no longer listening', V.isListening('home-box') === false);
+  /* THE LEASE, asserted through behaviour rather than by reading the private field: if the lease
+     is still held, starting elsewhere reports an interruption that did not happen. */
+  V.start('forum-box', { onState: (n, m, v) => bStates.push({ name: n, message: m, value: v }) });
+  ok('V20i …so the next composer starts cleanly rather than interrupting a session that ended',
+    !aStates.some(s => /another composer/i.test(String(s.message || ''))));
+  ok('V20j …and B is the one live microphone', V.isListening('forum-box') === true
+    && env._instances.filter(r => r.started && !r.aborted).length === 1);
+  /* AND THE OTHER CONSEQUENCE: a lease nothing can reach is a microphone sign-out cannot end. */
+  const env2 = makeEnv(); const V2 = load(env2);
+  area(env2, 'home-box', 'draft');
+  V2.start('home-box', { onState: () => {} });
+  env2._instances[0].stop = function () { throw new Error('InvalidStateError'); };
+  V2.stop('home-box');
+  V2.cancelAll();
+  ok('V20k …and after a failed stop nothing anywhere still reports a live microphone',
+    V2.isListening('home-box') === false);
+}
+
 /* ══ INPUT AND OUTPUT ARE TWO CAPABILITIES, AND NEITHER IMPLIES THE OTHER ═══════════════════
    Three different things get called "voice" in this product and they share nothing but the word:
 

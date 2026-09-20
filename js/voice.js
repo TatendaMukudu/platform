@@ -180,7 +180,27 @@
   IQVoice.stop = function (targetId) {
     var s = IQVoice._sessions[targetId];
     if (!s || !s.rec) return false;
-    try { s.rec.stop(); } catch (e) { IQVoice._sessions[targetId] = null; }
+    /* A NORMAL STOP ENDS THROUGH `onend`, which releases both the session and the lease. A stop
+       the browser REFUSES never gets there, so this path has to end the session itself — and
+       "end" means two things that were both half-done.
+
+       IT HAS TO RELEASE BOTH. Clearing only the session left `_active` pointing at a dead
+       recognizer: `cancelAll` (sign-out, every navigation) iterates the session registry, found
+       nothing for this target and released nothing, and the next Composer to start told a control
+       that had already stopped that listening "moved to another composer".
+
+       AND IT HAS TO ACTUALLY STOP THE MICROPHONE. `stop()` throwing does not mean the recognizer
+       ended — it means the polite request failed. Forgetting the session then leaves a live
+       recogniser that nothing in the app can reach, which is the one outcome voice input must
+       never produce. `abort()` is the stronger primitive `cancel()` already uses: ask it before
+       giving up the handle, and release afterwards so a late callback from either is inert.
+
+       A browser throws here for real — `stop()` on a recognizer whose service has already gone
+       away raises InvalidStateError, which is the flaky-connection case voice input lives in. */
+    try { s.rec.stop(); } catch (e) {
+      try { s.rec.abort(); } catch (e2) {}
+      release(targetId, s);
+    }
     return true;
   };
 
