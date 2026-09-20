@@ -2,7 +2,7 @@
 
 **Branch:** `codex/pilot-recovery-gate-r7` / draft PR #90  
 **Started from:** `c63215f4862055de9f12d3e277aea873a9b15c7a`  
-**Current recorded remote head:** `130863e3838d0eedf90272820d02fe8353acf884`
+**Current recorded remote head:** `f6ca7657bf11ba9e85d73cc386c1f9a4285fec79`
 **Verdict:** **SAFE TO MERGE: NO.** Nothing was merged or deployed.
 
 This is the evidence ledger for the closure pass governed by
@@ -144,6 +144,37 @@ Mutations, both red as required:
 - disabling member admission at `server.js::_forumAccess` failed the historical Forum join case
   (80 passed, 9 failed). The mutation was restored before the full run.
 
+### `f6ca7657bf11ba9e85d73cc386c1f9a4285fec79` — make Composer questions earn their turn
+
+Canonical owner traced: `ai/composer.js` owns the one production voice and its grounded context;
+the kernel-owned information need already enters that context separately. The live system prompt
+nevertheless required every useful answer to end with a question, even when the governed context
+already answered it or the person was brainstorming, choosing, reporting an outcome or simply
+asking for an answer.
+
+Positive law: ask the one kernel-supplied, high-information question when its answer would
+materially change understanding; otherwise answer, offer a small option set, reflect an outcome,
+help carry out the chosen action, brainstorm, or stop. Negative law: never ask merely to keep a
+conversation moving, keep interrogating after a choice, or manufacture an Inquiry/Focus because a
+person explored an idea.
+
+The prompt now makes the useful next move conditional on actual uncertainty, treats available
+actions as possibilities rather than instructions, and explicitly permits a useful turn with no
+question and no action. Card-open conversations use the same rule rather than forcing a question.
+No new classifier, assistant brain, object writer or store was introduced.
+
+Proof:
+
+- `composer-smoke` — 35 passed;
+- `composer-degraded-http-smoke` — 13 passed plus 2 composer-off controls;
+- `conversational-continuity-http-smoke` — 52 passed;
+- `conversational-action-journeys-http-smoke` — 27 passed;
+- `npm test` — green: 403 sources parsed and every registered suite passed.
+
+Mutation: reversing the production rule so the Composer was again told to ask merely to keep the
+conversation going made the focused suite red (34 passed, 1 failed). Restoring the conditional
+rule returned it to 35 passed, 0 failed before the full run.
+
 ## 4. Environment and remaining external proof
 
 This pass used in-process memory and deterministic/provider-failure paths. The full suite reported
@@ -164,11 +195,12 @@ still outstanding.
 
 ## 5. Next closure seam
 
-The latest `INTELLIGENCE_EXPERIENCE_LAW.md` at `7a1900a` materially expands methodical
-conversation, response-quality, evidence-direction, experimentation and help-seeking acceptance.
-The next implementation seam should be selected from that matrix by tracing the real Home/object
-Composer path and finding the first behavioral failure, with priority on response/action quality
-through A -> B -> experiment -> outcome -> learning rather than adding another pure helper.
+The next implementation seam is the expanded matrix's experiment/help-seeking boundary through
+the real Focus Composer: trace how prior failed outcomes enter the authorised turn, prove that a
+near-duplicate intervention is not proposed indefinitely, and either reuse the existing governed
+professional/collaborator context for appropriate help-seeking or document the exact missing
+canonical owner. The slice must preserve contextual precedent without converting a sequence into
+causal certainty or adding a second Focus lifecycle.
 
 One founder decision remains narrow and external: whether a new node member should read historical
 Forum speech and other previously shared node material. Current behavior is now pinned rather than
