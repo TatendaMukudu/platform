@@ -597,3 +597,197 @@ Implementation must prove at least:
 - evidence with beneficial outcomes can challenge a role description or expected behaviour rather than being mechanically labelled a Low;
 - cross-level relationships do not widen readership or leak private evidence;
 - one canonical evidence record can inform multiple authorized relationships without being copied into multiple truth systems.
+
+
+## Pilot interaction model: governed discovery, deliberate Focus, participant-owned conversation
+
+The following is founder-ratified pilot product law and should be implemented in the current closure stack rather than left as post-pilot R&D.
+
+### One deliberate creation primitive
+
+**Focus is the only primary intelligence object a human deliberately creates.**
+
+High, Low and Inquiry are governed IntelliQ standings over evidence and unresolved understanding. A human may notice, suggest, challenge, discuss or contribute evidence toward any of them, but a command such as "create a High", "save this as a Low" or "make this an Inquiry" must not manufacture canonical standing merely because the user requested the label.
+
+The three discovery standings are symmetric from the human interaction perspective:
+
+- **High**: governed positive understanding -- something meaningful appears to be working, holding, improving or moving in a desirable direction.
+- **Low**: governed attention-worthy understanding -- something meaningful appears to be deteriorating, obstructing a desired direction or otherwise worth attention.
+- **Inquiry**: governed unresolved understanding -- a question/unknown is sufficiently valuable and unresolved to deserve standing.
+
+Humans and the model may suggest any of the three. Their contributions enter the existing governed evidence/curiosity path. The kernel decides when evidence/question value justifies surfacing, strengthening, weakening, revising or retiring the standing. Do not create parallel \`create_high\`, \`create_low\` or user-commanded \`create_inquiry\` truth stores.
+
+A human statement such as "I think this is a High" is an attributed contribution, not empirical truth. IntelliQ may say that evidence is not yet sufficient to call it a High, or that it fits an already supported pattern. High/Low/Inquiry remain alive as evidence changes.
+
+### Home and bucket interaction
+
+**Home accepts anything. High, Low and Inquiry buckets provide context, not cages.**
+
+The Home Composer may naturally receive observations, questions, goals, outcomes, brainstorming and explicit desire to work on something. It may contribute to High/Low/Inquiry standing or lead to a proposed Focus.
+
+Within Highs, Lows and Inquiries, the same Composer remains available. The bucket gives useful contextual prior but does not force the user's turn into that classification. A statement in Low may weaken the Low, support a High, raise an Inquiry or lead toward Focus. A statement in Inquiry may answer it, complicate it or lead toward Focus. A statement in High may challenge the High or deliberately seek to strengthen what is working.
+
+Do not expose ontology commands as the normal UX.
+
+### Focus creation is a conversational commitment
+
+A Focus is different because it represents deliberate human choice of a B worth working toward.
+
+When conversation reaches a sufficiently clear candidate B, IntelliQ may propose a Focus. It must not silently create one. The smallest natural flow is:
+
+1. reflect the proposed B in human language;
+2. establish whether this is genuinely deliberate work rather than brainstorming;
+3. ask who should participate: **just the person or other members too**;
+4. resolve named people, governed groups/roles or ad-hoc participants against authoritative organization membership;
+5. clarify ambiguity before consequential sharing;
+6. show the proposed audience/commitment where confirmation is consequential;
+7. human confirms;
+8. existing canonical Focus owner creates the Focus;
+9. the Focus appears in Focuses and the authorized participant can continue working on it.
+
+Do not require a form for title/status/visibility/category/metric merely because those fields exist internally. Do not create permanent org-tree nodes for ad-hoc collaboration.
+
+A Focus can arise from Home, High, Low, Inquiry or an existing Focus conversation. Same B with refined A or a changed tactic normally continues the existing Focus. A materially different B requires explicit human choice before a new Focus or material revision.
+
+### Conversation belongs to its author/participants and travels with them
+
+**The object does not own the conversation. The author/participants own the conversation.**
+
+A conversation may begin on Home and later become related to a High, Low, Inquiry and Focus as the person's journey evolves. That conversation follows its authorized author/participants across those transitions. Moving from Low -> Inquiry -> Focus does not reset the person's journey and does not transfer ownership to the object.
+
+The same canonical object may therefore have multiple participant-owned conversations. Tatenda may have a private conversation around a Low, Tyler may have a different private conversation around the same Low, and Coach may have another. Shared access to the Low never grants access to one another's private conversations.
+
+When a person invites new members while creating or working on a Focus, the new members do not inherit predecessor private conversation. Existing participants retain their own journey. New participants receive only the shared Focus/object context they are authorized to read and may begin their own participant-owned conversation or participate in an explicitly shared conversation/Forum.
+
+**Relationship does not imply readership. Object membership does not imply predecessor-chat readership.**
+
+### New Chat is valid inside every intelligence space
+
+Home, High, Low, Inquiry and Focus should allow **New Chat**.
+
+New Chat means a fresh transcript/conversational session from the current context. It does **not** mean a new High/Low/Inquiry/Focus and does not erase governed memory.
+
+When a new chat begins around an existing object, IntelliQ may use the current object's authorized understanding, relevant evidence, outcomes, organizational learning and admissible summaries from the participant's earlier conversations. The UI need not force years of work into one immortal transcript.
+
+The product should preserve continuity of understanding while allowing clean conversational sessions.
+
+### One shared object-page skeleton
+
+High, Low, Inquiry and Focus should use the same interaction skeleton. Their semantics and displayed intelligence differ; the human interaction architecture does not.
+
+Each object view should provide, as applicable:
+
+1. **Header** -- concise title, type/standing/status, audience/participants and material change state.
+2. **Current useful understanding** -- the minimum information a person needs to understand why this object matters now.
+3. **Relevant uncertainty/evidence/learning** -- progressively disclosed rather than database machinery.
+4. **Your chats / participant chats** -- authorized participant-owned conversations and New Chat.
+5. **Forum** -- when a governed multi-person Forum is available.
+6. **Composer** -- always available to talk naturally to IntelliQ about the object.
+
+Object-specific content may include:
+
+- High: what appears to be working; why; what remains uncertain or could change the standing.
+- Low: what appears worth attention; why; contradictions/unknowns.
+- Inquiry: the unresolved question; what is known; plausible explanations; what would most improve understanding.
+- Focus: working-toward B; current A/where things stand; attempts/actions; outcomes; what is being learned.
+
+Focus is semantically downstream/deliberate, but it does not require a completely different page architecture.
+
+### Private chat and Forum are distinct conversational surfaces
+
+Every object may have participant-owned chat with IntelliQ. When the governed audience permits a multi-person Forum, the object may also expose Forum as the human-to-human collaborative surface.
+
+Forum does not read private chats. Private conversation does not become Forum merely because it concerns the same object. Governed sharing may contribute admissible material without exposing private wording or predecessor transcript.
+
+A subtle people/Forum control near the object header is preferable to exposing authorization machinery in the body.
+
+### Remove legacy keep/private-note interaction from the primary product
+
+Private conversation is already private according to its audience. IntelliQ should not ask users to "keep this private", "save this privately", "remember this privately" or create generic private-note records as the normal response to ordinary conversation.
+
+Do not make the human manage memory machinery.
+
+- **Focus** is the explicit action for deliberate work.
+- **Library** is the explicit surface for material intentionally kept as reference.
+- **Evidence/intelligence** is handled through governed canonical paths.
+- **Conversation** persists according to participant/audience and retention law.
+
+Legacy proposal cards/actions whose product meaning is merely "keep this -- private to you" should be removed or consolidated away from the primary conversational experience once production ownership is traced and regression coverage exists.
+
+Do not ask "save this to Library?" after every Focus creation. A Library suggestion is appropriate only when there is a distinct reference artifact/material worth keeping, such as a plan, document, source or useful generated summary.
+
+### Focus-derived organizational learning
+
+**A private Focus journey is not itself automatically organization-readable evidence. Its governed, admissible derivative learning may become reusable organizational precedent.**
+
+The organization may learn from authorized Focus journeys without inheriting the person's identity or private conversation. A reusable derivative may include, where governance permits:
+
+- a comparable A/context;
+- the shape of the chosen B;
+- intervention/action attempted;
+- recorded outcome;
+- conditions/limitations;
+- resulting learning and uncertainty.
+
+Do not transport private wording, private notes, predecessor transcript or identity merely because the journey was useful. Do not claim causation from sequence.
+
+This reusable transition knowledge supports the racecar law: over repeated A -> B cycles the organization learns how it tends to improve under particular conditions.
+
+When another authorized person encounters a materially comparable A, IntelliQ may use admissible organizational precedent before inventing another tactic. Similarity is not proof that the same path will work.
+
+If reasonable model-generated options, organizational precedent and appropriate external knowledge are exhausted, human help may be the highest-information next move. Existing consent-bound experience routing law applies: IntelliQ may ask a potentially relevant person whether they are willing to help without revealing their private history to the seeker.
+
+Anonymous mediated experience-sharing is a **Priority R&D extension**, not required to block the Coach pilot. Direct identity disclosure requires appropriate consent.
+
+### Minimal surface, expandable depth
+
+**IntelliQ starts concise; it is not permanently constrained to be concise.**
+
+For the pilot, concise mobile-first responses remain the default. Long-term product law is minimum useful answer first, with progressively deeper reasoning when the person asks for it. A fixed word ceiling is an implementation default, not epistemic/product law.
+
+"Why?", "show me the evidence", "walk me through everything we have tried", or an equivalent request should allow the model to provide materially more detail while preserving the same deterministic privacy, evidence, provenance and uncertainty envelope.
+
+Post-pilot, IntelliQ may learn or honor user presentation preferences (for example summary-first versus detailed reasoning) without changing truth standards, authorization, privacy or confidence.
+
+### Visualizations must communicate meaning
+
+Do not visualize data merely because data exists.
+
+A graph/timeline belongs on an object only when it helps a person understand a material pattern, change, contradiction, trajectory or outcome. A dot showing that a recorded event exists, raw graph topology, record-count machinery or explanatory database language should not dominate the default object surface.
+
+Prefer human meaning such as "changed recently", "appearing consistently", a useful trend over time, or competing evidence directions. Richer Web/graph exploration may exist as deeper disclosure/R&D rather than mandatory object-page chrome.
+
+### Pilot acceptance additions
+
+Before Coach-ready closure, registered production-path proof should cover:
+
+- user cannot manufacture High, Low or Inquiry standing merely by commanding the label;
+- a user's suggested High/Low/Inquiry is preserved as attributed contribution/question through existing governed evidence/curiosity ownership;
+- independent governed evidence can cause High/Low/Inquiry to surface without a user create command;
+- Home can naturally contribute toward any discovery standing and can propose a Focus;
+- High, Low and Inquiry bucket Composers provide context without forcing classification;
+- Focus proposal asks whether it is private to the current person or includes other members before consequential sharing;
+- named member/group/ad-hoc audience is resolved and confirmed through existing authority;
+- confirmed Focus appears in Focuses and is resumable after reload;
+- predecessor participant-owned conversation remains available to its author/participants when the journey transitions into Focus;
+- newly invited participant cannot read predecessor private conversation;
+- two different people can hold separate private chats around the same object without cross-read;
+- New Chat around an existing High/Low/Inquiry/Focus creates a fresh transcript without creating a duplicate object or losing governed object context;
+- Forum availability follows canonical live audience rules and never imports private chat;
+- legacy generic "keep this/private to you" action is not offered as the normal response to ordinary Home conversation;
+- Library remains a reference-material surface rather than a prerequisite for conversational memory;
+- Focus-derived reusable organizational learning excludes predecessor private wording/identity and preserves outcome/causal uncertainty;
+- object views expose a common interaction skeleton while presenting type-appropriate intelligence;
+- meaningless record-existence visualization is not required for an object to be usable;
+- initial prose can remain concise while explicit requests for deeper reasoning are not artificially truncated by a fixed product-law word ceiling.
+
+## Priority R&D extensions from the pilot interaction model
+
+These are aligned with the architecture but should not delay Coach closure unless already safely present:
+
+- consent-bound anonymous mediation between people with materially comparable prior Focus journeys;
+- adaptive per-user response-depth/presentation preferences;
+- live wearable/sensor-assisted Focus loops, including explicitly authorized health/fitness signals;
+- richer meaningful temporal/Web visualization over accumulated A -> B journeys.
+
+Wearable/sensor direction must preserve the same architecture: external signal -> governed provenance/scope -> evidence -> current A/Focus context -> observation/outcome -> learning. A biometric or sensor reading is evidence, not an automatic diagnosis, causal claim or command.
