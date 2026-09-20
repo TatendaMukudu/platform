@@ -56,6 +56,20 @@ const SECRET = 'PRIVATE_TEXT_MUST_NEVER_APPEAR';
       A.resolve(ref, { nodes }).userIds.join(',') === 'newcoach'
       && !A.includes(ref, 'coach', { nodes }));
 
+    /* TEMPORAL POLICY CHARACTERISATION, NOT A NEW POLICY DECISION. The founder has not yet
+       chosen whether historical team material should follow current membership or preserve the
+       audience at contribution time. The current canonical owner stores a reference, so this
+       test says exactly what it does today: a later join expands a node-members reference and a
+       later departure contracts it. Private conversation is governed separately and is tested
+       from the other end in focus-continuity-smoke. */
+    const teamRef = A.audienceRef({ kind: 'node_members', nodeId: 'mens' });
+    nodes.mens.memberIds.push('late');
+    ok('a1 · CURRENT TEMPORAL BEHAVIOUR: joining later enters an existing team audience reference',
+      A.includes(teamRef, 'late', { nodes }));
+    nodes.mens.memberIds = nodes.mens.memberIds.filter(id => id !== 'late');
+    ok('a1 · CURRENT TEMPORAL BEHAVIOUR: leaving removes access on the next resolution',
+      !A.includes(teamRef, 'late', { nodes }));
+
     // A deleted node must FAIL CLOSED, never fall back to something broader.
     ok('a1 · a vanished group narrows to the author, never widens',
       A.resolve(A.audienceRef({ kind: 'node_members', nodeId: 'gone' }), { ownerId: 'p1', nodes }).userIds.join(',') === 'p1');

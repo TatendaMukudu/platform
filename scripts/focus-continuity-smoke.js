@@ -53,6 +53,7 @@ _loadAllStores({
     mate:  { id: 'mate',  name: 'A Teammate',  email: 'mt@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: ['n1'] },
     coach: { id: 'coach', name: 'A Coach',     email: 'co@x.io', role: 'coach',  orgCode: C, status: 'active', leadershipNodeIds: ['n1'] },
     out:   { id: 'out',   name: 'Other Squad', email: 'ou@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: ['n2'] },
+    late:  { id: 'late',  name: 'Later Player', email: 'la@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: [] },
   } },
   orgNodes: { [C]: {
     n1: { nodeId: 'n1', name: 'First Team', parentId: null, childNodeIds: [], memberIds: ['me', 'mate'], leaderIds: ['coach'] },
@@ -93,6 +94,7 @@ const server = app.listen(0, async () => {
   const mateT = issueToken('mate', C, 'member');
   const coachT = issueToken('coach', C, 'coach');
   const outT = issueToken('out', C, 'member');
+  const lateT = issueToken('late', C, 'member');
   const focuses = () => (_getMemory(C, 'me').focuses || []);
 
   try {
@@ -148,6 +150,14 @@ const server = app.listen(0, async () => {
       (await get(`/api/me/focus/${FID}/source`, outT)).status === 404);
     ok('FC7 …404 rather than 403, because confirming there IS a conversation behind it is itself a disclosure',
       (await get(`/api/me/focus/${FID}/source`, coachT)).status === 404);
+    /* CURRENT NODE MEMBERSHIP MAY CHANGE A SHARED OBJECT'S AUDIENCE. It must never change the
+       ownership of the private conversation that produced it. This is intentionally driven after
+       the Focus exists and after the person joins, so a relationship edge plus current membership
+       cannot combine into durable predecessor-chat access. */
+    S.orgNodes[C].n1.memberIds.push('late');
+    S.orgUsers[C].late.assignedNodeIds = ['n1'];
+    ok('FC7b joining the source owner\'s node later still grants no predecessor conversation access',
+      (await get(`/api/me/focus/${FID}/source`, lateT)).status === 404);
 
     /* ── FC8-FC9: VALIDATED, NOT TRUSTED. ── */
     const forged = await post('/api/me/focus', meT, {

@@ -69,6 +69,7 @@ _loadAllStores({
       coach: { id: 'coach', name: 'Head Coach', email: 'c@x.io', role: 'coach', orgCode: C, status: 'active', leadershipNodeIds: ['crowd'], assignedNodeIds: [] },
       p1: { id: 'p1', name: 'Player One', email: 'p1@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: ['crowd'] },
       p2: { id: 'p2', name: 'Player Two', email: 'p2@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: ['crowd'] },
+      late: { id: 'late', name: 'Later Player', email: 'late@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: [] },
       solo: { id: 'solo', name: 'Only One', email: 's@x.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: ['lonely'] },
       sib:  { id: 'sib', name: 'Sibling Lead', email: 'sb@x.io', role: 'coach', orgCode: C, status: 'active', leadershipNodeIds: ['sibling'], assignedNodeIds: [] },
     },
@@ -118,6 +119,7 @@ const server = app.listen(0, async () => {
   const coachT = issueToken('coach', C, 'coach');
   const p1T = issueToken('p1', C, 'member');
   const p2T = issueToken('p2', C, 'member');
+  const lateT = issueToken('late', C, 'member');
   const soloT = issueToken('solo', C, 'member');
   const sibT = issueToken('sib', C, 'coach');
   const farT = issueToken('far', X, 'coach');
@@ -188,6 +190,25 @@ const server = app.listen(0, async () => {
     const restored = await thread('focus', 'tf_crowd', coachT, 'group:crowd');
     ok('FA-C4 …and it comes back when they do, because the answer is computed rather than stored',
       restored.j.forumAvailable === true && restored.j.forumReadable === 3);
+
+    /* TEMPORAL POLICY CHARACTERISATION, NOT RATIFICATION. The current Forum is a room for the
+       current node roster, so a person who joins after speech was posted can read that older
+       speech. Whether historical Forum speech should instead retain its original audience is a
+       founder decision recorded in the closure handoff; this guard prevents the present behavior
+       changing invisibly in either direction before that choice is made. */
+    const beforeJoin = await post('/api/group/crowd/forum/inq_crowd', p1T,
+      { text: 'This sentence was posted before the later player joined' });
+    ok('FA-C5 a historical Forum sentence exists before the later member joins', beforeJoin.status === 200);
+    ok('FA-C5b the later member cannot read it while outside the node',
+      (await get('/api/group/crowd/forum/inq_crowd', lateT)).status === 403);
+    orgNodes[C].crowd.memberIds.push('late');
+    const afterJoin = await get('/api/group/crowd/forum/inq_crowd', lateT);
+    ok('FA-C5c CURRENT TEMPORAL BEHAVIOUR: joining the node grants the historical Forum room',
+      afterJoin.status === 200
+      && /posted before the later player joined/.test(JSON.stringify(afterJoin.j.messages || [])));
+    orgNodes[C].crowd.memberIds = orgNodes[C].crowd.memberIds.filter(id => id !== 'late');
+    ok('FA-C5d leaving revokes that historical Forum room on the very next read',
+      (await get('/api/group/crowd/forum/inq_crowd', lateT)).status === 403);
 
     console.log('\n  D — A SIBLING NODE AND ANOTHER TENANT REACH NOTHING');
     const sibRead = await thread('focus', 'tf_crowd', sibT, 'group:crowd');
