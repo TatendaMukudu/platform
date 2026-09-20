@@ -18352,8 +18352,21 @@ function _forumThread(code, nodeId, inquiryId, { create = false } = {}) {
   return { ok: true, thread: threads[inq.inquiryId] || null, inquiry: inq, subjectRef: subject.subjectRef };
 }
 
-function _forumAccess(code, nodeId, userId) {
-  return { inNode: _inNode(code, nodeId, userId), leadsNode: _leadsNode(code, nodeId, userId) };
+function _forumAccess(code, nodeId, userId, inquiry) {
+  /* Access is the LIVE audience, not remembered node membership. A node reduced to one current
+     reader no longer has a Forum, and authorship cannot keep a departed reader in an old room.
+     Build the canonical inquiry shape once here and ask _forumAudience, the same owner used by
+     the object screen and Composer. Handlers must not grow their own interpretation of "two". */
+  const audience = _forumAudience(code, userId, {
+    kind: 'inquiry', id: inquiry && inquiry.inquiryId, nodeId, scope: `group:${nodeId}`,
+    raw: { ...(inquiry || {}), nodeId, subjectRef: `group:${nodeId}` },
+  });
+  return {
+    inNode: audience.available && audience.members.includes(String(userId)),
+    leadsNode: audience.available && audience.members.includes(String(userId))
+      && _leadsNode(code, nodeId, userId),
+    audience,
+  };
 }
 
 /* GET /api/group/:nodeId/forum/:inquiryId — read the deliberation. */
@@ -18362,7 +18375,7 @@ app.get('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
   const nodeId = String(req.params.nodeId);
   const t = _forumThread(code, nodeId, req.params.inquiryId);
   if (!t.ok) return res.status(t.status).json({ error: t.error });
-  const access = _forumAccess(code, nodeId, userId);
+  const access = _forumAccess(code, nodeId, userId, t.inquiry);
   if (!forum.mayRead(access)) return res.status(403).json({ error: 'not part of this group' });
   res.json({
     ok: true,
@@ -18380,13 +18393,17 @@ app.get('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
 app.post('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const nodeId = String(req.params.nodeId);
-  const t = _forumThread(code, nodeId, req.params.inquiryId, { create: true });
+  let t = _forumThread(code, nodeId, req.params.inquiryId);
   if (!t.ok) return res.status(t.status).json({ error: t.error });
-  const access = _forumAccess(code, nodeId, userId);
+  const access = _forumAccess(code, nodeId, userId, t.inquiry);
   if (!forum.mayPost(access)) return res.status(403).json({ error: 'not part of this group' });
 
   const text = String((req.body || {}).text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
+
+  // Create only after the live audience gate. A refused singleton write must not leave an empty
+  // remembered thread behind as if a room had existed.
+  if (!t.thread) t = _forumThread(code, nodeId, req.params.inquiryId, { create: true });
 
   const msg = forum.newMessage({
     id: 'fm_' + generateId(), authorId: userId, text,
@@ -18410,6 +18427,8 @@ app.patch('/api/group/:nodeId/forum/:inquiryId/:messageId', requireAuth, (req, r
   const nodeId = String(req.params.nodeId);
   const t = _forumThread(code, nodeId, req.params.inquiryId);
   if (!t.ok || !t.thread) return res.status(404).json({ error: t.error || 'no discussion yet' });
+  const access = _forumAccess(code, nodeId, userId, t.inquiry);
+  if (!forum.mayRead(access)) return res.status(403).json({ error: 'this discussion is not currently available to you' });
   const i = t.thread.messages.findIndex(m => m.messageId === String(req.params.messageId));
   if (i === -1) return res.status(404).json({ error: 'message not found' });
   if (!forum.mayEdit({ actorId: userId, message: t.thread.messages[i] })) {
@@ -18794,7 +18813,7 @@ app.post('/api/group/:nodeId/forum/:inquiryId/:messageId/contribute', requireAut
   const t = _forumThread(code, nodeId, req.params.inquiryId);
   if (!t.ok || !t.thread) return res.status(t.status || 404).json({ error: t.error || 'no discussion yet' });
   const msg = t.thread.messages.find(m => m.messageId === String(req.params.messageId));
-  const access = _forumAccess(code, nodeId, userId);
+  const access = _forumAccess(code, nodeId, userId, t.inquiry);
 
   // Authorship, not leadership. A coach may run the squad and still not put words in a player's
   // mouth — see ai/forum.mayContributeMessage.

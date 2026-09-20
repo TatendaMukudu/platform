@@ -115,6 +115,8 @@ const server = app.listen(0, async () => {
   const get  = (u, t) => fetch(base + u, { headers: H(t) }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
   const post = (u, t, b) => fetch(base + u, { method: 'POST', headers: H(t), body: JSON.stringify(b || {}) })
     .then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+  const patch = (u, t, b) => fetch(base + u, { method: 'PATCH', headers: H(t), body: JSON.stringify(b || {}) })
+    .then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
 
   const coachT = issueToken('coach', C, 'coach');
   const p1T = issueToken('p1', C, 'member');
@@ -210,6 +212,39 @@ const server = app.listen(0, async () => {
     ok('FA-C5d leaving revokes that historical Forum room on the very next read',
       (await get('/api/group/crowd/forum/inq_crowd', lateT)).status === 403);
 
+    console.log('\n  C6 — EVERY GROUP FORUM OPERATION RE-RESOLVES THE LIVE ROOM');
+    const authored = await post('/api/group/crowd/forum/inq_crowd', p1T,
+      { text: 'My authorship must not outlive my access to this room' });
+    ok('FA-C6 a normal current reader can POST while at least two current readers remain',
+      authored.status === 200 && !!authored.j.messageId);
+    ok('FA-C6b another current reader can GET the same live room',
+      (await get('/api/group/crowd/forum/inq_crowd', coachT)).status === 200);
+    const beforeRefusedWrite = (forumThreads[C].inq_crowd.messages || []).length;
+
+    // Only the coach remains. The inquiry and old speech still exist, but a person alone is not
+    // a Forum and neither existence nor authorship is an authorization grant.
+    orgNodes[C].crowd.memberIds = [];
+    ok('FA-C6c shrinking to ONE current reader refuses GET on the very next request',
+      (await get('/api/group/crowd/forum/inq_crowd', coachT)).status === 403);
+    ok('FA-C6d …and refuses POST rather than letting the remaining reader talk into an empty room',
+      (await post('/api/group/crowd/forum/inq_crowd', coachT, { text: 'nobody can read this' })).status === 403);
+    ok('FA-C6e the refused POST creates no speech or other remembered room state',
+      (forumThreads[C].inq_crowd.messages || []).length === beforeRefusedWrite);
+    ok('FA-C6f a former member is no longer a reader merely because the room has history',
+      (await get('/api/group/crowd/forum/inq_crowd', p1T)).status === 403);
+    ok('FA-C6g …and even the ORIGINAL AUTHOR cannot PATCH old speech after losing live access',
+      (await patch(`/api/group/crowd/forum/inq_crowd/${authored.j.messageId}`, p1T,
+        { text: 'trying to edit from outside' })).status === 403);
+
+    // Restore one legitimate member beside the coach. This pins only the already-characterized
+    // current temporal policy; it does not decide whether late joiners should inherit history.
+    orgNodes[C].crowd.memberIds = ['p1'];
+    const reopened = await get('/api/group/crowd/forum/inq_crowd', p1T);
+    ok('FA-C6h restoring a legitimate SECOND current reader restores the room under current policy',
+      reopened.status === 200
+      && /authorship must not outlive/.test(JSON.stringify((reopened.j || {}).messages || [])));
+    orgNodes[C].crowd.memberIds = ['p1', 'p2'];
+
     console.log('\n  D — A SIBLING NODE AND ANOTHER TENANT REACH NOTHING');
     const sibRead = await thread('focus', 'tf_crowd', sibT, 'group:crowd');
     ok('FA-D1 a sibling node’s leader cannot read the object at all, so the question of a forum never arises',
@@ -218,6 +253,8 @@ const server = app.listen(0, async () => {
     ok('FA-D2 another tenant gets nothing', farRead.status === 404 || farRead.status === 403);
     const farPost = await post('/api/group/crowd/forum/inq_crowd', farT, { text: 'hello' });
     ok('FA-D2b …and cannot post into the room either', farPost.status === 403 || farPost.status === 404);
+    ok('FA-D3 a sibling node leader cannot read the group Forum either',
+      (await get('/api/group/crowd/forum/inq_crowd', sibT)).status === 403);
 
     console.log('\n  E — FORUM INFORMS PRIVATE CONVERSATION, FOR THAT OBJECT ONLY');
     const said = await post('/api/group/crowd/forum/inq_crowd', p1T,
