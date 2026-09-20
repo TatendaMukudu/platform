@@ -2,7 +2,7 @@
 
 **Branch:** `codex/pilot-recovery-gate-r7` / draft PR #90  
 **Started from:** `c63215f4862055de9f12d3e277aea873a9b15c7a`  
-**Current recorded remote head:** `98d4d2a2683b63968dc5913dad4aedcb84cdef1f`  
+**Current recorded remote head:** `130863e3838d0eedf90272820d02fe8353acf884`
 **Verdict:** **SAFE TO MERGE: NO.** Nothing was merged or deployed.
 
 This is the evidence ledger for the closure pass governed by
@@ -114,6 +114,36 @@ Mutations, all red as required:
 - force check-in streaks back to non-neutral milestones: proactive suite fails;
 - restore forced High-first opening: proactive suite fails.
 
+### `130863e3838d0eedf90272820d02fe8353acf884` — characterize temporal audience boundaries
+
+Canonical owners traced: `ai/audience.js::resolve` owns stored node-audience references;
+`server.js::_forumAccess` owns group Forum admission; the Focus source route remains keyed to the
+source owner's own workspace.
+
+Positive current behavior, pending founder policy: node-members and Forum rooms resolve against
+the current roster, so a later join currently gains an existing node-members audience and
+historical Forum speech; leaving revokes both on the next read. Negative law: current membership,
+a shared Focus and its relationship to a source conversation must never combine to grant a new
+participant access to that private predecessor chat.
+
+No production behavior or temporal policy changed. The tests explicitly label join-after-share
+as characterization so the current expansion cannot change silently before the founder decides
+whether historical Forum/shared material should snapshot its original audience.
+
+Proof:
+
+- `audience-disclosure-smoke` — 48 passed;
+- `forum-audience-smoke` — 89 passed;
+- `focus-continuity-smoke` — 45 passed;
+- `npm test` — green, all registered suites.
+
+Mutations, both red as required:
+
+- removing current node members from `ai/audience.js::resolve` failed the join-after-share
+  assertion (47 passed, 1 failed);
+- disabling member admission at `server.js::_forumAccess` failed the historical Forum join case
+  (80 passed, 9 failed). The mutation was restored before the full run.
+
 ## 4. Environment and remaining external proof
 
 This pass used in-process memory and deterministic/provider-failure paths. The full suite reported
@@ -134,8 +164,13 @@ still outstanding.
 
 ## 5. Next closure seam
 
-Continue from the remaining P0/P1 list in the Monday brief. The next pass should trace temporal
-audience behavior before changing it: document join-after-share and leave-after-share separately
-for Forum history, raw conversation, contributed evidence, and derived organizational learning.
-Founder policy is still required before changing which historical shared records a newly joined
-member may read. Private predecessor conversation must remain inaccessible regardless.
+The latest `INTELLIGENCE_EXPERIENCE_LAW.md` at `7a1900a` materially expands methodical
+conversation, response-quality, evidence-direction, experimentation and help-seeking acceptance.
+The next implementation seam should be selected from that matrix by tracing the real Home/object
+Composer path and finding the first behavioral failure, with priority on response/action quality
+through A -> B -> experiment -> outcome -> learning rather than adding another pure helper.
+
+One founder decision remains narrow and external: whether a new node member should read historical
+Forum speech and other previously shared node material. Current behavior is now pinned rather than
+silently treated as ratified. Regardless of that choice, private predecessor conversation remains
+inaccessible.
