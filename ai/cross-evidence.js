@@ -343,6 +343,34 @@ function loop(objects = [], focusRef = null) {
   const resolvedAt = _at(raw.resolvedAt)
     || (_rawOutcome && typeof _rawOutcome === 'object' ? _at(_rawOutcome.at) : null);
 
+  /* OTHER CLOSED ATTEMPTS ON THE SAME A. These are not "similar" because a model said so: each
+     one carries the same canonical `addresses` edge as the Focus in view. That is deliberately a
+     narrow comparison. Sharing an A does not mean two tactics were identical, so this reader
+     returns only refs, recorded outcomes and times; the authorised caller may join the Focus
+     labels so the Composer can compare what people actually chose.
+
+     No conversation, evidence statement or identity travels. The input set has already been
+     scoped by the caller, and an attempt outside it cannot be found here. */
+  const priorAttempts = [];
+  if (addressesRef) {
+    for (const candidate of rows) {
+      const candidateRef = refOf(candidate);
+      if (!candidate || candidate.kind !== 'focus' || candidateRef === self) continue;
+      const candidateAddress = (all.find(e => e.from === candidateRef && e.type === 'addresses') || {}).to || null;
+      if (candidateAddress !== addressesRef) continue;
+      const candidateRaw = candidate.raw || {};
+      const candidateOutcomeRaw = candidateRaw.outcome || null;
+      const candidateOutcome = candidateOutcomeRaw && typeof candidateOutcomeRaw === 'object'
+        ? candidateOutcomeRaw.result || null : candidateOutcomeRaw;
+      if (!candidateOutcome) continue; // an open sibling Focus is not a prior outcome
+      const candidateResolvedAt = _at(candidateRaw.resolvedAt)
+        || (candidateOutcomeRaw && typeof candidateOutcomeRaw === 'object' ? _at(candidateOutcomeRaw.at) : null);
+      priorAttempts.push({ focus: candidateRef, outcome: _s(candidateOutcome, 20),
+        resolvedAt: candidateResolvedAt });
+    }
+    priorAttempts.sort((x, y) => (y.resolvedAt || 0) - (x.resolvedAt || 0) || x.focus.localeCompare(y.focus));
+  }
+
   /* WHAT ARRIVED AFTER. Only on the object the focus addressed, only from signals that are
      current, and only as a COUNT plus their refs — the statements stay where they live. */
   let observedSince = null;
@@ -364,6 +392,7 @@ function loop(objects = [], focusRef = null) {
     sharedEvidence: a ? evidenceRefsOf(f).filter(r => new Set(evidenceRefsOf(a)).has(r)) : [],
     outcome: outcome ? _s(outcome, 20) : null,
     resolvedAt,
+    priorAttempts,
     observedSince,
     /* WHERE THE LOOP IS OPEN. A person asking "are we closer?" deserves to be told which part of
        the answer does not exist yet, rather than a confident-sounding sentence built over a gap. */

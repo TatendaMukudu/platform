@@ -101,6 +101,13 @@ ok('9 · …to meet the person at the useful next move rather than manufacture a
   && /already chosen, stop interrogating/.test(c.SYSTEM_PROMPT));
 ok('9 · …and allow a useful turn to end with neither question nor action',
   /valid to answer with no question[\s\S]*and no action/.test(c.SYSTEM_PROMPT));
+ok('9 · …to learn from prior attempts without laundering sequence into cause',
+  /Do not repackage a materially identical unsuccessful[\s\S]*tactic as new/.test(c.SYSTEM_PROMPT)
+  && /sequence is[\s\S]*not proof of cause/.test(c.SYSTEM_PROMPT)
+  && /contextual precedent, not a guarantee/.test(c.SYSTEM_PROMPT));
+ok('9 · …to stop low-value variations and route help without turning role into truth or access',
+  /poor information value/.test(c.SYSTEM_PROMPT)
+  && /role[\s\S]*proves nothing and grants no access to private material/.test(c.SYSTEM_PROMPT));
 ok('9 · …to read the domain before deciding what a word means (the "finishing" failure)',
   /putting chances away, not completing tasks/.test(c.SYSTEM_PROMPT));
 ok('9 · …to actually start building when asked to build, not just offer',

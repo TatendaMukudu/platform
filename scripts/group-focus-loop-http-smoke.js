@@ -78,7 +78,9 @@ const INQ = (id, concept, label, unknowns = []) => ({
 });
 
 _loadAllStores({
-  orgMeta:  { [C]: { orgName: 'Alma College', orgMode: 'sports' }, [X]: { orgName: 'Elsewhere', orgMode: 'sports' } },
+  orgMeta:  { [C]: { orgName: 'Alma College', orgMode: 'sports', professionals: [
+    { userId: 'coach', title: 'Head Coach', remit: 'build-up play and playing through pressure' },
+  ] }, [X]: { orgName: 'Elsewhere', orgMode: 'sports' } },
   orgUsers: {
     [C]: {
       coach: { id: 'coach', name: 'Head Coach', email: 'c@g.io', role: 'coach', orgCode: C, status: 'active', leadershipNodeIds: ['sq'], assignedNodeIds: [] },
@@ -260,6 +262,43 @@ const server = app.listen(0, async () => {
       && /no outcome has been recorded on this focus yet/i.test(handed));
     ok('GFL-G2b …and never names the inquiry the OTHER focus was started on',
       !/started to work on an inquiry: Building from the back/i.test(block()));
+
+    console.log('\n  H — A FAILED ATTEMPT CHANGES WHAT THE NEXT FOCUS COMPOSER KNOWS');
+    await post(`/api/group/sq/focus/${plain.j.focus.focusId}/outcome`,
+      { result: 'no_change', note: 'not comparable to build-up' }, T.coach);
+    const failed = await post('/api/group/sq/focus',
+      { text: 'Drop the six between the centre backs', fromInquiryId: 'inq_q' }, T.coach);
+    ok('GFL-H1 a second attempt on the same A is a canonical Focus, not a suggestion-side memory',
+      failed.status === 200 && failed.j.focus.origin.inquiryId === 'inq_q');
+    await post(`/api/group/sq/focus/${failed.j.focus.focusId}/outcome`,
+      { result: 'no_change', note: 'the press still trapped us by the touchline' }, T.coach);
+    const current = await post('/api/group/sq/focus',
+      { text: 'Use a full-back inside during build-up', fromInquiryId: 'inq_q' }, T.coach);
+    handed = '';
+    await turn('p1', 'What should we try next?', { kind: 'focus', id: current.j.focus.focusId });
+    ok('GFL-H2 the live Focus Composer receives prior closed attempts on the SAME governed A',
+      /PRIOR CLOSED ATTEMPTS ON THE SAME THING/.test(block())
+      && /Drop the six between the centre backs/.test(block())
+      && /recorded outcome: no_change/.test(block()));
+    ok('GFL-H3 …and receives the different successful precedent too, without calling either causal proof',
+      /Start the build deeper for three games/.test(block())
+      && /recorded outcome: better/.test(block())
+      && /precedent, not proof of cause/i.test(block()));
+    ok('GFL-H4 failed notes and participant identities do not travel with the reusable attempt shape',
+      !/press still trapped us/.test(block()) && !/Player \d|Head Coach/.test(block()));
+    ok('GFL-H5 the response law forbids recycling a failed tactic and permits a help transition',
+      /materially identical unsuccessful[\s\S]*tactic as new/.test(ai && require('../ai/composer.js').SYSTEM_PROMPT)
+      && /poor information value/.test(require('../ai/composer.js').SYSTEM_PROMPT));
+    ok('GFL-H5b the existing governed directory supplies a real capability route, not an invented role',
+      /Head Coach[\s\S]*build-up play and playing through pressure/.test(handed));
+    ok('GFL-H6 role relevance is explicitly routing context, never truth or private access',
+      /role[\s\S]*proves nothing and grants no access to private material/.test(require('../ai/composer.js').SYSTEM_PROMPT));
+
+    handed = '';
+    await turn('out', 'What did they already try?', { kind: 'focus', id: current.j.focus.focusId });
+    ok('GFL-H7 another squad receives neither the current Focus nor its reusable attempt history',
+      !/Drop the six between the centre backs/.test(handed)
+      && !/Start the build deeper for three games/.test(handed));
 
   } catch (e) { fail++; console.error('  FAIL group-focus-loop suite threw:', e && e.stack); }
 

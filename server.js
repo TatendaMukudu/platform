@@ -11338,9 +11338,15 @@ function _crossEvidenceContext(code, userId, aboutRef) {
     const safeOpen = loop ? loop.open.filter(x => !groupPostWithheld
       || x !== 'nothing has been recorded on it since the outcome') : [];
     if (groupPostWithheld) safeOpen.push('post-outcome evidence cannot yet be described at this group level');
+    const priorAttempts = loop ? (loop.priorAttempts || []).map(p => {
+      const prior = byRef.get(p.focus) || {};
+      const label = String((prior.explained && prior.explained.headline)
+        || (prior.present && prior.present.summary && prior.present.summary.title) || '').slice(0, 160);
+      return label ? { label, outcome: p.outcome, resolvedAt: p.resolvedAt || null } : null;
+    }).filter(Boolean).slice(0, 5) : [];
     return { related, loop: loop ? { addresses: loop.addresses, outcome: loop.outcome,
       observedSince: !groupPostWithheld && loop.observedSince ? loop.observedSince.records : null,
-      sharedOrigins: loop.sharedOrigins.length, open: safeOpen } : null };
+      sharedOrigins: loop.sharedOrigins.length, priorAttempts, open: safeOpen } : null };
   } catch (_) { return null; }
 }
 

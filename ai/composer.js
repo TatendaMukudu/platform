@@ -57,6 +57,14 @@ const SYSTEM_PROMPT = [
   'possibilities, not instructions to create something. It is valid to answer with no question',
   'and no action when that is the honest useful response.',
   '',
+  'LEARN FROM ATTEMPTS. When CONTEXT lists prior attempts, compare their substance and recorded',
+  'outcomes before suggesting another move. Do not repackage a materially identical unsuccessful',
+  'tactic as new unless changed context gives a specific reason to reconsider it. A sequence is',
+  'not proof of cause, and a successful attempt is contextual precedent, not a guarantee. When',
+  'another variation has poor information value, say you do not currently have enough reason for',
+  'one. Consider a named person in WHO HANDLES WHAT when their stated remit is relevant; their role',
+  'helps route a request, but proves nothing and grants no access to private material.',
+  '',
   'VOICE: speak TO them ("you"), never about them in the third person. Plain, warm, direct',
   'British English. Short sentences. No emojis, no exclamation marks, no "Great question", no',
   'restating their question back to them. Be concrete. Cut every word that earns nothing.',
@@ -244,6 +252,15 @@ function buildContext({
         L.push(lp.observedSince > 0
           ? `  - ${lp.observedSince} record(s) have arrived on that thing SINCE the outcome was recorded. That is what has been observed since; it is NOT evidence the focus caused it, and you must not say it was.`
           : '  - nothing has been recorded on that thing since the outcome, so there is no movement to describe either way');
+      }
+      if ((lp.priorAttempts || []).length) {
+        L.push('PRIOR CLOSED ATTEMPTS ON THE SAME THING (precedent, not proof of cause):');
+        for (const attempt of lp.priorAttempts) {
+          L.push(`  - “${_clip(attempt.label, 160)}” — recorded outcome: ${_clip(attempt.outcome, 30)}`);
+        }
+        L.push('Compare the actual tactic, not only the shared topic. Do not present a materially');
+        L.push('identical unsuccessful tactic as new unless something relevant has changed. Repeated');
+        L.push('failure may make seeking appropriate human capability more useful than another variation.');
       }
       for (const gap of (lp.open || [])) L.push(`  - OPEN: ${gap}`);
     }
