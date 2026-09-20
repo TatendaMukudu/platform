@@ -43,7 +43,7 @@ ok('2b · a thread opened from a card carries what it is about',
   /OPENED FROM SOMETHING THE SYSTEM NOTICED/.test(fromCard)
   && /You've been pulling back/.test(fromCard) && /eased off from your own normal/.test(fromCard));
 ok('2b · …and is told to open the discussion rather than restate the card',
-  /Start there\./.test(fromCard) && /one question that moves it forward/.test(fromCard));
+  /Start there\./.test(fromCard) && /only the next move the context earns/.test(fromCard));
 ok('2b · an ordinary thread carries no card context', !/OPENED FROM SOMETHING/.test(ctx));
 
 /* THE KERNEL DECIDES WHAT TO LEARN; THE MODEL ONLY PHRASES IT. Without this the assistant asks
@@ -89,8 +89,18 @@ ok('9 · the model is told never to invent org specifics',
   /Never state a fact about this person or this organisation unless it is in CONTEXT/.test(c.SYSTEM_PROMPT));
 ok('9 · …to admit an empty context rather than pad it with a guess',
   /SAY SO plainly/.test(c.SYSTEM_PROMPT) && /Never pad the gap with a guess/.test(c.SYSTEM_PROMPT));
-ok('9 · …to then BUILD the missing picture with one specific question',
-  /ask one specific, easy question/.test(c.SYSTEM_PROMPT));
+ok('9 · …to BUILD a genuinely missing picture with one specific question',
+  /ask one specific,[\s\S]*easy question/.test(c.SYSTEM_PROMPT)
+  && /answer would change what we understand/.test(c.SYSTEM_PROMPT));
+ok('9 · …but not manufacture a question once the governed context already answers it',
+  /do not ask merely to keep the conversation going/.test(c.SYSTEM_PROMPT)
+  && /Ask a[\s\S]*question only when a meaningful uncertainty remains/.test(c.SYSTEM_PROMPT));
+ok('9 · …to meet the person at the useful next move rather than manufacture an object',
+  /DO NOT DEFAULT TO A QUESTION/.test(c.SYSTEM_PROMPT)
+  && /brainstorming[\s\S]*without manufacturing an[\s\S]*Inquiry or Focus/.test(c.SYSTEM_PROMPT)
+  && /already chosen, stop interrogating/.test(c.SYSTEM_PROMPT));
+ok('9 · …and allow a useful turn to end with neither question nor action',
+  /valid to answer with no question[\s\S]*and no action/.test(c.SYSTEM_PROMPT));
 ok('9 · …to read the domain before deciding what a word means (the "finishing" failure)',
   /putting chances away, not completing tasks/.test(c.SYSTEM_PROMPT));
 ok('9 · …to actually start building when asked to build, not just offer',
