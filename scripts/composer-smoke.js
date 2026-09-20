@@ -108,6 +108,12 @@ ok('9 · …to learn from prior attempts without laundering sequence into cause'
 ok('9 · …to stop low-value variations and route help without turning role into truth or access',
   /poor information value/.test(c.SYSTEM_PROMPT)
   && /role[\s\S]*proves nothing and grants no access to private material/.test(c.SYSTEM_PROMPT));
+ok('9 · …to revisit A and B without silently rewriting history or taking agency over B',
+  /KEEP A AND B REVISABLE/.test(c.SYSTEM_PROMPT)
+  && /without rewriting[\s\S]*earlier record/.test(c.SYSTEM_PROMPT)
+  && /B remains their choice/.test(c.SYSTEM_PROMPT)
+  && /A tactic adjustment is not a new Focus/.test(c.SYSTEM_PROMPT)
+  && /revise the same commitment or start a[\s\S]*separate one/.test(c.SYSTEM_PROMPT));
 ok('9 · …to read the domain before deciding what a word means (the "finishing" failure)',
   /putting chances away, not completing tasks/.test(c.SYSTEM_PROMPT));
 ok('9 · …to actually start building when asked to build, not just offer',

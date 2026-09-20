@@ -42,13 +42,13 @@ const ACTIONS = Object.freeze({
   create_focus: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', null], confirmation: true,
     args: { text: 'the commitment in the person own words', target: 'a measurable target ONLY if they stated one',
       reviewOn: 'a review date ONLY if they stated one' },
-    description: 'Start a private focus in the user words; target and review date are optional and never invented.' },
+    description: 'Start a private focus in the user words. Inside an existing focus, use this ONLY for a deliberately separate desired state, never for a tactic adjustment or rewording; the existing focus remains unchanged. Target and review date are optional and never invented.' },
   update_focus: { contexts: ['focus'], confirmation: true,
     args: { text: 'the new wording, in the person own words', target: 'a target ONLY if they stated one',
       reviewOn: 'a review date ONLY if they stated one',
       visibility: 'private or shared, ONLY if they said which',
       participantIds: 'ids from currentContext.contacts, ONLY if they named people' },
-    description: 'Change the wording, target, review date, or audience of the current focus.' },
+    description: 'Revise the desired state, wording, target, review date, or audience of the current focus while preserving the same canonical commitment. Use this, not create_focus, for tactic adjustments or a revision the person says is still the same commitment.' },
   record_focus_outcome: { contexts: ['focus'], confirmation: true,
     args: { outcome: 'the outcome word the person themselves used' },
     description: 'Record the user declared outcome of the current focus.' },
@@ -332,8 +332,12 @@ function available(context = {}) {
 }
 
 function prompt({ text, context = {}, priorMessages = [] } = {}) {
+  const inFocus = context.object && context.object.kind === 'focus';
   return JSON.stringify({
     rule: 'Interpret intent only. Propose actions; never claim execution, permission, safety, confidence or visibility. Use no action when the person is only talking. Do not infer missing dates, targets, audiences, folder names or outcomes. You never author an identifier: the object and the evidence in view are already decided by what the person is looking at, and any id you write will be discarded.',
+    journeyRule: inFocus
+      ? 'This conversation is already inside a Focus. A changed tactic does not create a new Focus. Use update_focus only when the person deliberately revises this same commitment. Use create_focus only when they clearly choose a separate desired state; it leaves the current Focus and its history unchanged. If it is unclear whether revised B is the same commitment or a separate one, propose neither and ask that smallest clarification. You may question the starting assumption without rewriting any record.'
+      : 'Do not manufacture a Focus merely because a tactic or option was discussed. A Focus is a desired state the person deliberately chooses.',
     relationVocabulary: FOCUS_RELATIONS,
     currentContext: {
       surface: context.surface || null,

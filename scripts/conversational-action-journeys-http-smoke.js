@@ -253,6 +253,10 @@ const server = app.listen(0, async () => {
     ok('B10 …while an action that DOES declare it keeps it, de-duplicated',
       n2.actions[0].arguments.visibility === 'shared'
       && n2.actions[0].arguments.participantIds.join(',') === 'p2,p3');
+    const focusPrompt = actions.prompt({ text: 'try another approach', context: { object: { kind: 'focus', id: fid } } });
+    ok('B10a the production interpreter is told not to turn a tactic variation into another Focus',
+      /changed tactic does not create a new Focus/.test(focusPrompt)
+      && /If it is unclear whether revised B is the same commitment or a separate one/.test(focusPrompt));
     /* AND THE ONE THE LAW FORBIDS IS FORBIDDEN AT THE FILTER, not only absent from the prompt. */
     const n3 = actions.normalize({ actions: [{ type: 'declare_focus_relation',
       arguments: { relation: 'supports', evidenceRef: 'ev_me_0' } }] },

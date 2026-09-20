@@ -15683,7 +15683,8 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
     return ({
     id: 'prop_' + generateId(), actionType: c.type, capability: 'composer_action',
     label: ({
-      create_focus: 'Start this focus', update_focus: 'Update this focus', record_focus_outcome: 'Record this focus outcome',
+      create_focus: context.object && context.object.kind === 'focus' ? 'Start a separate focus' : 'Start this focus',
+      update_focus: 'Revise this focus', record_focus_outcome: 'Record this focus outcome',
       inspect_inquiry: 'Show this inquiry', create_inquiry: 'Open this as an inquiry', show_evidence: 'Show the governed evidence',
       settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
@@ -15728,6 +15729,8 @@ function _composerActionEffect(candidate, context) {
   const a = candidate.arguments || {}, sources = candidate.argumentSources || {};
   const group = (context.groups || []).find(g => String(g.id) === String(a.groupId));
   const people = (context.contacts || []).filter(c => (a.participantIds || []).includes(c.id));
+  const revisesFocus = candidate.type === 'update_focus' && context.object && context.object.kind === 'focus';
+  const separatesFocus = candidate.type === 'create_focus' && context.object && context.object.kind === 'focus';
   return {
     text: a.text || null, textSource: sources.text || null,
     account: a.because || null,
@@ -15796,7 +15799,9 @@ function _composerActionEffect(candidate, context) {
       ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
       : (candidate.type === 'prioritise_object' || candidate.type === 'unprioritise_object')
         ? 'This is yours alone. It changes what comes up first for you and nothing about who can see this or what anybody else thinks of it.'
-        : null,
+        : separatesFocus
+          ? 'This creates a separate commitment. The current Focus and its history stay unchanged.'
+          : (revisesFocus ? 'This revises the current commitment on the same Focus. Its earlier history stays attached.' : null),
   };
 }
 

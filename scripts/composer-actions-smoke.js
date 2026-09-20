@@ -16,6 +16,12 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
   ok('CA2 a model cannot propose an action unavailable in the current context',
     actions.normalize({ actions: [{ type: 'settle_inquiry' }] }, { object: { kind: 'focus', id: 'f1' } }).actions.length === 0);
   ok('CA3 the model-facing prompt forbids inventing audience, dates, targets and outcomes', /Do not infer missing dates, targets, audiences, folder names or outcomes/.test(actions.prompt({ text: 'do it' })));
+  const focusActionPrompt = actions.prompt({ text: 'try something else', context: { object: { kind: 'focus', id: 'f1' } } });
+  ok('CA3a the real Focus action interpreter separates tactic change, revised B and a separate commitment',
+    /changed tactic does not create a new Focus/.test(focusActionPrompt)
+    && /revises this same commitment/.test(focusActionPrompt)
+    && /clearly choose a separate desired state/.test(focusActionPrompt)
+    && /propose neither and ask that smallest clarification/.test(focusActionPrompt));
   const hostile = actions.ground(actions.normalize({ actions: [{ type: 'create_focus', arguments: {
     text: 'A model rewrite', target: 'Invented target', reviewOn: '2030-01-02', visibility: 'shared', participantIds: ['hidden'] } }] },
     { object: null }), { text: 'Make that my focus', priorMessages: [{ role: 'user', text: 'Improve communication when we defend.' }], context: { object: null } });
@@ -78,6 +84,24 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
       { kind: 'focus', id: focus.json.focus.id }, { target: 'Calmer defensive communication' });
     const updated = await confirm(updateTurn, 'update_focus');
     ok('CA12b focus target updates through the same confirmed dispatcher', updated.json.focus?.target === 'Calmer defensive communication');
+    const afterRevision = S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus');
+    ok('CA12b2 revising B keeps the same canonical Focus rather than proliferating one',
+      afterRevision.length === focusBefore + 1 && updated.json.focus?.id === focus.json.focus.id);
+
+    const existingBeforeSeparate = JSON.stringify(S._getMemory(ALMA_CODE, member.id).focuses
+      .find(f => f.id === focus.json.focus.id));
+    const separateTurn = await turn('create_focus', 'Start a separate focus on earlier scanning.',
+      { kind: 'focus', id: focus.json.focus.id }, { text: 'Earlier scanning' });
+    const separateProp = separateTurn.json.response.proposedActions.find(p => p.actionType === 'create_focus');
+    ok('CA12b3 a revised B proposed inside Focus is visibly a separate commitment before confirmation',
+      separateProp?.label === 'Start a separate focus'
+      && /current Focus and its history stay unchanged/.test(separateProp?.effect?.disclosure || '')
+      && S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus').length === focusBefore + 1);
+    const separate = await confirm(separateTurn, 'create_focus');
+    ok('CA12b4 confirming the explicit choice creates one separate Focus without rewriting its predecessor',
+      separate.json.focus?.id && separate.json.focus.id !== focus.json.focus.id
+      && S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus').length === focusBefore + 2
+      && JSON.stringify(S._getMemory(ALMA_CODE, member.id).focuses.find(f => f.id === focus.json.focus.id)) === existingBeforeSeparate);
 
     const disagreeTurn = await turn('disagree_with_inquiry', 'I think spacing is the issue, not effort.', about,
       { because: 'I think spacing is the issue, not effort.' });

@@ -6646,6 +6646,7 @@ function todayRenderProposals(j) {
     return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
       <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
       ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
+      ${effect.disclosure ? `<div class="tdy-prop-why">${esc(effect.disclosure)}</div>` : ''}
       ${share ? `<div class="tdy-prop-why">Audience: ${esc(audience.name || 'Forum')} (${esc(audience.readable)} current readers). Only these edited words will be shared; the rest of this conversation stays private. A Forum post is speech, not evidence.</div><label class="iq-field">Words to share<textarea class="iq-field-input iq-share-edit" aria-label="Words to share">${esc(effect.text || '')}</textarea></label>` : ''}
       <div class="tdy-actions" style="margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
