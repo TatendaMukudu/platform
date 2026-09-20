@@ -558,3 +558,42 @@ At minimum test:
 - provider paraphrase/code-switching does not change the deterministic privacy, audience, evidence or canonicalization result.
 
 For each scenario, test both **what IntelliQ does** and the nearest dangerous thing it must **not** do. Mutation-test the governing assertions where feasible. A polished answer without the correct governed action is a failure; a correct backend mutation with awkward, misleading or machinery-exposing prose is also a failure.
+
+## Evidence direction and polarity law
+
+**Evidence contributes to direction before it contributes to polarity.**
+
+Every admissible piece of evidence should be allowed to affect governed understanding where it is relevant. When a meaningful reference exists -- for example an individual, group or organization goal, trait, expected behaviour, Focus, hypothesis, desired B or prior understanding -- evidence may:
+
+- support movement toward or consistency with that reference;
+- support movement away from or inconsistency with it;
+- contradict or complicate the reference itself;
+- be relevant but directionally ambiguous;
+- or be too weak/isolated to justify a directional conclusion yet.
+
+High and Low are **human-facing governed standings over meaningful patterns**, not automatic wrappers around individual evidence events. One positive observation may contribute toward a High without manufacturing a High immediately; one negative observation may contribute toward a Low without manufacturing a Low immediately. Independent origins, repetition, corrections, contradiction, scope, recency and other canonical standing rules still apply.
+
+A High may emerge when the governed body of evidence justifies that something meaningful appears to be going well, holding, improving or aligning with a desired direction. A Low may emerge when the governed body of evidence justifies that something meaningful appears worth attention, is deteriorating, obstructing a desired direction or materially conflicting with an expectation. Neither standing is required when the evidence remains ambiguous or the reference itself is questionable.
+
+**Declared goals, traits, role descriptions and expected behaviours are reference context, not empirical truth.** Evidence that aligns with a description may support a High; evidence that conflicts may support a Low; but outcomes may instead show that the description or desired behaviour deserves reconsideration. IntelliQ must not label beneficial behavior a Low merely because it differs from a declared expectation.
+
+Example: if a midfielder's role description says to play forward whenever possible, repeated recycling of possession is not automatically a Low. If governed outcomes show that recycling under particular pressure improves possession or progression, IntelliQ should be able to surface that the expectation itself may need refinement.
+
+Evidence may relate across authorized individual, group/team and organization references without widening audience. The same evidence must not be copied into parallel truth stores simply to support different views; relationships should point back to canonical governed evidence/provenance.
+
+### Required direction/polarity tests
+
+Implementation must prove at least:
+
+- a single positive observation can contribute toward a possible High without automatically creating one;
+- a single negative observation can contribute toward a possible Low without automatically creating one;
+- sufficiently supported independent evidence can produce the appropriate High/Low standing;
+- repeated reports from one origin do not masquerade as independent corroboration;
+- ambiguous evidence can remain unpolarized;
+- contradictory evidence can weaken or complicate an existing High/Low rather than being discarded;
+- a correction supersedes the corrected contribution without erasing provenance;
+- evidence can support or conflict with individual, group/team and organization goals/traits/Focuses where authorized;
+- alignment with a declared trait does not turn the declaration itself into evidence;
+- evidence with beneficial outcomes can challenge a role description or expected behaviour rather than being mechanically labelled a Low;
+- cross-level relationships do not widen readership or leak private evidence;
+- one canonical evidence record can inform multiple authorized relationships without being copied into multiple truth systems.
