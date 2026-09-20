@@ -55,6 +55,8 @@ _loadAllStores({
          an older organisation, which is a worse failure than the one this rule prevents — so the
          rule is "present unless marked otherwise" rather than "marked active". */
       old:  { id: 'old',  name: 'Legacy Account', email: 'o@sau.io', role: 'member', orgCode: A },
+      first: { id: 'first', name: 'First Login', email: 'f@sau.io', role: 'member', orgCode: A,
+        status: 'active', passwordSet: false, passwordHash: 'unchanged-first-login-hash' },
     },
     /* THE SAME USER ID IN A SECOND TENANT. Without it, "resolved inside the session's org" is a
        claim no assertion can distinguish from "resolved somewhere". */
@@ -73,6 +75,8 @@ const server = app.listen(0, async () => {
   const get  = (u, t) => fetch(base + u, { headers: H(t) }).then(r => r.status);
   const post = (u, b, t) => fetch(base + u, { method: 'POST', headers: H(t), body: JSON.stringify(b) })
     .then(r => r.status);
+  const postJson = (u, b, t) => fetch(base + u, { method: 'POST', headers: H(t), body: JSON.stringify(b) })
+    .then(async r => ({ status: r.status, body: await r.json().catch(() => null) }));
 
   /* TWO ROUTES, because the product has two doors and they used to disagree. `/api/contacts` is
      `requireAuth` only; the metrics write is `requirePermission('manage_metrics')`. A fix applied
@@ -180,12 +184,48 @@ const server = app.listen(0, async () => {
       (await READ(ashTok)) === 200 && (await READ(ashInB)) === 401);
     restore(B, 'ash', { status: 'active' });
 
-    console.log('\n  F — THE REFUSAL SAYS ENOUGH AND NOT MORE');
+    console.log('\n  F — PROFILE AND FIRST-LOGIN CREDENTIALS USE THE SAME CURRENT-ACCOUNT OWNER');
+    ok('SA-F1 an active current account can read its own profile',
+      (await get('/api/auth/me', ashTok)) === 200);
+    for (const status of ['inactive', 'suspended', 'pending_review_2027']) {
+      restore(A, 'ash', { status });
+      ok(`SA-F2 /api/auth/me refuses a '${status}' current account`,
+        (await get('/api/auth/me', ashTok)) === 401);
+    }
+    restore(A, 'ash', { status: 'active' });
+    const goneForMe = orgUsers[A].ash;
+    delete orgUsers[A].ash;
+    ok('SA-F3 /api/auth/me refuses a token whose account was deleted',
+      (await get('/api/auth/me', ashTok)) === 401);
+    orgUsers[A].ash = goneForMe;
+
+    const firstTok = issueToken('first', A, 'member');
+    const first = orgUsers[A].first;
+    const unchanged = () => first.passwordSet === false && first.passwordHash === 'unchanged-first-login-hash';
+    for (const status of ['inactive', 'suspended', 'pending_review_2027']) {
+      first.status = status;
+      const denied = await postJson('/api/auth/set-password', { newPassword: 'new-secret' }, firstTok);
+      ok(`SA-F4 bearer set-password refuses a '${status}' account without credential mutation or a fresh token`,
+        denied.status === 401 && unchanged() && !(denied.body && denied.body.token));
+    }
+    first.status = 'active';
+    delete orgUsers[A].first;
+    const missingSet = await postJson('/api/auth/set-password', { newPassword: 'new-secret' }, firstTok);
+    ok('SA-F5 bearer set-password refuses a deleted account without issuing a token',
+      missingSet.status === 401 && !(missingSet.body && missingSet.body.token));
+    orgUsers[A].first = first;
+    ok('SA-F5b …and the deleted-account refusal did not alter the detached credential record', unchanged());
+    const acceptedSet = await postJson('/api/auth/set-password', { newPassword: 'new-secret' }, firstTok);
+    ok('SA-F6 a current first-login account still sets its password and receives its governed session',
+      acceptedSet.status === 200 && acceptedSet.body?.ok === true && !!acceptedSet.body.token
+      && first.passwordSet === true && first.passwordHash !== 'unchanged-first-login-hash');
+
+    console.log('\n  G — THE REFUSAL SAYS ENOUGH AND NOT MORE');
     restore(A, 'ash', { status: 'suspended' });
     const body = await fetch(base + '/api/contacts', { headers: H(ashTok) }).then(r => r.json()).catch(() => null);
-    ok('SA-F1 the reason is one a person can act on — log in again',
+    ok('SA-G1 the reason is one a person can act on — log in again',
       !!body && /log in again/i.test(String(body.error || '')));
-    ok('SA-F2 …and does not disclose the account\'s state, which a holder of a stale token is not entitled to and cannot act on',
+    ok('SA-G2 …and does not disclose the account\'s state, which a holder of a stale token is not entitled to and cannot act on',
       !!body && !/suspend|inactive|removed|deleted|not found|no such/i.test(String(body.error || '')));
     restore(A, 'ash', { status: 'active' });
 

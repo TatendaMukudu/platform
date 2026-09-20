@@ -2238,13 +2238,14 @@ app.post('/api/auth/join-invite', async (req, res) => {
 
 /* ── Get current user profile ───────────────────────────────────────────── */
 app.get('/api/auth/me', (req, res) => {
-  const header  = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  const token   = header || req.query.token;
-  const session = verifyToken(token);
-  if (!session) return res.status(401).json({ error: 'Authentication required.' });
-
-  const user = orgUsers[session.orgCode]?.[session.userId];
-  if (!user) return res.status(404).json({ error: 'User not found.' });
+  /* PROFILE IS NOT AN EXCEPTION TO CURRENT ACCOUNT AUTHORITY. This route used to verify the
+     bearer record directly, so an inactive, suspended, future-status or deleted account could
+     still receive its profile after every `requireAuth` route had correctly stopped it. A token
+     says who signed in; `_authoriseRequest` is the one owner of whether that person exists and is
+     present now. */
+  const a = _authoriseRequest(req);
+  if (!a.ok) return res.status(a.status).json({ error: a.error });
+  const { session, user } = a;
 
   const org = orgMeta[session.orgCode];
 
@@ -3015,10 +3016,13 @@ app.post('/api/auth/set-password', async (req, res) => {
   //    Allowed only when passwordSet === false (first-login).
   const authHeader = (req.headers.authorization || '').replace('Bearer ', '').trim();
   if (authHeader) {
-    const session = verifyToken(authHeader);
-    if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
-    const user = orgUsers[session.orgCode]?.[session.userId];
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    /* FIRST LOGIN CHANGES A CREDENTIAL AND ISSUES ANOTHER TOKEN, so it must ask the SAME current
+       account owner as every authenticated route before either act. Direct `verifyToken` here
+       allowed a stale token for an inactive/deleted first-login account to set a password and
+       mint a fresh session. Refusal happens before hashing or touching the record. */
+    const a = _authoriseRequest(req);
+    if (!a.ok) return res.status(a.status).json({ error: a.error });
+    const { session, user } = a;
     // Only allow skipping current-password check when password was never set
     if (user.passwordSet !== false) return res.status(403).json({ error: 'Current password required' });
     if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be 6+ characters' });
