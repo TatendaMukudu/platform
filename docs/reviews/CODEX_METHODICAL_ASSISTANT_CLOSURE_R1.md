@@ -206,3 +206,100 @@ One founder decision remains narrow and external: whether a new node member shou
 Forum speech and other previously shared node material. Current behavior is now pinned rather than
 silently treated as ratified. Regardless of that choice, private predecessor conversation remains
 inaccessible.
+
+
+## 6. Independent correction gate after \`e78a4ae059df3cdb2841006512d7a7e44e0a46f9\`
+
+**Audit disposition:** **SAFE TO MERGE: NO.** The checkpoint at \`e78a4ae\` is substantive: governed outcomes from earlier Focus attempts on the same canonical A are carried into the next authorized conversation as contextual precedent, without treating sequence as causal proof or transporting another group's attempts. An independent gate nevertheless found four concrete HIGH blockers plus incomplete methodical A -> B acceptance coverage. These findings are the next correction queue; reproduce each against the real production path before changing behavior.
+
+### HIGH 1 — authenticated routes bypass current-account status
+
+Canonical owners to trace: \`server.js::_authoriseRequest\`, \`server.js::requireAuth\`, \`server.js::requirePermission\`.
+
+Reproduced gap:
+- \`GET /api/auth/me\` directly verifies the token and checks only that a user record exists.
+- The bearer-token branch of \`POST /api/auth/set-password\` likewise directly verifies the token and checks user existence/\`passwordSet\`, then can mutate the password and issue a fresh token.
+- Inactive, suspended and future/non-present accounts could receive 200 from \`/api/auth/me\`; an inactive first-login account could use an old bearer token to set a password and receive a fresh token.
+
+Required correction:
+- Route both paths through the canonical current-account authorization owner before mutation.
+- Gone/deleted, inactive, suspended and not-yet-present accounts must be refused consistently.
+- A refused set-password request must not alter password state, \`passwordSet\`, sessions, timestamps or other relevant store state and must not issue a token.
+- Preserve legitimate first-login behavior for a currently present account.
+- Do not add a parallel authentication/status helper.
+
+Required registered runtime proof: active/current \`/api/auth/me\` succeeds; inactive, suspended, future/not-yet-present and deleted/missing accounts are refused; corresponding bearer set-password attempts are refused without relevant store mutation; a valid current first-login account still succeeds. Mutation weakening either route back to direct \`verifyToken\` must turn the suite red.
+
+### HIGH 2 — group Forum authorization goes stale
+
+Production paths: group Forum GET/POST/PATCH and canonical \`_forumAudience\` / \`_forumAccess\`.
+
+Reproduced gap:
+1. A two-person node creates Forum speech.
+2. The node shrinks to one current readable person.
+3. \`_forumAudience\` reports \`forumAvailable:false\`.
+4. The remaining person can still GET the Forum and POST new speech.
+5. A removed original author can PATCH their old message after losing room access.
+
+Required correction:
+- Resolve the live canonical Forum audience/access on every GET, POST and PATCH.
+- Fewer than two current readable people means the room is unavailable.
+- Anyone no longer a current reader is refused.
+- Authorship never overrides current room access.
+- Use the canonical owner rather than copying audience logic into handlers.
+- Preserve private-to-Forum confirmation, Forum-to-private non-flow, tenant isolation and cross-object separation.
+
+Required registered proof: normal two-person GET/POST works; shrink to singleton refuses GET/POST; removed former member is refused; removed original author cannot PATCH; unrelated tenant and sibling object remain refused; restoring a legitimate second current reader restores the room only according to existing temporal policy. Mutation removing the live gate from each handler must turn the suite red.
+
+**Do not silently decide the temporal-history founder policy:** whether late joiners receive historical Forum/shared node material remains unresolved. Keep existing characterization tests. Private predecessor conversation remains inaccessible regardless.
+
+### HIGH 3 — multiple Composers can run microphones simultaneously
+
+Production paths: \`js/voice.js\`, \`MemberApp._micFor\`, shell/object/Forum composers.
+
+Reproduced gap: voice sessions are tracked by target ID, so starting target A and then target B can leave both active with two recognizers. Existing tests only double-tap the same target and are false-green for cross-composer concurrency.
+
+Required correction:
+- Enforce exactly one module-global active microphone/recognizer.
+- Starting B stops/aborts A before B becomes active and truthfully marks A interrupted/stopped.
+- Late result/error/end callbacks from A cannot write into either A or B drafts.
+- B can finish normally.
+- Preserve same-target toggle, permission, transcription, retry and visible-state behavior.
+- Do not conflate microphone input with server transcription or spoken output.
+
+Required registered proof covers A -> B exclusivity, one recognizer, stale callback isolation, normal B completion and same-target behavior. Mutation removing global exclusivity must turn the suite red.
+
+### HIGH 4 — Knowledge/Data Sources upload is false-green
+
+Production paths: \`js/app.js::renderDataSources\`, \`js/app.js::uploadKnowledgeFile\`, \`AttachmentHandler.process\`, and canonical server-side attachment/material readers.
+
+Reproduced gap: the legacy Knowledge/Data Sources picker advertises \`.txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx\`, while \`uploadKnowledgeFile\` always sends \`parsed.content || parsed.summary\`. A PDF with no extracted content can therefore import a receipt such as “PDF document attached: x.pdf” as canonical evidence. DOC/DOCX are advertised even though \`AttachmentHandler\` deliberately refuses them and tells the user to attach them in conversation. Existing material-accept tests cover newer composer/material pickers rather than this legacy door.
+
+Required correction: use one coherent existing owner. Prefer routing this door through the same canonical server-side upload/reader used by conversation attachments/materials; if the legacy door has no legitimate distinct purpose, remove/consolidate it. A parser receipt, filename, attachment acknowledgement or unsupported-document summary must never become canonical evidence.
+
+Required registered proof: PDF genuinely imports extracted content through the canonical reader or is honestly refused; DOC/DOCX behavior matches visible support; unsupported types are not advertised; parser receipts cannot be stored as evidence; picker/server behavior remain consistent. Mutation restoring \`parsed.summary\` as evidence must turn the suite red.
+
+### Methodical A -> B closure after the four HIGHs
+
+Do not stop at prompt wording. Trace the real \`/api/assistant/turn -> proposal -> confirmation -> canonical owner -> persistence -> read/reload -> continued conversation\` path and continue the founder-ratified acceptance matrix in \`docs/rnd/INTELLIGENCE_EXPERIENCE_LAW.md\`.
+
+Priority risk: Focus proliferation. Audit \`ai/composer-actions.js\` and canonical Focus owners. Required law:
+- same B with refined A or changed tactic normally resumes/updates the existing Focus unless the person explicitly chooses otherwise;
+- materially different B may be proposed as a new Focus but requires explicit human confirmation;
+- brainstorming alone creates no Focus;
+- model proposes; kernel/confirmed action owns mutation;
+- do not add a second Focus store, intent engine or regex ontology.
+
+Also prove conversational High/Low behavior: a person's stated observation remains attributed contribution/evidence; High/Low remain governed projections from evidence; do not add \`create_high\`/\`create_low\` truth stores merely because conversational commands mention those labels.
+
+Remaining required scenarios include known A/unknown B; known B/unknown A; both known/path unknown; brainstorming with no object; brainstorming -> confirmed Focus; wrong/incomplete A; reconsidered B with human agency; outcome report/why it worked; abandon/change Focus; same journey after reload without duplication; rejected suggestion; repeated failed attempts changing strategy or routing to relevant human capability; named person/role group/ad-hoc audience ambiguity; no permanent org node for temporary collaboration; no predecessor private conversation disclosure; concise initial response with deeper reasoning on request; paraphrase and language/code-switching without changing kernel semantics.
+
+For every new assertion: identify the production owner, prove the registered suite reaches it, and run at least one adversarial counterexample or mutation that turns it red. Source-text-only assertions are not runtime proof.
+
+### Passing lanes to preserve and final proof
+
+Do not regress manifest/citation/card/graph consistency; evidence standing vs delivery reliability; universal-domain behavior without sport-only kernel rules; tenant/cross-object privacy; Settings role separation and server authority; super-admin participation as administrator and ordinary participant; truthful capability reporting; demo-data truth; persistence/restart behavior; or asset-version guards.
+
+Run focused suites after each small correction, then the complete registered suite. Run cloud CI on the exact final pushed head where available, including \`node scripts/test.js\`, PostgreSQL acknowledged-write restart, Chromium Settings roles and rendered Forum sharing. Do not claim Safari/iPhone, Render, Neon, live-provider, audible speech, picker or deployed restart verification unless actually performed.
+
+Every durable handoff must record starting/ending SHA, root cause per blocker, files changed, tests, adversarial reproductions, mutations and red/green result, false-green tests corrected, full suite result, exact CI conclusions, unresolved founder-policy questions, external/live proof gaps and exact next weakest seam.
