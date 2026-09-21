@@ -167,6 +167,20 @@ ok('M7e NO hand-written accept list survives on a path that sends text to the se
       && textPath.every(t => /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(t));
   })());
 
+/* ── M7F — THE LEGACY KNOWLEDGE DOOR IS A TEXT DOOR, NOT A RECEIPT DOOR ─────────────────
+   This picker used to advertise PDF and Word, then pass `parsed.content || parsed.summary` to
+   canonical evidence. PDF has no extracted content on this path, so its attachment receipt
+   became the evidence. The picker and upload now ask one owner for the narrower capability. */
+const knowledgeInput = (appJs.match(/<input type="file" id="kn-file"[^>]*>/) || [''])[0];
+const knowledgeUpload = appJs.slice(appJs.indexOf('async function uploadKnowledgeFile('),
+  appJs.indexOf('async function deleteKnowledge('));
+ok('M7f the Knowledge picker derives its formats from the attachment owner rather than a hand-written list',
+  /knowledgeAcceptAttr\(\)/.test(appJs) && /accept="\$\{_escAdvisor\(knowledgeAccept\)\}"/.test(knowledgeInput));
+ok('M7g PDF, DOC/DOCX, JSON and unsupported legacy aliases are not advertised by that text-only door',
+  A && !/\.pdf|\.docx?|\.json|\.markdown/.test(A.knowledgeAcceptAttr()));
+ok('M7h the production upload asks for knowledge content and never falls back to a parser receipt',
+  /processKnowledge\(file\)/.test(knowledgeUpload) && !/parsed\.summary/.test(knowledgeUpload));
+
 /* ── M8 — AN UPLOAD IS A WRITE, AND EVERY OTHER WRITE IN THIS FILE IS BOUNDED ──────────────
    wsAttach had no ceiling at all: a stalled POST left "Reading that file…" on the screen for as
    long as somebody was willing to wait, which is the defect the bounded reader exists to remove,
@@ -288,6 +302,79 @@ const handlerWith = async present => {
 (async () => {
 const withLibs = await handlerWith(true);
 const noLibs   = await handlerWith(false);
+
+console.log('\n  O — KNOWLEDGE FILES CONTAIN TEXT OR THEY DO NOT BECOME EVIDENCE');
+let plain = null;
+try {
+  plain = await A.processKnowledge({ name: 'session.md', type: 'text/markdown',
+    text: async () => 'The recovery block starts at 10.' });
+} catch (_) { plain = null; }
+ok('O1 a genuinely readable file returns its actual extracted text',
+  !!plain && plain.content === 'The recovery block starts at 10.');
+ok('O1b the advertised Knowledge formats are exactly the locally readable text subset',
+  A && A.knowledgeAcceptAttr() === '.txt,.md,.csv');
+
+for (const f of [
+  { name: 'scouting.pdf', type: 'application/pdf' },
+  { name: 'plan.doc', type: 'application/msword' },
+  { name: 'plan.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+]) {
+  let refusal = '';
+  try { await A.processKnowledge(f); } catch (e) { refusal = String(e && e.message); }
+  ok(`O2 ${f.name} is honestly refused by this door and directed to the canonical conversation reader`,
+    /cannot be read as knowledge here/i.test(refusal) && /conversation/i.test(refusal));
+}
+
+const realProcess = A.process;
+let receiptRefusal = '';
+try {
+  A.process = async () => ({ summary: 'PDF document attached: scouting.pdf' });
+  await A.processKnowledge({ name: 'mislabelled.txt', type: 'text/plain' });
+} catch (e) { receiptRefusal = String(e && e.message); }
+finally { A.process = realProcess; }
+ok('O3 a parser receipt, filename or attachment acknowledgement can never become knowledge evidence',
+  /Could not read any text/.test(receiptRefusal) && /Nothing was added/.test(receiptRefusal));
+
+/* Execute the actual production upload function with its browser boundaries stubbed. This is
+   the seam the defect crossed: parser output -> upload function -> canonical evidence POST. */
+const formatSource = appJs.slice(appJs.indexOf('function _knowledgeFormat('),
+  appJs.indexOf('async function renderDataSources('));
+const uploadSource = appJs.slice(appJs.indexOf('async function uploadKnowledgeFile('),
+  appJs.indexOf('async function deleteKnowledge('));
+const resultEl = { style: {}, textContent: '' };
+const visibilityEl = { value: 'private' };
+const fakeDocument = { getElementById: id => id === 'kn-result' ? resultEl
+  : (id === 'kn-visibility' ? visibilityEl : null) };
+const posted = [];
+let productionUpload = null;
+try {
+  productionUpload = new Function('AttachmentHandler', 'document', '_postKnowledge',
+    `${formatSource}\n${uploadSource}\nreturn uploadKnowledgeFile;`)(
+      A, fakeDocument, async body => { posted.push(body); return { ok: true }; });
+} catch (_) { productionUpload = null; }
+ok('O4 the real Knowledge upload function is executable at the production seam',
+  typeof productionUpload === 'function');
+if (productionUpload) {
+  const pdfInput = { files: [{ name: 'scouting.pdf', type: 'application/pdf' }], value: 'chosen' };
+  await productionUpload(pdfInput);
+  ok('O4b a PDF through the real upload path is refused before any evidence POST',
+    posted.length === 0 && /conversation/i.test(resultEl.textContent) && pdfInput.value === 'chosen');
+
+  const oldProcess = A.process;
+  try {
+    A.process = async () => ({ summary: 'Text file: receipt.txt (0 words)' });
+    await productionUpload({ files: [{ name: 'receipt.txt', type: 'text/plain' }], value: 'chosen' });
+  } finally { A.process = oldProcess; }
+  ok('O4c a parser receipt through the real upload path produces no evidence POST',
+    posted.length === 0 && /Nothing was added/.test(resultEl.textContent));
+
+  const textInput = { files: [{ name: 'truth.txt', type: 'text/plain',
+    text: async () => 'The actual source text.' }], value: 'chosen' };
+  await productionUpload(textInput);
+  ok('O4d genuine extracted text reaches the canonical evidence POST unchanged',
+    posted.length === 1 && posted[0].content === 'The actual source text.'
+      && posted[0].format === 'text' && textInput.value === '');
+}
 
 ok('N1 with no browser library at all, Word, PowerPoint and spreadsheets are still offered',
   !!noLibs && ['.docx', '.xlsx', '.pptx'].every(e => noLibs.material.includes(e)));

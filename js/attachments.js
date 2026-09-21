@@ -115,6 +115,29 @@ const AttachmentHandler = {
   /* Derived, never typed twice — the picker and the parser table cannot drift apart. */
   materialAcceptAttr() { return Object.keys(this.materialExtensions()).join(','); },
 
+  /* The legacy Knowledge/Data Sources door sends TEXT to the evidence importer. It therefore
+     offers only files this browser path can itself turn into text. Office files deliberately go
+     whole to the canonical conversation/material server reader; PDFs are document bytes for the
+     model, not extracted text. Neither a filename nor a parser receipt may stand in for content. */
+  knowledgeExtensions() {
+    const serverRead = new Set(Object.keys(this.SERVER_READ || {}));
+    return Object.fromEntries(Object.entries(this.materialExtensions())
+      .filter(([ext]) => !serverRead.has(ext)));
+  },
+  knowledgeAcceptAttr() { return Object.keys(this.knowledgeExtensions()).join(','); },
+
+  async processKnowledge(file) {
+    const match = String((file && file.name) || '').toLowerCase().match(/\.[a-z0-9]+$/);
+    const ext = match && match[0];
+    if (!ext || !this.knowledgeExtensions()[ext]) {
+      throw new Error('That file type cannot be read as knowledge here. Attach it in a conversation instead.');
+    }
+    const parsed = await this.process(file);
+    const content = String((parsed && parsed.content) || '').trim();
+    if (!content) throw new Error('Could not read any text from that file. Nothing was added.');
+    return { ...parsed, content };
+  },
+
   /* ── WHAT THE COMPOSER'S PICKER MAY OFFER, NOW THAT A PICTURE GOES SOMEWHERE ──────────────
      The Material list above is what this handler can turn into WORDS in the browser. An image
      cannot be turned into words here and is read by the server through the vision gateway, so it

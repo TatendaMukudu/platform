@@ -5996,16 +5996,17 @@ async function ocRetire(id, ev) {
 function _knowledgeFormat(name) {
   const ext = String(name || '').toLowerCase().split('.').pop();
   if (ext === 'csv')  return 'csv';
-  if (ext === 'json') return 'json';
   if (ext === 'md' || ext === 'markdown') return 'markdown';
-  if (ext === 'pdf')  return 'pdf';
-  if (ext === 'doc' || ext === 'docx') return 'docx';
   return 'text';
 }
 
 async function renderDataSources() {
   const el = document.getElementById('data-sources-content');
   if (!el) return;
+  const knowledgeAccept = typeof AttachmentHandler !== 'undefined'
+    ? AttachmentHandler.knowledgeAcceptAttr() : '';
+  const knowledgeTypes = knowledgeAccept.split(',').filter(Boolean)
+    .map(x => x.replace(/^\./, '')).join(' · ');
   const connectCard = (icon, name, note) => `
     <div class="ds-connect">
       <div class="ds-connect-top"><span class="ds-connect-icon">${icon}</span><span class="ds-connect-name">${name}</span></div>
@@ -6040,10 +6041,10 @@ async function renderDataSources() {
         <label class="btn btn-outline btn-sm" style="cursor:pointer">
           ＋ Upload a file
           <input type="file" id="kn-file" style="display:none"
-            accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx"
+            accept="${_escAdvisor(knowledgeAccept)}"
             onchange="uploadKnowledgeFile(this)">
         </label>
-        <span style="font-size:var(--fs-sm);color:var(--text-muted)">txt · md · csv · json · pdf · docx — uploads use the visibility selected above.</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${_escAdvisor(knowledgeTypes)} — uploads use the visibility selected above. Other documents can be attached in a conversation.</span>
       </div>
       <div id="kn-result" style="font-size:var(--fs);margin-top:0.6rem"></div>
     </div>
@@ -6145,10 +6146,8 @@ async function uploadKnowledgeFile(input) {
   const visibility = document.getElementById('kn-visibility')?.value || 'private';
   if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `Reading ${file.name}…`; }
   try {
-    const parsed  = await AttachmentHandler.process(file);
-    const content = parsed.content || parsed.summary || '';
-    if (!String(content).trim()) throw new Error('Could not read any text from that file.');
-    await _postKnowledge({ format, content: String(content), sourceName: file.name, visibility }, res, 'Nothing new to add');
+    const parsed = await AttachmentHandler.processKnowledge(file);
+    await _postKnowledge({ format, content: parsed.content, sourceName: file.name, visibility }, res, 'Nothing new to add');
     input.value = '';
   } catch (err) {
     if (res) { res.style.color = 'var(--danger)'; res.textContent = err.message; }
