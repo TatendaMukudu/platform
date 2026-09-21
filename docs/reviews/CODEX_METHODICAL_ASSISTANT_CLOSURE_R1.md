@@ -303,3 +303,78 @@ Do not regress manifest/citation/card/graph consistency; evidence standing vs de
 Run focused suites after each small correction, then the complete registered suite. Run cloud CI on the exact final pushed head where available, including \`node scripts/test.js\`, PostgreSQL acknowledged-write restart, Chromium Settings roles and rendered Forum sharing. Do not claim Safari/iPhone, Render, Neon, live-provider, audible speech, picker or deployed restart verification unless actually performed.
 
 Every durable handoff must record starting/ending SHA, root cause per blocker, files changed, tests, adversarial reproductions, mutations and red/green result, false-green tests corrected, full suite result, exact CI conclusions, unresolved founder-policy questions, external/live proof gaps and exact next weakest seam.
+
+
+## 7. Direct GitHub bounded corrections after Work quota exhaustion — 2026-09-21
+
+Remote branch work continued through bounded, canonical-owner changes that could be traced safely without a runnable repository environment. **These commits are NOT claimed runtime-green; the next coding agent must execute focused + registered suites and correct any failures before relying on them.**
+
+Starting point for this direct pass: \`ac060b4d91b8d2894874f8df60eea3eef701aaa9\`.
+
+### Legacy conversational Keep / Library boundary
+
+Commits:
+- \`783a62486da6ce0aa17e80869ddcf8357fdf07a4\`
+- \`49e936d4fd04c5def4d0b25a5955a045dcff38a2\`
+
+Production owner traced: \`ai/composer-actions.js::ACTIONS.keep_in_library\`.
+
+Change:
+- removed ordinary unbound \`conversation\` from the contexts in which \`keep_in_library\` is available;
+- preserved intentional Library filing for governed intelligence objects/material;
+- action description now states that Library filing is not conversational memory and must not be offered merely to remember/keep-private an ordinary conversation;
+- added a regression assertion that \`Remember this privately.\` in ordinary conversation cannot manufacture a \`keep_in_library\` proposal.
+
+Intent: enforce the ratified law that conversation persists by participant/audience semantics; Library is intentional reference material, not a memory gate. Do not remove legitimate Library filing flows.
+
+Required next-agent proof: run \`scripts/composer-actions-smoke.js\`, relevant Composer HTTP journeys, full \`scripts/test.js\`, and a red mutation restoring \`conversation\` to the action context.
+
+### Inquiry is governed standing, not a user-created object
+
+Commits:
+- \`8fc5dc91a0053091dd4d3e130a158e995567bcd9\`
+- \`edcfad9b52bf10efbf7766377e1cd11279d15fa9\`
+
+Production owner traced: \`ai/composer-actions.js\`.
+
+Change:
+- removed \`create_inquiry\` from the user-facing Composer action vocabulary;
+- removed the \`inquiry\`/\`enquiry\` shortcut mapping to that action;
+- removed its user-text grounding branch;
+- changed the creation smoke invariant to require that High, Low **and Inquiry** have no user-create action.
+
+Intent: Focus remains the only primary intelligence object a human deliberately creates. A human question/observation must travel through existing attributed contribution/evidence/curiosity machinery; the kernel decides whether an Inquiry earns canonical standing.
+
+**Important next seam:** removing the action is only half of the vertical slice. The next coding agent must prove that a user's explicit "make this an Inquiry" / ordinary unresolved question is preserved as attributed input and can feed the existing governed Inquiry/curiosity owner rather than simply disappearing. Independent governed evidence/uncertainty must still be able to surface Inquiry standing. Do not reintroduce a user-commanded \`create_inquiry\` action to accomplish that.
+
+Required next-agent proof: focused Composer creation/action suites, real \`/api/assistant/turn\` tests for commanded-Inquiry and ordinary-question paths, governed Inquiry surfacing test, mutation reintroducing \`create_inquiry\` turns the acceptance suite red, then full registered suite.
+
+### Architectural inspection note
+
+A direct source inspection at \`edcfad9b\` supports the broad intended layering:
+
+\`source/material/contribution -> canonical evidence envelope -> admissibility/scope/audience -> observations/patterns -> belief/reasoning ledger -> governed High/Low/Inquiry projections -> Focus/human commitment -> action/outcome -> derived organizational learning -> authorized retrieval -> Composer -> proposal/confirmation -> canonical writer\`.
+
+Strong boundaries already visible in code:
+- \`lib/evidence.js\` owns a canonical evidence envelope and provenance/lifecycle shape;
+- \`ai/audience.js\` explicitly treats audience as a narrowing reference resolved at read time, separate from admissibility/contribution;
+- \`ai/reason.js\` is a pure belief ledger and does not persist itself;
+- \`ai/inquiry.js\` is pure epistemic planning and says questions spend attention; it recommends rather than writes;
+- \`ai/cross-evidence.js\` is explicitly read-only relationship reconstruction and cannot authorize;
+- \`ai/composer.js\` is prose/reasoning inside already-scoped context, with proposal rather than direct mutation;
+- \`ai/org-learning.js\` is observational/pure and deliberately redacts person/raw-evidence identifiers;
+- \`db.js\` retains split per-store/per-org persistence with CAS/transactional multi-unit writes while keeping the in-memory shape stable.
+
+Architectural risks the next implementation/review passes should treat as first-class rather than inventing new layers:
+1. **Projection ownership is distributed.** Pattern/intelligence/reasoning/inquiry modules overlap conceptually. Preserve their distinct jobs: observations detect; reasoner maintains beliefs; High/Low/Inquiry are governed human-facing standings. Do not let each module become a competing truth owner.
+2. **Conversation has two meanings in the repo.** \`ai/conversation.js\` is a pure structured intake/claim-planning engine, while product chat/session persistence lives elsewhere. Do not mistake that module for the participant-owned conversation store when implementing New Chat/continuity.
+3. **Dynamic audience references have temporal consequences.** Current-membership resolution is structurally good for revocation but the late-join historical Forum/shared-material policy remains founder-unratified. Do not let object/chat continuity accidentally decide it.
+4. **Persistence is still a transitional architecture.** Split durable units + CAS are directionally correct for the pilot, but the large in-memory aggregate remains a scalability/ownership risk. Do not attempt a relational rewrite during pilot closure.
+5. **Domain-free primitives are mostly correct, but some fixed pattern actions in \`ai/primitives.js\` are prescriptive templates.** They must remain suggestions under evidence/Focus/human-choice law, never become automatic B/action truth.
+6. **Org learning currently has multiple generations/concepts (\`org-learning\`, \`org-memory\`, \`org-playbook\`, outcome intelligence).** Consolidate readers/derivatives around one provenance-preserving organizational-learning contract over time; do not create another learning store for Focus-derived precedent.
+7. **Scoped Intelligence Packet is a reader/presentation boundary, not a new truth store.** Keep it read-only and avoid reviving packet-centric UX/architecture.
+8. **High/Low/Inquiry symmetry is not yet guaranteed by implementation.** The law now requires them to be sibling governed discovery standings. Audit their canonical projection/read paths for asymmetric lifecycle/creation semantics before building the common object page.
+9. **Focus is correctly the deliberate commitment boundary only if every mutation converges on the canonical Focus owner.** Continue checking Composer confirmation, direct routes and group-Focus paths for duplicate lifecycle side effects.
+10. **The LLM boundary is directionally correct only when every context item has already passed scope/admissibility/provenance gates.** Keep deterministic authorization/standing/mutation outside model output; model-generated text/action candidates are never authority.
+
+Do not treat this architectural note as runtime proof. It is a map for the next agent to test against real call graphs and mutations.
