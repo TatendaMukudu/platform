@@ -114,13 +114,12 @@ const server = app.listen(0, async () => {
   try {
     /* ══ A — THE ACTION VOCABULARY EXISTS, WHICH IS THE FACT THE LAST PASS GOT WRONG ══════════ */
     console.log('\n  A — THE MACHINERY WAS ALREADY THERE');
-    ok('CC-A1 create_focus, create_inquiry and record_focus_outcome are declared actions',
-      ['create_focus', 'create_inquiry', 'record_focus_outcome'].every(a => !!composerActions.ACTIONS[a]));
-    ok('CC-A2 …and every one of them requires a human confirmation',
-      ['create_focus', 'create_inquiry', 'record_focus_outcome']
-        .every(a => composerActions.ACTIONS[a].confirmation === true));
-    ok('CC-A3 …and NO create_high or create_low exists, because High and Low are projections rather than records',
-      !composerActions.ACTIONS.create_high && !composerActions.ACTIONS.create_low);
+    ok('CC-A1 create_focus and record_focus_outcome are declared deliberate actions',
+      ['create_focus', 'record_focus_outcome'].every(a => !!composerActions.ACTIONS[a]));
+    ok('CC-A2 …and both require human confirmation',
+      ['create_focus', 'record_focus_outcome'].every(a => composerActions.ACTIONS[a].confirmation === true));
+    ok('CC-A3 High, Low AND Inquiry have no user-create action: they are governed standings, not commanded records',
+      !composerActions.ACTIONS.create_high && !composerActions.ACTIONS.create_low && !composerActions.ACTIONS.create_inquiry);
 
     /* ══ B — AN UTTERANCE PROPOSES; IT DOES NOT WRITE ════════════════════════════════════════ */
     console.log('\n  B — "CREATE A FOCUS TO TRY PLAYER-LED DEBRIEFS."');
