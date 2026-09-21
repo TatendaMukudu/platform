@@ -54,17 +54,6 @@ const ACTIONS = Object.freeze({
     description: 'Record the user declared outcome of the current focus.' },
   inspect_inquiry: { contexts: ['inquiry'], confirmation: false, args: {},
     description: 'Open or explain the current inquiry and its governed evidence.' },
-  /* `'conversation'` WAS MISSING, AND IT IS THE ONLY CONTEXT AN UNBOUND TURN EVER HAS.
-     `contexts: [null, …]` reads as "offered when nothing is bound", but `_composerActionContext`
-     never produces a null object: with no object ref it sets `{ kind: 'conversation' }`. So the
-     one action for opening a question was unavailable on every turn where somebody would ask for
-     one, model or no model — a capability declared for a context the product does not produce.
-     `create_focus` has carried `'conversation'` since it was written; this is the same list with
-     the same meaning. `'inquiry'` stays off it deliberately: you do not open an inquiry from
-     inside one. */
-  create_inquiry: { contexts: [null, 'conversation', 'focus', 'high', 'low'], confirmation: true,
-    args: { text: 'the question in the person own words' },
-    description: 'Open a private inquiry on a topic stated by the user; it starts unsettled.' },
   show_evidence: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: false, args: {},
     description: 'Open the governed evidence view for the current object.' },
   settle_inquiry: { contexts: ['inquiry'], confirmation: true, args: {},
@@ -189,7 +178,7 @@ const _COMMAND_RE = new RegExp(
 
 /* Object word -> the action that already owns it. High and Low are absent on purpose. */
 const _COMMAND_ACTION = Object.freeze({
-  focus: 'create_focus', inquiry: 'create_inquiry', enquiry: 'create_inquiry',
+  focus: 'create_focus',
 });
 
 /* ── SAYING YES IN WORDS ───────────────────────────────────────────────────────────────────────
@@ -522,8 +511,7 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        — so the provenance said the person had asked for a Focus they had only asked ABOUT.
 
        `create_focus` is the action that manufactures a commitment, so it is the one that has to
-       ask. The others keep taking model text as before: `create_inquiry` opens a question rather
-       than a promise, and `discuss_with_group` reaches a confirmation card that names the group.
+       ask. `discuss_with_group` still reaches a confirmation card that names the group.
        A pressed control still declares intent by itself, which is what `requested` carries. */
     if (raw.text && (action.type !== 'create_focus' || _mayTakeWording)) {
       args.text = raw.text;
@@ -536,7 +524,7 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
       const antecedent = priorUser[priorUser.length - 1];
       if (antecedent) { args.text = antecedent.slice(0, 300); sources.text = 'user_stated_reference'; }
     }
-    if (!args.text && ['create_focus', 'create_inquiry'].includes(action.type) && current.trim()
+    if (!args.text && action.type === 'create_focus' && current.trim()
         && _mayTakeWording) {
       args.text = current.trim().slice(0, 300); sources.text = 'user_stated';
     }
