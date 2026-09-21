@@ -51,6 +51,10 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
 
   try {
     const about = { kind: 'inquiry', id: inquiry.inquiryId };
+    const ordinaryKeep = await turn('keep_in_library', 'Remember this privately.', null);
+    ok('CA3b ordinary conversation cannot manufacture a private Keep/Library proposal',
+      ordinaryKeep.json.response.proposedActions.every(p => p.actionType !== 'keep_in_library'));
+
     const keepTurn = await turn('keep_in_library', 'Keep this in my Library.', about);
     ok('CA4 an explicit button shortcut enters the assistant as a typed proposal', keepTurn.json.response.proposedActions.some(p => p.actionType === 'keep_in_library'));
     ok('CA5 proposing Keep changes no shelf state', (S.shelfFilings[ALMA_CODE] || []).length === 0);
