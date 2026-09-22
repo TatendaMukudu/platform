@@ -203,36 +203,35 @@ const server = app.listen(0, async () => {
       !/세트피스에서 두 번의/.test(said(asked)));
 
     /* ══ C — A CHARACTER IS NOT ALWAYS ONE CODE UNIT ═══════════════════════════════════════
-       The cap that turns free text into a stored value counted UTF-16 code units, so a character
-       above U+FFFF landing on the boundary was cut in half. */
+       Exercise the cap through Focus, the one primary object humans deliberately create. */
     console.log('\n  C — A LENGTH CAP MUST NOT CUT A CHARACTER IN HALF');
     const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
     const capped = text => {
       const n = composerActions.normalize(
-        { actions: [{ type: 'create_inquiry', arguments: { text } }] },
+        { actions: [{ type: 'create_focus', arguments: { text } }] },
         { object: { kind: 'conversation', id: 'c1' } });
       return String((n.actions[0] || {}).arguments.text || '');
     };
     const split = capped('字'.repeat(299) + '\u{20000}' + '尾');
-    ok('C1 a character straddling the cap does not become half a character',
-      !LONE.test(split));
+    ok('C1 a character straddling the cap does not become half a character', !LONE.test(split));
     ok('C2 …it is dropped whole, one character short rather than one half too many',
       split.length === 299 && split === '字'.repeat(299));
     ok('C3 …and a character that fits is kept whole',
       capped('字'.repeat(298) + '\u{20000}' + '尾') === '字'.repeat(298) + '\u{20000}');
     ok('C4 …while ordinary text at the cap is unchanged by any of this',
       capped('字'.repeat(400)) === '字'.repeat(300));
-    /* AND THE CANONICAL RECORD KEEPS THE PERSON'S OWN CHARACTERS. */
-    picks('create_inquiry', { text: '왜 우리는 실점 후에 조용해지나요' });
-    const mk = await say('왜 우리는 실점 후에 조용해지나요');
-    const p = props(mk).find(x => x.actionType === 'create_inquiry');
+
+    picks('create_focus', { text: '실점 후 먼저 말하기' });
+    const mk = await say('실점 후 먼저 말하기를 연습하고 싶어요');
+    const p = props(mk).find(x => x.actionType === 'create_focus');
     const done = p && await call('POST', `/api/assistant/turn/${mk.j.turnId}/confirm`, { proposalId: p.id });
-    ok('C5 a question asked in Korean opens an inquiry', !!done && done.status === 200);
-    const inqs = (((await call('GET', '/api/objects?kind=inquiry&scope=self')).j || {}).objects || []);
-    ok('C6 …and the inquiry on the surface carries the person\'s own characters, untranslated',
-      inqs.some(o => /왜 우리는 실점 후에 조용해지나요/.test(
-        String((o.explained || {}).headline || '') + String((o.present || {}).summary?.full || '')
-        + JSON.stringify(o.raw || {}))));
+    ok('C5 a Korean declaration can create the deliberate Focus', !!done && done.status === 200);
+    const focuses = (((await call('GET', '/api/objects?kind=focus&scope=self')).j || {}).objects || []);
+    ok('C6 …and the Focus carries the person\'s own characters, untranslated',
+      focuses.some(o => /실점 후 먼저 말하기/.test(
+        String((o.present || {}).summary?.full || '') + JSON.stringify(o.raw || {}))));
+
+    
 
     /* ══ D — AND THE HONEST BOUNDARY, WHICH IS NOT A BUG ═══════════════════════════════════
        Retrieval matches the words that are there. A document written in one language does not
