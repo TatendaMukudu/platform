@@ -378,3 +378,92 @@ Architectural risks the next implementation/review passes should treat as first-
 10. **The LLM boundary is directionally correct only when every context item has already passed scope/admissibility/provenance gates.** Keep deterministic authorization/standing/mutation outside model output; model-generated text/action candidates are never authority.
 
 Do not treat this architectural note as runtime proof. It is a map for the next agent to test against real call graphs and mutations.
+
+
+## 8. Layer ownership trace — Evidence -> Understanding -> High/Low/Inquiry
+
+This trace is intended to stop future agents from creating a second intelligence stack. It is based on source inspection at \`18026685082bbe37b2f2a0d011609a33e285a846\`; runtime call-graph proof remains required.
+
+### Canonical responsibilities to preserve
+
+| Layer | Current owner(s) | What it is allowed to own | What it must not own |
+| --- | --- | --- | --- |
+| Evidence contract | \`lib/evidence.js\` | canonical envelope, provenance, lifecycle, subject/source/time/value shape | belief, polarity, recommendation |
+| Evidence lifecycle | \`ai/lifecycle.js\` + server admission gate | freshness/retire/review recommendations; active/held/superseded/deleted admission | human-facing High/Low or B |
+| Text -> bounded observation | \`ai/understanding.js\`, \`ai/diagnose.js\` | grounded/sanitized observations and interpretations tied to evidence refs | independent truth, direct action |
+| Pattern detection | \`ai/primitives.js\`, legacy/specialized detectors feeding reasoner | domain-free structures over admitted observations | automatic intervention/Focus |
+| Belief ledger | \`ai/reason.js\` | support/counter-evidence, confidence standing, contest/dormancy, agenda candidates | persistence authority, user commitment |
+| Inquiry epistemic planning | \`ai/inquiry.js\` | decide what is worth learning/asking, information value/routing | user-commanded creation, evidence writes |
+| Inquiry state/projection | \`ai/diagnose.js\` | evidence-ref-backed unresolved understanding, hypotheses, confidence/timeline | copied evidence text, independent authorization |
+| High/Low polarity owner | \`ai/intelligence-feed.js::normalizePolarity/bucketOf\` | the ONE High/Low mapping from governed finding polarity | detection, evidence standing, authorization |
+| Presentation | \`ai/present.js\`, \`ai/stance.js\` | human wording/cards consistent with standing | changing standing or manufacturing truth |
+| Attention | \`ai/priority-office.js\` | rank already-authorized canonical objects/read artifacts | truth, authorization, prediction/person scoring |
+| LLM response | \`ai/composer.js\` | useful prose/reasoning inside scoped envelope; candidate actions | evidence/standing/auth/write authority |
+| Commitment | canonical Focus owner(s) reached by confirmed Composer/direct routes | human-chosen B, Focus lifecycle/outcome | silently converting discovery into commitment |
+
+### Architectural conclusion
+
+The target architecture should converge on this single flow:
+
+\`canonical evidence -> admitted observations -> reasoned belief/uncertainty -> governed standing -> High/Low/Inquiry projection -> authorized conversation -> human-chosen Focus -> action/outcome -> new evidence -> learning\`.
+
+There must NOT be independent High/Low/Inquiry creation stores or separate model-authored truth. High/Low are already centralized at \`ai/intelligence-feed.js::bucketOf\`; Inquiry should converge on the same conceptual standing boundary even though its richer epistemic state lives in \`ai/diagnose.js\`.
+
+### Concrete seam found: High/Low symmetry is centralized; Inquiry symmetry is conceptual, not yet structural
+
+\`ai/intelligence-feed.js\` explicitly calls itself the **ONE polarity vocabulary and High/Low decision** and maps governed polarities to \`high\`/\`low\`. This is good and should remain the sole bucket owner.
+
+Inquiry differs because \`ai/diagnose.js\` owns a richer evidence-ref-backed Inquiry projection with hypotheses, missing signals, confidence and timeline. That richer state is legitimate; forcing it into the simple polarity map would lose epistemic structure. The convergence point should therefore be a common **governed-standing/read contract**, not one identical storage shape.
+
+Required post/pilot-safe consolidation:
+- define/read one small standing contract consumed by object lists/pages: \`{ kind: high|low|inquiry, canonicalRef, subject/scope, title, standing, evidenceRefs/counts, changedAt, uncertainty/status }\`;
+- adapt existing High/Low feed artifacts and Inquiry projections into it at READ time;
+- do not migrate truth stores merely to make UI symmetric;
+- common H/L/I object-page skeleton should consume this contract;
+- Focus remains a different commitment contract.
+
+### Concrete seam found: pattern modules contain action language
+
+\`ai/primitives.js::STRUCTURE_ACTION\` couples detection of structures such as overload/plateau/withdrawal with fixed action advice. This does not currently prove an unauthorized write, but it crosses the desired layer boundary: a detector knows A; it should not own B/path.
+
+Pilot-safe rule:
+- do not delete these templates blindly if existing UX/tests depend on them;
+- treat them only as candidate option text downstream of governed standing;
+- they must never auto-create Focus or be represented as learned/local truth;
+- after pilot, move intervention generation/selection behind the option/Focus boundary and preserve provenance (generic heuristic vs org precedent vs external evidence).
+
+### Concrete seam found: two epistemic engines need an explicit relationship, not merger
+
+\`ai/reason.js\` is a general belief ledger over observations. \`ai/diagnose.js\` also maintains Inquiry signals/hypotheses/confidence. They overlap in evidence weighing but serve different jobs: belief maintenance versus investigation state. Do not merge them during pilot.
+
+Required architectural invariant:
+- Reasoner may establish/challenge a belief/uncertainty.
+- Inquiry state may investigate that unresolved understanding and track hypotheses/missing evidence.
+- Inquiry evidence must reference canonical evidence/origins and must not become a second source.
+- Settling/changing an Inquiry must feed the shared governed understanding/read layer rather than create a competing final truth.
+
+### Concrete seam found: Priority Office correctly ranks records, but old feed ranking remains
+
+\`ai/priority-office.js\` contains both older heterogeneous queue ranking and newer canonical-object attention logic. This is acceptable transitionally, but future work should avoid adding a third attention system. During pilot, preserve behavior and route new H/L/I/Focus attention through canonical-object attention where possible; after pilot, retire compatibility ranking once all producers have migrated.
+
+### Tests the next runnable agent should add/strengthen
+
+1. One admitted evidence origin repeated many times cannot create multiple independent standing votes.
+2. A correction/supersession changes standing without erasing history.
+3. A neutral/data-gap observation creates neither High nor Low.
+4. A user saying "make this a High/Low/Inquiry" cannot directly create standing.
+5. The same governed evidence can move a standing High -> uncertain/neither -> Low (or inverse) as counter-evidence arrives, without creating duplicate canonical truths.
+6. Inquiry can be surfaced by unresolved/high-information uncertainty even though no user-create action exists.
+7. High/Low/Inquiry read adapters expose the common minimal standing contract without widening authorization.
+8. A pattern action template cannot create a Focus or masquerade as organization-learned precedent.
+9. Priority ranking changes attention only; mutating priority/preferences cannot change evidence standing.
+10. LLM output cannot alter kind/polarity/standing unless a deterministic confirmed canonical action owns that transition.
+
+### Staging across pilot
+
+**Pre/player-pilot correctness:** direct-create prohibitions; canonical High/Low bucket owner; governed Inquiry surfacing; evidence lifecycle/provenance; scope/audience; Focus-only deliberate commitment; no detector/template auto-commit.
+
+**During pilot consolidation:** common H/L/I read contract; common object-page skeleton; canonical-object attention migration; explicit Reasoner -> Inquiry -> standing call graph; remove dead compatibility readers only after runtime proof.
+
+**Post-pilot evolution:** move fixed intervention templates out of detection; consolidate old heterogeneous feed/packet compatibility; rationalize org-learning/memory/playbook readers; persistence/schema evolution when scale requires it.
+
