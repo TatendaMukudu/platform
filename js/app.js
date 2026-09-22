@@ -10029,7 +10029,13 @@ const MemberApp = {
   openFromShelf(kind, refId) {
     // A conversation is resumed where conversations live; everything else has an object thread,
     // and openObjectThread is the same door every other surface in the app uses to reach it.
-    if (kind === 'conversation') { this.navigate('home'); return; }
+    if (kind === 'conversation') {
+      this.navigate('home');
+      // Library is an index into the LIVE conversation, not merely a shortcut to Home.
+      // Resume the referenced thread exactly as the navigation drawer does.
+      setTimeout(() => this.wsLoadConversation(refId), 60);
+      return;
+    }
     this.openObjectThread(kind === 'material' ? 'focus' : kind, refId);
   },
 
