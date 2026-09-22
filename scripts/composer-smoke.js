@@ -120,10 +120,12 @@ ok('9 · …to actually start building when asked to build, not just offer',
   /Offering is not helping/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to speak to the person, in house style',
   /speak TO them/i.test(c.SYSTEM_PROMPT) && /No emojis/.test(c.SYSTEM_PROMPT));
-// Read on a phone: a reply nobody scrolls to the end of is not a better reply, and markdown
-// markers are shown literally rather than rendered.
-ok('9 · …to keep it short enough to read on a phone',
-  /under 120 words/.test(c.SYSTEM_PROMPT));
+// Mobile-first means concise FIRST, not permanently shallow. Explicit requests for why, evidence
+// or a full walkthrough must be allowed to deepen without changing the truth envelope.
+ok('9 · …to start concise on a phone but deepen when the person explicitly asks',
+  /START concise/.test(c.SYSTEM_PROMPT)
+  && /explicitly ask why, ask for evidence, or ask for a full walkthrough/.test(c.SYSTEM_PROMPT)
+  && !/under 120 words/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to write plain prose with no markdown',
   /NO markdown/.test(c.SYSTEM_PROMPT) && /Asterisks are shown literally/.test(c.SYSTEM_PROMPT));
 // A privacy-first product cannot tell someone their private note is now shared when it is not.
