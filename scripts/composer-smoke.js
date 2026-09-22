@@ -123,7 +123,7 @@ ok('9 · …and to speak to the person, in house style',
 // Mobile-first means concise FIRST, not permanently shallow. Explicit requests for why, evidence
 // or a full walkthrough must be allowed to deepen without changing the truth envelope.
 ok('9 · …to start concise on a phone but deepen when the person explicitly asks',
-  /START concise/.test(c.SYSTEM_PROMPT)
+  /start concise/i.test(c.SYSTEM_PROMPT)
   && /explicitly ask why, ask for evidence, or ask for a full walkthrough/.test(c.SYSTEM_PROMPT)
   && !/under 120 words/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to write plain prose with no markdown',
