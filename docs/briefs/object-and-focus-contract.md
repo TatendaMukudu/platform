@@ -1,5 +1,7 @@
 # High / Low / Inquiry / Focus — object contract, and the Focus implementation brief
 
+> **SUPERSEDED ONTOLOGY WARNING (2026-09-21):** This brief was written against `b459a10` and is retained for historical implementation/privacy tests. Its ontology is NOT current where it says Inquiry is a user-created/durable intake object or where it conflicts with the ratified Pilot Interaction Model. Current governing law is `docs/rnd/INTELLIGENCE_EXPERIENCE_LAW.md`: High, Low and Inquiry are governed discovery standings/projections; Focus is the only primary intelligence object a human deliberately creates. Preserve useful participation/privacy/CAS invariants here, but reconcile any implementation against current law before coding.
+
 **Status:** CURRENT implementation brief. **Nothing implemented.**
 **Stages 5 and 6** of the final pre-implementation hardening program. Preceded by `b459a10`.
 **Written against:** `b459a10`. Field lists read from the code, not from prior documents.
