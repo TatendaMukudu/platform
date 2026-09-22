@@ -200,6 +200,7 @@ const server = app.listen(0, async () => {
        governed intelligence path may establish High/Low/Inquiry standing. */
     console.log('\n  C — A HUMAN CANNOT MANUFACTURE AN INQUIRY BY REQUESTING THE LABEL');
     const cBefore = await listed('inquiry', 'self');
+    const iid = 'inq_mine'; // reused by the later relationship/product-promise sections
     const c = await stage('create_inquiry', { text: 'why we stop talking when we go behind' },
       { text: 'I want to understand why we stop talking when we go behind' });
     ok('C1 unsupported create_inquiry is not staged as a consequential proposal', !c.prop);
