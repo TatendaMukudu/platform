@@ -906,3 +906,33 @@ Pinned at \`fa05acf6c589f08363ed551f56c4ec230f6744d5\` in \`scripts/composer-act
 
 Removal of a forbidden mutation is not complete until every upstream intent parser, fallback, test, UI label and downstream reader preserves the replacement semantics. Search for this pattern around every retired action. A fail-closed write path can still be semantically wrong on the read/reasoning path.
 
+
+
+## 14. PR closure hygiene for tonight — do not make Claude re-review history
+
+Open-PR inventory observed from GitHub on 2026-09-22:
+- **#90** \`codex/pilot-recovery-gate-r7\` — CURRENT pilot closure branch. Continue here. Do not merge/deploy until gates pass.
+- **#89** \`claude/pilot-live-recovery-r1\` — older recovery branch at \`27b66644...\`. #90 was already established as containing/superseding its useful recovery work. Do not merge #89 separately; after #90 closure, verify no unique surviving delta, then close/supersede #89.
+- **#85** \`claude/platform-work-summary-nmb0cm\` — old review/work-summary lineage. Treat as historical until a net-integration comparison proves a unique current-main delta.
+- **#81** \`codex/ci-history-checkout\` — CI/documentation ancestry utility, not a Coach-pilot product feature. Keep out of tonight's product closure unless current CI requires it.
+- **#75/#74/#73/#67** target #85 rather than main. They belong to an older stacked-review lineage. Do not individually merge into current main/#90 merely because they are open; first check whether #90/main already contains equivalent implementation.
+- **#66/#65/#64/#63/#62/#59/#58/#12** are old main-targeting PRs. They require a NET INTEGRATION EFFECT check against current main/#90, not an old-base diff. Assume nothing from title/age.
+
+### Fast close-out procedure for stale PRs
+
+For every PR other than #90, Claude should spend minutes, not hours:
+1. refresh current main + #90;
+2. inspect PR intent and changed paths;
+3. search current #90 for the same canonical owner/behavior/test;
+4. classify **superseded / unique small delta worth porting / intentionally obsolete / unrelated post-pilot**;
+5. if unique and pilot-critical, port the smallest delta into #90 and test it — do NOT merge the stale branch wholesale;
+6. record the equivalence evidence and close/supersede stale PR only after remote truth confirms it.
+
+Do not resurrect old ontology (user-created Inquiry, parallel packets/truth stores, duplicate Focus owner, authority-as-evidence, private-to-shared shortcuts) from an old PR.
+
+### Credit-saving rule
+
+Do not run a comprehensive historical audit before coding. The only historical question worth paying for is:
+**"Does this open PR contain a unique pilot-critical behavior that current #90 lacks?"**
+If no, classify it and move on.
+
