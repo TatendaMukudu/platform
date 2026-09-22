@@ -124,7 +124,7 @@ ok('9 · …and to speak to the person, in house style',
 // or a full walkthrough must be allowed to deepen without changing the truth envelope.
 ok('9 · …to start concise on a phone but deepen when the person explicitly asks',
   /start concise/i.test(c.SYSTEM_PROMPT)
-  && /explicitly ask why, ask for evidence, or ask for a full walkthrough/.test(c.SYSTEM_PROMPT)
+  && /unless they explicitly ask for depth, evidence, history, or a full walkthrough/i.test(c.SYSTEM_PROMPT)
   && !/under 120 words/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to write plain prose with no markdown',
   /NO markdown/.test(c.SYSTEM_PROMPT) && /Asterisks are shown literally/.test(c.SYSTEM_PROMPT));
