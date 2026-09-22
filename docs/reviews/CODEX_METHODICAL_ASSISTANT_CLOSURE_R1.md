@@ -1028,3 +1028,71 @@ A material is not conceptually a Focus, and the app already has \`openMaterial(m
 
 Do not add a graph because the product has data. Existing chart/graph code must be judged by one question: does it communicate a meaningful change, trajectory, comparison, contradiction, relationship or progress toward B? If it merely renders recorded events/counts/points, hide/remove it from pilot UI rather than redesigning the intelligence layer.
 
+
+
+## 17. CI is RED — failures are mostly obsolete Inquiry semantics, not ten independent product regressions
+
+Truth Layer for \`67247249...\` completed \`node scripts/test.js\` RED. Do **not** merge. The log reports “10 steps failed”, but root-cause clustering matters:
+
+### Cluster A — obsolete user-created Inquiry contract (primary)
+
+These suites still expect \`create_inquiry\` or a human confirmation to mint an Inquiry:
+- \`scripts/human-origin-http-smoke.js\` — HO-F1 then throws reading \`requiredApproval\`.
+- \`scripts/conversational-journey-http-smoke.js\` — C1/C3.
+- \`scripts/conversational-commands-http-smoke.js\` — A2/H2.
+- \`scripts/product-promise-http-smoke.js\` — C1 then throws reading proposal id.
+- \`scripts/conversational-continuity-http-smoke.js\` — A1/A2/A3 then throws reading \`explained\`.
+- \`scripts/multilingual-universality-http-smoke.js\` — throws after the expected old Inquiry path is absent.
+- \`scripts/pilot-crackdown-smoke.js\` — PX-A16 explicitly asserts \`create_inquiry\` is not narrowed.
+
+Current ratified law is the opposite: High/Low/Inquiry are governed discovery standings; only Focus is deliberately created by a human. **Do not restore \`create_inquiry\` to make CI green.** Rewrite these assertions to prove the new contract:
+1. explicit Inquiry wording preserves inquiry/question intent;
+2. no consequential create action/proposal is emitted;
+3. conversation/evidence can feed the governed Inquiry owner;
+4. an Inquiry appears only when the kernel/standing rules justify it;
+5. no false prose claims “I created/opened an Inquiry.”
+
+Fix the tests at the semantic boundary, not by weakening them to “no crash”. Preserve their original hostile/continuity purpose where still applicable.
+
+### Cluster B — Composer smoke
+
+\`scripts/composer-smoke.js\` also failed. Pull its exact assertion/log before editing; do not assume it is the same cause.
+
+### Cluster C — asset stamp
+
+\`scripts/asset-version-smoke.js\` AV5/AV5b failed after \`js/app.js\` changed. This is expected release hygiene, not a product-law defect. Run the repository's prescribed stamp flow (\`npm run stamp:record\` after the required index stamp bump) once the UI batch is stable, not after every app.js edit.
+
+### Cluster D — stale review status
+
+\`scripts/docs-status-smoke.js\` says a tracked status document is 40 commits behind HEAD. Update the canonical status/checkpoint once after the correction batch. Do not churn it per commit.
+
+### What passed in the same full run
+
+Important owners remained green in the log, including:
+- voice input 89/0;
+- object conversation screen 4/0;
+- chart governance 53/0;
+- material 31/0 and material reach 87/0;
+- shelf 23/0 and shelf HTTP 33/0;
+- focus Action owner 3/0 and Focus ownership parity 27/0;
+- evidence polarity 26/0 and highs/lows 24/0;
+- group Focus loop 40/0;
+- Forum audience 98/0;
+- attachment retry 32/0;
+- material classification 43/0;
+- output manifest 90/0;
+- endpoint smoke 222/0.
+
+This is strong evidence that the red run is concentrated around semantic migration/release bookkeeping rather than a broad syntax collapse.
+
+### Agent order from here
+
+1. Fix Cluster A stale tests **without resurrecting user-created Inquiry**.
+2. Inspect/fix Composer smoke exact failure.
+3. Run those focused suites.
+4. Continue product connection defects.
+5. At the end of the UI batch, fix asset stamp.
+6. Refresh status doc.
+7. Run full \`npm test\` again.
+8. Then browser/mobile gates.
+
