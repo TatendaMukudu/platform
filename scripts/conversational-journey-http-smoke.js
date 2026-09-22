@@ -5,8 +5,8 @@
    state machine that happens to be wearing a chat window.
 
    WHAT WAS ACTUALLY MISSING, and it was one thing rather than thirteen. Every canonical owner
-   already existed: `ai/composer-actions.js` has create_focus (from an inquiry, a high, a low, a
-   focus, a bare conversation), create_inquiry, record_focus_outcome, attach_material,
+   already existed for deliberate actions: `ai/composer-actions.js` has create_focus (from an inquiry, a high, a low, a
+   focus, a bare conversation), record_focus_outcome, attach_material,
    keep_in_library, discuss_with_group and share_to_forum, each with its confirmation rule. The
    deterministic command reader already turned "create a focus about X" into a proposal.
 
@@ -135,35 +135,28 @@ const server = app.listen(0, async () => {
     ok('B8 …and with nothing pending, an ordinary "ok" is just a word',
       actions.resolveAcceptance('ok', []) === null);
 
-    /* ══ C — A LOW BECOMES AN INQUIRY BY TALKING ═══════════════════════════════════════════ */
-    console.log('\n  C — SOMETHING NOTICED BECOMES SOMETHING INVESTIGATED');
+    /* ══ C — NAMING AN INQUIRY IS A CONTRIBUTION, NOT A CREATE COMMAND ═══════════════════════
+       Inquiry is a governed standing. Conversation may feed the curiosity/evidence machinery,
+       but no parser or provider action is allowed to mint one just because the person typed the
+       product noun. */
+    console.log('\n  C — A QUESTION DOES NOT BYPASS THE GOVERNED INQUIRY PATH');
+    const beforeInquiries = Object.keys((S.inquiryStates[C] || {})['member:me'] || {}).length;
+    const parsedInquiry = actions.readCommand('Create an inquiry about why we go quiet after conceding');
+    ok('C1 the deterministic reader preserves which standing they named without inventing an action',
+      !!parsedInquiry && parsedInquiry.kind === 'inquiry' && parsedInquiry.type === null);
     const inqOffer = await say('Create an inquiry about why we go quiet after conceding', 'me');
     const inqProps = resp(inqOffer).proposedActions || [];
-    ok('C1 wanting to understand something produces a create_inquiry proposal',
-      inqProps.length === 1 && inqProps[0].actionType === 'create_inquiry');
-    const inqDone = await acceptAndConfirm('do that', 'me');
-    ok('C2 …and "do that" carries it to the governed owner',
-      !!inqDone.confirmed && inqDone.confirmed.status === 200);
-    /* ── C3 — AND THE PERSON CAN THEN SEE IT ────────────────────────────────────────────────
-       C2 stopped at a 200, which was not enough and hid a real hole for two rounds. The write
-       was real, the note said "Inquiry opened as an unsettled question" — and the inquiry
-       appeared on NO surface, at any scope. `_objectBucket` skips an inquiry with no signals,
-       which is correct for one the machine derived and wrong for one a person just asked for,
-       and it could not tell them apart. A confirmation whose result is invisible is a
-       confirmation that lied. Asserted here, where it should have been all along. */
-    const inqId = ((inqDone.confirmed.j || {}).inquiry || {}).id;
+    ok('C2 …and the live turn offers no create_inquiry mutation',
+      !inqProps.some(p => p.actionType === 'create_inquiry'));
+    const afterInquiries = Object.keys((S.inquiryStates[C] || {})['member:me'] || {}).length;
+    ok('C3 …so the command itself creates no canonical Inquiry', afterInquiries === beforeInquiries);
     const visible = await call('GET', '/api/objects?kind=inquiry&scope=self', undefined, 'me');
-    ok('C3 …and the person can then see the question they opened',
-      !!inqId && (((visible.j || {}).objects) || []).some(o => String(o.id) === String(inqId)));
-    ok('C3b …carrying no confidence, because nobody has said anything about it yet',
-      (((visible.j || {}).objects) || []).filter(o => String(o.id) === String(inqId))
-        .every(o => !(o.explained || {}).confidence));
-    /* THE CONTROL, BOTH WAYS. Hiding everything empty made the confirmation a lie; showing
-       everything empty fills a person's screen with questions no human ever asked. */
-    ok('C3c …while an empty inquiry nobody opened is still not on their screen',
-      !(((visible.j || {}).objects) || []).some(o => String(o.id) === 'inq_derived_empty'));
-    ok('C3d …and that row really is in the store, so C3c is testing a filter rather than an absence',
+    ok('C3b …and a signal-less derived shell nobody opened remains off the human surface',
+      !((((visible.j || {}).objects) || []).some(o => String(o.id) === 'inq_derived_empty')));
+    ok('C3c …while that control row really is in the store, so the surface check is not vacuous',
       !!((S.inquiryStates[C] || {})['member:me'] || {})['derived.noise']);
+
+    
 
     /* ══ D — AND THE SAME SENTENCE FROM INSIDE AN OBJECT ═══════════════════════════════════
        `create_focus` lists inquiry, high, low, focus and conversation among its contexts, which is
