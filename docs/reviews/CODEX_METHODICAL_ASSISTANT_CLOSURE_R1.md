@@ -992,3 +992,39 @@ Add a browser assertion when the browser gate is next run: keep/reference a conv
 Prefer **connection defects** over cosmetic cleanup. A route existing is not proof a person can reach it. A test passing is not proof the UI calls it with the right identity/scope. A correct object is not proof later reasoning reads it. A stored outcome is not proof future prose learns from it.
 
 Do not spend Claude time re-reading all 416 files linearly if static gates and focused ownership tests already cover them. Spend it on contradictions between layers and on the end-to-end seams above.
+
+
+## 16. Pass checkpoint — UI/read-path inspection and CI state
+
+Observed current CI for \`67247249...\`: Truth Layer is running. At observation time:
+- PostgreSQL acknowledged-write restart: **success**
+- \`node scripts/test.js\`: **in progress**
+- Settings roles in Chromium: **in progress**
+
+Do not duplicate those jobs manually while the same commit is still running. Read their result first.
+
+### UI/read-path inspection
+
+The current bucket renderer already contains several important anti-surface-fix protections:
+- one card renderer for H/L/I/Focus;
+- failed reads are distinct from empty state;
+- render tickets prevent a slow prior bucket request overwriting a newer page;
+- group/self list uses \`scope=all\`;
+- Forum availability comes from the server rather than a client guess;
+- object threads propagate scope through their internal reads;
+- Home/bucket object cards converge on the same thread path.
+
+Preserve these. They are exactly the sort of connection invariants a visual rewrite can accidentally undo.
+
+### Library connection defect
+
+\`3e0f8a9\` fixed conversation rows reopening only Home rather than the referenced live conversation. Browser proof remains required.
+
+One suspicious legacy mapping remains in \`js/app.js::openFromShelf\`:
+\`material -> focus\` before \`openObjectThread\`.
+A material is not conceptually a Focus, and the app already has \`openMaterial(materialId)\`. Before changing this, prove whether \`material\` is currently fileable/reachable through the Library and what \`refId\` represents. If it is a materialId, route it through \`openMaterial\`; if it is intentionally an owning Focus id, fix the naming/contract rather than guessing. **Do not implement from this note alone.**
+
+### Graph/presentation constraint
+
+Do not add a graph because the product has data. Existing chart/graph code must be judged by one question: does it communicate a meaningful change, trajectory, comparison, contradiction, relationship or progress toward B? If it merely renders recorded events/counts/points, hide/remove it from pilot UI rather than redesigning the intelligence layer.
+
