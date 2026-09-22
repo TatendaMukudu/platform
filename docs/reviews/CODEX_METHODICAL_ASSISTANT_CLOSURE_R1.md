@@ -811,3 +811,73 @@ For images specifically test: chart/table, photographed written note, screenshot
 
 The next runnable coding agent should create one durable matrix/report that records, for every row above: production route, canonical owner, positive assertion, negative/counterexample assertion, mutation, reload proof where relevant, and whether live provider/device proof was actually performed. Do not summarize a missing row as "covered by architecture."
 
+
+## 12. Pre-Claude checkpoint — 2026-09-22
+
+Branch head after this checkpoint: \`867c427c8befdcf57cf965e56be78219a0d6189e\`.
+
+### Direct correction made
+
+\`scripts/composer-coach-questions-smoke.js\` still encoded the obsolete law that an explicit "Create an Inquiry..." command should produce a \`create_inquiry\` proposal. That contradicted the ratified Pilot Interaction Model even though production code search no longer exposes \`create_inquiry\`.
+
+The suite now asserts the current law:
+- explicit "Create an Inquiry..." cannot manufacture governed Inquiry standing;
+- no \`create_inquiry\` action is proposed;
+- prose must not claim an Inquiry was created;
+- canonical Inquiry count remains unchanged.
+
+This matters because leaving the old assertion would either fail the next full suite or pressure an implementation agent to resurrect a forbidden action merely to make tests green.
+
+### What source inspection says is already unusually well covered
+
+The registered truth suite already contains production-path coverage for:
+- attachment/material reach and retry;
+- Composer answer hijack/privacy/person reads;
+- Coach questions with provider off;
+- Composer creation/confirmation and group-vs-personal outcome vocabulary;
+- intelligence continuity across Inquiry/object/thread/Focus/outcome/Composer;
+- Focus ownership, Action owner and continuity;
+- Library HTTP/reference/migration;
+- Web intelligence and scope;
+- object conversation screen;
+- group Focus loop.
+
+Do not rewrite these. Run them, attack them, and extend only missing founder acceptance rows.
+
+### Known stale prose/comments to reconcile, not blindly implement
+
+Some test-file headers/comments still describe the older eighteen-action Composer vocabulary including \`create_inquiry\`. Treat executable current law and \`INTELLIGENCE_EXPERIENCE_LAW.md\` as authoritative. Search all comments/docs for old user-created Inquiry semantics while touching nearby code; remove/mark them when safe so future agents are not misled.
+
+### First execution order for Claude
+
+1. Refresh remote and start at this head or newer; do not redo prior commits.
+2. Run \`npm test\` immediately. Fix any red caused by the Inquiry-law correction before feature work.
+3. Run the attachment/material and Composer suites individually so failures are attributable.
+4. Run rendered browser gates at both pilot widths.
+5. Add only the missing prose/media parity matrix rows from §11.
+6. Mutation-test the exact owner/boundary each new assertion claims.
+7. Then attack end-to-end: private personal input/material -> personal reasoning; independent governed contributions -> H/L/I; deliberate B -> Focus; outcome -> changed understanding; future authorised retrieval.
+8. Live-provider proof for image/PDF/Office and mobile device proof remain external until actually performed. Never infer them from hermetic green tests.
+
+### My current architecture belief, for challenge rather than deference
+
+- The fundamental layering is sound enough for pilot: evidence/material, reasoning, governed standing, presentation, attention, Composer and commitment are separable and mostly have named owners.
+- The largest risk is now **semantic drift between paths**, not absence of architecture: provider vs deterministic prose, personal vs group Focus grains, attachment vs conversation reasoning, old vs new Inquiry semantics, and multiple read projections of one understanding.
+- H/L/I should converge on the same governed-standing READ contract, not identical persistence.
+- Focus should remain the only deliberate primary intelligence object.
+- The A->B loop is real in code, but pilot readiness depends on proving that outcome/new evidence visibly changes later understanding and prose rather than merely being stored.
+- Privacy must be tested as non-interference, not only endpoint denial.
+- Prose quality is the release surface. A technically correct kernel with generic, repetitive, interrogative or machinery-exposing prose is not a successful pilot.
+
+### Do not spend tonight on
+
+- schema unification for personal/group Focus;
+- merging \`reason.js\` and \`diagnose.js\`;
+- a new graph/truth/memory store;
+- causal inference;
+- anonymous experience mediation;
+- broad Web-of-Webs visualization;
+- temporal Forum-history semantics without founder decision.
+
+Those can consume the night while doing little for the Coach/player experience.
+
