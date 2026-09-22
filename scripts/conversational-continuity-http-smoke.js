@@ -1,17 +1,15 @@
 /* Truth layer — FOUR FORMS, ONE INTELLIGENCE, FOLLOWED THROUGH TIME.
 
-   FOUNDER, September 2026:
+   RATIFIED FOUNDER LAW, September 2026:
 
-     Humans may create all four. But they are not four independent intelligence systems. Prove
-     journeys such as Low → Inquiry → Focus → Outcome → Learning, and High → Focus → Outcome →
-     Learning, without creating disconnected copies of the underlying intelligence.
+     Focus is the one primary intelligence object a human deliberately creates. High, Low and
+     Inquiry are governed standings that may arise from human contributions, questions and
+     evidence. Prove journeys such as Inquiry → Focus → Outcome → Learning and High → Focus →
+     Outcome → Learning without creating disconnected copies of the underlying intelligence.
 
-   And the four laws that must survive being created by a person:
-
-     A human-created High does not become empirically proven strength merely because it was
-     recorded. A human-created Low does not become empirically proven organizational weakness. A
-     human-created Inquiry does not establish its premise. A human-created Focus establishes
-     deliberate intention, not that the chosen intervention will work.
+   The authority/truth split must survive every journey: human speech establishes what they said,
+   asked or chose; governed evidence establishes standing; a Focus establishes deliberate
+   intention, not that the chosen intervention will work.
 
    HOW THIS IS DRIVEN. Through the bounded action schema, with the provider boundary stubbed — the
    model picks an action NAME and everything on both sides of that is this codebase's. No English
@@ -107,34 +105,29 @@ const server = app.listen(0, async () => {
   };
 
   try {
-    /* ══ A — LOW → INQUIRY → FOCUS → OUTCOME → LEARNING, BY TALKING ═════════════════════════
-       The founder's own sequence. Each step is a sentence a person would really say, and each one
-       reaches a governed owner through a confirmation. */
-    console.log('\n  A — THE WHOLE LOOP, ONE SENTENCE AT A TIME');
+    /* ══ A — GOVERNED INQUIRY → FOCUS → OUTCOME → LEARNING, BY TALKING ═══════════════════════
+       The question already has governed standing from evidence. The person may discuss it and
+       deliberately choose a Focus; conversation must not manufacture a second Inquiry copy. */
+    console.log('\n  A — THE WHOLE LOOP, WITHOUT A HUMAN-CREATED INQUIRY');
     const inqBefore = await listed('inquiry', 'self');
     const focusBefore = await listed('focus', 'self');
+    const iid = 'inq_mine';
+    const iBefore = (((await call('GET', '/api/objects?kind=inquiry&scope=self')).j || {}).objects || [])
+      .find(o => String(o.id) === iid);
+    const standingBefore = JSON.stringify(((iBefore || {}).explained || {}).confidence || null);
 
-    picks('create_inquiry', { text: 'why we go quiet after conceding' });
-    const a1 = await say('Why does that keep happening?');
-    ok('A1 "why does that keep happening" is offered as a question to open',
-      props(a1).some(p => p.actionType === 'create_inquiry'));
-    const a1y = await sayYes('yeah');
-    const iid = String(((a1y.done || {}).j || {}).inquiry?.id || '');
-    ok('A2 …and saying yes in words opens it', !!iid && a1y.done.status === 200);
-    ok('A3 …and it is on the Inquiries surface, not only in the reply',
-      (await listed('inquiry', 'self')).includes(iid));
-
-    /* AND A HUMAN-OPENED INQUIRY DOES NOT ESTABLISH ITS PREMISE. Asking why something happens is
-       not evidence that it happens. */
+    none();
+    const a1 = await say('Why does that keep happening?', { about: { kind: 'inquiry', id: iid } });
+    ok('A1 asking why does not create a second Inquiry action',
+      !props(a1).some(p => p.actionType === 'create_inquiry'));
+    ok('A2 …and the governed Inquiry remains the same canonical object',
+      (await listed('inquiry', 'self')).filter(id => id === iid).length === 1);
     const iCard = (((await call('GET', '/api/objects?kind=inquiry&scope=self')).j || {}).objects || [])
       .find(o => String(o.id) === iid);
-    ok('A4 …carrying no confidence, because asking a question proves nothing',
-      !(iCard.explained || {}).confidence);
-    ok('A5 …and saying it has no read yet rather than agreeing with the premise',
-      /don'?t have a read on this yet/i.test(String((iCard.explained || {}).claim || '')));
+    ok('A3 …with evidence-derived standing still present', !!iCard && !!(iCard.explained || {}).confidence);
+    ok('A4 …and asking the question did not upgrade or erase that standing',
+      JSON.stringify(((iCard || {}).explained || {}).confidence || null) === standingBefore);
 
-    /* FROM THE QUESTION TO SOMETHING TO DO ABOUT IT. */
-    none();
     picks('create_focus', { text: 'Speak first after we concede' });
     const a6 = await say('I want to work on that — speaking first after we concede',
       { about: { kind: 'inquiry', id: iid } });
@@ -143,35 +136,34 @@ const server = app.listen(0, async () => {
     const a6y = await sayYes('yeah', 'me');
     const fid = String(((a6y.done || {}).j || {}).focus?.id || '');
     ok('A7 …and saying yes starts it', !!fid && a6y.done.status === 200);
-    ok('A8 …remembering which question it came out of',
+    ok('A8 …remembering which governed question it came out of',
       String((((a6y.done.j || {}).focus || {}).addresses || {}).id) === iid);
-    /* AND A HUMAN-STARTED FOCUS IS AN INTENTION, NOT A PREDICTION. */
     const fCard = (((await call('GET', '/api/objects?kind=focus&scope=self')).j || {}).objects || [])
       .find(o => String(o.id) === fid);
-    ok('A9 …and the card says they decided it rather than that it will work',
+    ok('A9 …and the Focus is an intention, never a confidence claim',
       /you set this|you decided to work on/i.test(String(((fCard.present || {}).summary || {}).standingWhy || ''))
       && !(fCard.explained || {}).confidence);
 
-    /* AND WHAT CAME OF IT. */
     picks('record_focus_outcome', { outcome: 'helped' });
     const a10 = await say('We tried it today and it helped', { about: { kind: 'focus', id: fid } });
-    ok('A10 "we tried it today and it helped" is offered as an outcome',
+    ok('A10 the reported outcome is offered against the Focus',
       props(a10).some(p => p.actionType === 'record_focus_outcome'));
     const a10y = await sayYes('yeah');
     ok('A11 …and it lands on THAT focus',
       a10y.done && a10y.done.status === 200 && String(a10y.done.j.focusId) === fid);
 
-    /* AND THEN IT IS LEARNING, REACHABLE FROM HOME WITH NOTHING BOUND. */
     none();
     const a12 = await say('What have we learned about speaking first?');
-    ok('A12 …and asking later, from Home, reaches it',
+    ok('A12 …and asking later, from Home, reaches the learning',
       /Speak first after we concede/i.test(said(a12)) && /it helped/i.test(said(a12)));
+
+    
 
     /* ══ B — AND NOTHING WAS DUPLICATED OR LOST GOING ROUND ════════════════════════════════ */
     console.log('\n  B — ONE INTELLIGENCE, NOT FOUR COPIES OF IT');
     const inqAfter = await listed('inquiry', 'self');
     const focusAfter = await listed('focus', 'self');
-    ok('B1 exactly one Inquiry was opened', inqAfter.length === inqBefore.length + 1);
+    ok('B1 no duplicate Inquiry was opened by conversation', inqAfter.length === inqBefore.length);
     ok('B2 exactly one Focus was started', focusAfter.length === focusBefore.length + 1);
     ok('B3 the Inquiry did not disappear because a Focus now exists', inqAfter.includes(iid));
     ok('B4 …and the seeded Inquiry was not replaced by a copy of itself',
@@ -243,37 +235,35 @@ const server = app.listen(0, async () => {
     ok('D5 …and they are asked, in the words that focus\'s own screen offers',
       /did it help, not help, or was it mixed/i.test(said(d4)));
 
-    /* ══ E — CHOOSING BETWEEN THINGS THAT WERE OFFERED ═════════════════════════════════════
-       The founder's list: "Let's try the first one." / "The other one." / "Yeah." */
+    /* ══ E — CHOOSING BETWEEN TWO DELIBERATE FOCUSES THAT WERE OFFERED ═══════════════════════
+       Ambiguous acceptance is still a conversation problem; it does not require a synthetic
+       create_inquiry action to prove it. */
     console.log('\n  E — AND CHOOSING AMONG WHAT WAS OFFERED');
-    /* A DECLARATIVE SENTENCE, not a question. "What could we try?" is a question, and the
-       commitment gate correctly refuses to manufacture a Focus out of somebody wondering aloud —
-       so the first version of this offered one thing, not two, and the ambiguity it meant to test
-       never existed. The product was right; the fixture was asking the wrong thing. */
     NEXT = { actions: [
       { type: 'create_focus', arguments: { text: 'Name who takes the restart' }, reason: 'one' },
-      { type: 'create_inquiry', arguments: { text: 'whether the keeper should hold it' }, reason: 'two' },
+      { type: 'create_focus', arguments: { text: 'Have the keeper call the restart' }, reason: 'two' },
     ], intent: 'stated', needsClarification: null };
-    const e0 = await say("Let's try naming who takes the restart, and I also want to understand whether the keeper should hold it");
-    ok('E1 two things are offered', props(e0).length >= 2);
+    const e0 = await say("I want to work on naming who takes the restart, and separately have the keeper call the restart");
+    ok('E1 two deliberate Focus options are offered', props(e0).length >= 2);
     none();
     const bare = await say('yeah');
     ok('E2 a bare yes against two does not guess',
       !((((bare.j || {}).response) || {}).acceptance || {}).resolves);
     ok('E3 …it asks which',
       /which/i.test(String(((((bare.j || {}).response) || {}).acceptance || {}).ask || '')));
-    /* AND AN ORDINAL RESOLVES. */
     NEXT = { actions: [
       { type: 'create_focus', arguments: { text: 'Name who takes the restart' }, reason: 'one' },
-      { type: 'create_inquiry', arguments: { text: 'whether the keeper should hold it' }, reason: 'two' },
+      { type: 'create_focus', arguments: { text: 'Have the keeper call the restart' }, reason: 'two' },
     ], intent: 'stated', needsClarification: null };
-    await say("Let's try naming who takes the restart, and I also want to understand whether the keeper should hold it");
+    await say("I want to work on naming who takes the restart, and separately have the keeper call the restart");
     none();
     const firstOne = await sayYes("Let's try the first one");
     ok('E4 "let\'s try the first one" resolves to the first', !!firstOne.acc && !!firstOne.acc.resolves);
     ok('E5 …and reaches the governed owner', firstOne.done && firstOne.done.status === 200);
-    ok('E6 …creating the thing that was actually offered first',
+    ok('E6 …creating the deliberate Focus that was actually chosen',
       String(firstOne.done.j.confirmed) === 'create_focus');
+
+    
 
     /* ══ F — "I DISAGREE" REACHES THE DISAGREEMENT BOUNDARY ════════════════════════════════ */
     console.log('\n  F — AND DISAGREEING IS A CONTRIBUTION, NOT A COMPLAINT');
@@ -293,47 +283,36 @@ const server = app.listen(0, async () => {
       lows.some(l => /do not agree|differ/i.test(
         String((l.explained || {}).claim || '') + String((l.explained || {}).headline || ''))));
 
-    /* ══ G — AND ALL OF IT WORKS IN ANOTHER LANGUAGE ═══════════════════════════════════════
-       The whole reason understanding belongs to the model. Nothing below adds a pattern; the same
-       bounded action list crosses the boundary and the same owners run. */
-    console.log('\n  G — THE SAME ARCHITECTURE, ASKED IN SHONA AND NDEBELE');
+    /* ══ G — AND THE SAME AUTHORITY BOUNDARY HOLDS IN OTHER LANGUAGES ════════════════════════ */
+    console.log('\n  G — SHONA CAN CHOOSE A FOCUS; NDEBELE CANNOT COMMAND AN INQUIRY INTO EXISTENCE');
     SEEN.length = 0;
-    /* THE MODEL SAYS WHETHER THEY DECLARED IT. This is the fix for the defect this section found:
-       the commitment gate used to be an ENGLISH WORD LIST, so a Shona sentence meaning "I want to
-       work on speaking first" produced no Focus even though the model had understood it, picked
-       the right action and supplied the right words. Reading a sentence is the model's half; the
-       bounded two-value field is how it says what it read, and `ground` still vetoes a question. */
     NEXT = { actions: [{ type: 'create_focus',
       arguments: { text: 'Taura kutanga kana tabvisirwa' }, reason: 'they said they want to' }],
       intent: 'stated', needsClarification: null };
     const g1 = await say('Ndinoda kushanda pakutaura kutanga kana tabvisirwa');
-    ok('G0 a Shona declaration of intent produces a Focus proposal — it used to produce nothing',
-      props(g1).some(p => p.actionType === 'create_focus'));
-    ok('G1 a Shona sentence reaches the provider with the bounded action list',
+    ok('G0 a Shona declaration of intent produces a Focus proposal', props(g1).some(p => p.actionType === 'create_focus'));
+    ok('G1 the Shona sentence reaches the provider with the bounded action list',
       SEEN.length > 0 && SEEN.join('').includes('create_focus'));
     const g1y = await sayYes('hongu');
-    ok('G2 …and "hongu" is not an acceptance word this repo knows, so it is not resolved by pattern',
+    ok('G2 "hongu" is not a deterministic acceptance word, so no pattern guesses',
       !g1y.acc || !g1y.acc.resolves);
-    /* THE HONEST HALF. Acceptance in another language is not a deterministic capability — saying
-       so is better than a Shona word list, which is the allowlist the language layer already lost
-       once. Confirming through the card still works, and that is the path that must not break. */
-    /* A MISSING PROPOSAL MUST FAIL G3, NOT BLIND IT. Mutation M1 (the model's reading discarded,
-       so the English list is the only signal again) made G0 red and then THREW here, which took
-       G3-G6 out of the run entirely — a failing assertion that switches off the four assertions
-       behind it reports a smaller problem than it found. */
     const g1p = props(g1).find(p => p.actionType === 'create_focus') || { id: '__no_proposal__' };
     const g1done = await call('POST', `/api/assistant/turn/${g1.j.turnId}/confirm`, { proposalId: g1p.id });
-    ok('G3 …while confirming it reaches the same governed owner',
-      g1done.status === 200 && !!g1done.j.focus);
+    ok('G3 confirming the card reaches the same governed owner', g1done.status === 200 && !!g1done.j.focus);
     ok('G4 …and the Focus carries the person\'s own words, untranslated',
       /Taura kutanga/.test(String(((g1done.j || {}).focus || {}).text)));
+
+    const ndebeleBefore = await listed('inquiry', 'self');
     SEEN.length = 0;
-    picks('create_inquiry', { text: 'kungani sithula nxa sesivinjelwe' });
+    none();
     const g5 = await say('Ngifuna ukwazi ukuthi kungani sithula nxa sesivinjelwe');
-    ok('G5 an Ndebele sentence gets the same bounded list',
-      SEEN.length > 0 && SEEN.join('').includes('create_inquiry'));
-    ok('G6 …and produces the same governed proposal',
-      props(g5).some(p => p.actionType === 'create_inquiry'));
+    ok('G5 an Ndebele question still reaches the provider, whose action list has no create_inquiry',
+      SEEN.length > 0 && !SEEN.join('').includes('create_inquiry'));
+    ok('G6 …and the language layer cannot turn that question into a canonical standing by itself',
+      !props(g5).some(p => p.actionType === 'create_inquiry')
+      && (await listed('inquiry', 'self')).length === ndebeleBefore.length);
+
+    
 
     /* ══ H — AND THE MODEL'S READING IS A READING, NOT AUTHORITY ═══════════════════════════
        Section G handed the model a field that opens the commitment gate, which is the right
