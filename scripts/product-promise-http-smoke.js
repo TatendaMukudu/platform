@@ -448,8 +448,10 @@ const server = app.listen(0, async () => {
     const flat = JSON.stringify(snap);
     const persistedInquiry = Object.values((snap.inquiryStates || {})['member:me'] || {})
       .find(i => i && String(i.inquiryId) === iid);
-    ok('L1 the governed inquiry survives with its evidence provenance, not a human-opened marker',
-      !!persistedInquiry && (persistedInquiry.signals || []).length === SQUAD.length
+    ok('L1 the governed inquiry survives with its original evidence provenance, plus any later governed contribution, and not a human-opened marker',
+      !!persistedInquiry
+      && SQUAD.every((who, i) => (persistedInquiry.signals || []).some(s => s && s.originRef === `o_${who}_${iid + i}`))
+      && (persistedInquiry.signals || []).length >= SQUAD.length
       && !persistedInquiry.openedBy);
     ok('L2 the attached material survives', flat.includes(mid));
     ok('L3 …and the disagreement that produced the Low survives',
