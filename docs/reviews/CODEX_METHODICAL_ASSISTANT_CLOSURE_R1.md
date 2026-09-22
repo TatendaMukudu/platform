@@ -467,3 +467,151 @@ Required architectural invariant:
 
 **Post-pilot evolution:** move fixed intervention templates out of detection; consolidate old heterogeneous feed/packet compatibility; rationalize org-learning/memory/playbook readers; persistence/schema evolution when scale requires it.
 
+
+
+## 9. Layer ownership trace — Focus -> Action -> Outcome -> Learning -> future A -> B
+
+Source-inspected at \`83739ff127bcc5438b5e27e46f9f447e808879cf\`. This is an ownership map, not runtime certification.
+
+### What already works architecturally
+
+The repo has a real A -> B spine rather than only conversational rhetoric:
+
+1. **Focus is the deliberate commitment projection.** Personal Focus creation converges through the canonical personal-Focus owner; \`scripts/focus-ownership-parity-smoke.js\` explicitly compares direct and Composer transports and checks lifecycle/audit/feedback parity.
+2. **Focus starts an Action-loop record.** \`scripts/focus-action-owner-smoke.js\` asserts that approving a Focus creates one canonical Action record in \`actionsLog\`, and recording a Focus outcome advances that same Action through evaluate -> learn rather than storing a duplicate action identity inside Focus.
+3. **Cross-evidence is a read, not a truth store.** \`ai/cross-evidence.js\` reconstructs addresses/projected-from/shared-evidence/outcome/prior-attempt relationships from already-scoped canonical records.
+4. **Group A -> B has a real production-path acceptance suite.** \`scripts/group-focus-loop-http-smoke.js\` creates a group Focus from a real group Inquiry, records the outcome through the real route, adds later evidence, and asks Composer about the result.
+5. **Outcome Intelligence is deliberately retrospective.** \`ai/outcome-intelligence.js\` summarizes recorded intervention/outcome history and exposes sample size/uncertainty; it does not predict a future outcome.
+6. **Organizational Memory and Learning are derived/redacted.** \`ai/org-memory.js\` stores compact derived organizational moments; \`ai/org-learning.js\` derives observations over compatible history without raw evidence/person identifiers.
+7. **Playbook confirmation remains governed.** \`ai/org-playbook.js\` derives candidates with counter-evidence/confidence, but the module does not persist a playbook entry itself; human confirmation shapes the durable entry and later history can contest it.
+
+This is directionally the architecture required by the product law:
+\`Focus -> Action -> Outcome -> new evidence -> changed understanding -> derived transition knowledge -> future precedent\`.
+
+### Important architectural mismatch: there are TWO organizational-learning families
+
+The current repo has two related but not identical learning paths:
+
+**A. Derived org-state history**
+\`org-memory -> org-learning -> org-playbook\`
+
+This learns repeated changes in the derived organizational state and can produce governed candidate practices.
+
+**B. Focus/action outcome history**
+\`Focus -> actionsLog/outcome -> outcome-intelligence -> cross-evidence priorAttempts\`
+
+This learns what was tried around a particular pattern/Focus and what recorded outcome followed.
+
+Both are legitimate. The mistake would be treating them as two competing meanings of "organizational learning."
+
+Canonical conceptual contract going forward:
+
+> **Organizational learning is governed, provenance-preserving knowledge derived from historical state transitions and attempts/outcomes.**
+
+The two families are INPUTS/derivers for that contract:
+- org-memory history answers **what changed around the organization over time?**
+- Focus/action outcome history answers **what did people deliberately try and what was observed afterward?**
+
+Do not merge their storage during pilot. Do not create a third learning store. During/post pilot, converge their READ contract so Composer can retrieve comparable precedent with source class and limitations.
+
+### Focus has two storage/shape families today
+
+\`ai/cross-evidence.js\` explicitly documents:
+- personal Focus: \`raw.addresses = {kind,id}\`, personal outcome/resolution shape;
+- group Focus: \`raw.origin.inquiryId\`, group outcome record with \`outcome.at\`.
+
+The reader currently supports both rather than rewriting historical records. That is the correct pilot choice.
+
+However, this is technical debt with architectural consequence. New code must not invent a third Focus lineage/outcome shape. Any new common Focus reader should normalize at the READ boundary. Storage migration can wait until after pilot unless a correctness bug requires it.
+
+### The Action loop is canonical enough to preserve
+
+The important ownership invariant from the existing tests is:
+
+> Focus projects commitment; \`actionsLog\` owns the execution/evaluation/learning lifecycle.
+
+Do not add action identity/state inside Focus merely to make the UI easier. Focus may reference/derive action history, but Action owns its own lifecycle. Likewise, an outcome recorded on Focus must converge on the Action owner rather than becoming a disconnected feedback field.
+
+Required runnable proof to retain:
+- create Focus -> exactly one Action-loop record;
+- retry/reload -> no duplicate Action;
+- outcome -> same Action advances to evaluated/learn;
+- changed tactic on same B normally remains the same Focus but may create the next action/attempt under that Focus;
+- materially changed B requires deliberate Focus change/new Focus according to canonical Focus law.
+
+### Learning must distinguish sequence from causation
+
+\`ai/cross-evidence.js::loop\` is architecturally careful: it reports what the Focus addressed, the recorded outcome, prior attempts, and evidence observed afterward, while explicitly refusing to call the Focus causal.
+
+\`ai/outcome-intelligence.js\` similarly reports recorded history/sample size rather than predicting.
+
+Preserve this hard boundary:
+- "X was tried, Y was recorded afterward" is history.
+- "X caused Y" requires stronger evidence and is not implied by temporal order.
+- repeated positive history can become useful precedent with uncertainty; it does not become universal prescription.
+- failed attempts are learning too and should suppress repetitive suggestions unless conditions materially changed.
+
+### Learning retrieval must be authorized separately from source conversation
+
+Future A -> B reasoning may retrieve a governed derivative of an earlier Focus journey. It must NOT retrieve the private conversation merely because the earlier Focus is similar.
+
+Safe precedent shape should be roughly:
+\`{ comparableA, chosenBShape, action/interventionShape, conditions, recordedOutcome, limitations, resultingLearning, provenanceClass }\`
+
+It should not require:
+\`{ personIdentity, privateMessages, rawNotes }\`.
+
+This is where the founder law "conversation belongs to its people; evidence and reusable direction/learning belong to the organization at their governed standing" becomes executable.
+
+### A concrete risk: outcome history can become accidental prescription
+
+\`ai/outcome-intelligence.js::bestForPattern\` sorts intervention history and returns the first intervention; \`earlySignalBrief\` correctly phrases it as recorded outcome history and says "Review before acting." This is currently cautious.
+
+Do not allow downstream consumers to reinterpret \`bestForPattern\` as "recommended intervention." A better long-term name would be \`strongestRecordedHistoryForPattern\` or similar, but avoid rename churn before pilot. Tests should pin that the result is precedent/history, not an instruction and never auto-creates Focus/action.
+
+### A concrete risk: old object-and-focus brief is stale
+
+\`docs/briefs/object-and-focus-contract.md\` still says Inquiry is durable and may be created by intake, and describes Focus fields/stages against a much older SHA. Current ratified product law now says High/Low/Inquiry are governed discovery standings and Focus is the only primary intelligence object deliberately created.
+
+**Next coding agent must not implement that brief literally.** It should either be marked superseded or reconciled against \`docs/rnd/INTELLIGENCE_EXPERIENCE_LAW.md\` before any Focus storage migration. The useful privacy/participation tests in the brief remain valuable, but its ontology/status text is historical.
+
+### Pre-pilot / during / post-pilot staging
+
+**Pre/player-pilot correctness**
+- preserve one Focus lifecycle owner across direct + Composer transports;
+- preserve exactly-one Action-loop creation and outcome convergence;
+- prove reload/idempotency;
+- no outcome-history -> prescription promotion;
+- no private predecessor conversation through cross-evidence/learning;
+- governed prior-attempt retrieval only inside authorized scope;
+- fix stale documentation precedence so an agent cannot resurrect user-created Inquiry semantics.
+
+**During pilot**
+- introduce a normalized Focus read adapter covering personal/group lineage/outcome shapes;
+- make attempt/action history first-class in Focus presentation without duplicating Action state;
+- connect Focus outcome -> evidence/updated standing -> changed source H/L/I visibly;
+- converge outcome-history and org-learning retrieval behind one provenance-bearing precedent READ contract;
+- use pilot outcomes to test whether "same A" matching is actually useful before generalizing it.
+
+**Post-pilot**
+- migrate Focus storage/shape only if needed for shared multi-writer scale;
+- consolidate organizational learning/playbook/memory presentation and compatibility readers;
+- richer transition graph/Web-of-Webs;
+- causal/experimental inference only where design/evidence genuinely supports it;
+- external/sensor outcome sources and cross-system adapters.
+
+### Runnable acceptance tests for the next coding agent
+
+1. Same Focus create through direct vs Composer produces same canonical state/side effects.
+2. Same Focus create retry after reload produces no duplicate Focus or Action.
+3. Recording an outcome advances the same Action; it does not create a second action/learning record.
+4. A second tactic toward the same B can be represented as another attempt/action without forced Focus proliferation.
+5. Prior failed attempt is present in authorized future reasoning and materially changes the option set/wording.
+6. Prior attempt from another unauthorized person/group is absent even when A/B text is identical.
+7. Focus-derived organizational precedent contains no raw/private conversation text or person identity.
+8. Outcome history cannot auto-create a Focus/action and cannot be rendered as causal proof.
+9. Later contradictory evidence can downgrade/contest a previously useful precedent without deleting history.
+10. Group and personal Focus shapes normalize to the same read contract while preserving their canonical writers.
+11. Source H/L/I can change after Focus outcome/new evidence without being deleted merely because a Focus existed.
+12. "Why did this work?" can answer from recorded attempt/outcome/evidence with explicit uncertainty and no invented causation.
+
