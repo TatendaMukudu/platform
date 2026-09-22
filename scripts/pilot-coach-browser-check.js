@@ -496,65 +496,74 @@ _rebuildEmailIndex();
     posts.length = 0;
     await coach.page.evaluate(() => navigate('home'));
     await coach.page.waitForTimeout(1200);
-    await coach.page.fill('#iq-composer-input', 'Create an inquiry into why substitutes feel disconnected');
+    await coach.page.fill('#iq-composer-input', 'Create a focus to reconnect substitutes');
     await coach.page.evaluate(() => MemberApp.wsSend());
     await coach.page.waitForTimeout(2600);
     const madeTurn = posts.find(p => /assistant\/turn/.test(p.url));
     ok('PC-K1 the rendered control sends the coach\'s sentence unchanged, with no model anywhere',
-      !!madeTurn && madeTurn.body.text === 'Create an inquiry into why substitutes feel disconnected');
+      !!madeTurn && madeTurn.body.text === 'Create a focus to reconnect substitutes');
     const afterSay = await textOf(coach.page, null);
-    /* THE ACTION IS NAMED ON THE SCREEN. Not "I have created it" — that would be false until they
-       approve — and not silence, which is what the coach used to get. */
-    /* NOT A WORD MATCH. The first version of this looked for /inquiry/ in the page text, which
-       the coach's own echoed sentence supplies — it passed with `readCommand` stubbed to return
-       null, so it was asserting that the coach can type, not that the product understood. What
-       makes this real is the RENDERED APPROVAL CONTROL: a proposal card with a Confirm button
-       that exists only because an action was named. */
+    /* FOCUS IS THE ONE DELIBERATE CREATION PRIMITIVE. The card is the visible boundary between
+       conversation and a consequential commitment: nothing exists until the person confirms. */
     const approve = await coach.page.evaluate(() => {
       const card = document.querySelector('.iq-proposal[data-proposal], .tdy-prop[id^="today-prop-"]');
       if (!card) return null;
       const btn = [...card.querySelectorAll('button')].find(b => /confirm/i.test(b.textContent || ''));
       return { label: (card.innerText || '').trim(), confirm: !!btn };
     });
-    ok('PC-K2 …and the screen offers it back as an approvable control rather than announcing it done',
+    ok('PC-K2 …and a deliberate Focus is offered back as an approvable control rather than announced as done',
       !!approve && approve.confirm === true
-      && /inquir/i.test(approve.label)
+      && /focus/i.test(approve.label)
       && !/I have created|I have opened|created for you/i.test(afterSay));
     ok('PC-K3 …and nothing was written before they approved it',
       !posts.some(p => /\/confirm/.test(p.url)));
 
-    /* ── AND THEN THEY SAY YES IN WORDS, WHICH IS HOW PEOPLE ANSWER ────────────────────────
-       The card has a Confirm button and the button works. But a person who has just been asked
-       a question in a conversation answers it in the conversation — they type "yeah" — and until
-       September 2026 that fell through to be answered as a brand new remark, so the thing they
-       had just agreed to never happened. `resolveAcceptance` closed that, and this is the first
-       time it is driven on a phone rather than over HTTP.
-
-       WHAT MAKES IT SAFE IS ALSO ASSERTED: saying yes RESOLVES, it does not execute. The write
-       still goes through POST /turn/:turnId/confirm — the one mutation path, with its frozen
-       payload and its re-checked authority — and PC-K3d is the assertion that there is no second
-       one. A conversational shortcut that wrote directly would be the dangerous version of this. */
-    const inquiriesBefore = await coach.page.evaluate(() =>
-      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+    /* SAYING YES RESOLVES THE VISIBLE PROPOSAL, BUT STILL USES THE ONE CONFIRMATION MUTATION PATH. */
+    const focusesBefore = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=focus&scope=self', { headers: MemberApp._authHeaders() })
         .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
     posts.length = 0;
     await coach.page.fill('#iq-composer-input', 'yeah');
     await coach.page.evaluate(() => MemberApp.wsSend());
     await coach.page.waitForTimeout(2600);
     const confirmPost = posts.find(p => /\/confirm/.test(p.url));
-    ok('PC-K3b typing "yeah" reaches the thing that was offered, with no button pressed',
+    ok('PC-K3b typing "yeah" reaches the Focus that was offered, with no button pressed',
       !!confirmPost);
     ok('PC-K3c …through the one governed confirmation route, carrying the proposal it resolved to',
       !!confirmPost && /\/api\/assistant\/turn\/[^/?#]+\/confirm(\?|#|$)/.test(String(confirmPost.url))
       && !!(confirmPost.body || {}).proposalId);
-    const inquiriesAfter = await coach.page.evaluate(() =>
-      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+    const focusesAfter = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=focus&scope=self', { headers: MemberApp._authHeaders() })
         .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
-    ok('PC-K3d …and the inquiry the coach asked for now exists, once',
-      inquiriesBefore >= 0 && inquiriesAfter === inquiriesBefore + 1);
+    ok('PC-K3d …and the Focus the coach chose now exists, once',
+      focusesBefore >= 0 && focusesAfter === focusesBefore + 1);
     ok('PC-K3e …and the whole acceptance still fits a 390px screen',
       await coach.page.evaluate(() =>
         document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+
+    /* INQUIRY IS GOVERNED DISCOVERY, NOT A SECOND DELIBERATE-CREATION PRIMITIVE. A command may
+       contribute the person's question to conversation, but it must not manufacture standing. */
+    const inquiriesBefore = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+        .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
+    posts.length = 0;
+    await coach.page.fill('#iq-composer-input', 'Create an inquiry into why substitutes feel disconnected');
+    await coach.page.evaluate(() => MemberApp.wsSend());
+    await coach.page.waitForTimeout(2600);
+    const afterInquiry = await textOf(coach.page, null);
+    const inquiriesAfter = await coach.page.evaluate(() =>
+      fetch('/api/objects?kind=inquiry&scope=self', { headers: MemberApp._authHeaders() })
+        .then(r => r.json()).then(j => (j.objects || []).length).catch(() => -1));
+    ok('PC-K3f asking to create an Inquiry is answered as governed discovery, not as a missing-model failure',
+      /inquiry is not something I create|question or unknown|governed discovery/i.test(afterInquiry)
+      && !/language model is unavailable|no model configured/i.test(afterInquiry));
+    ok('PC-K3g …and no approval control is manufactured for that Inquiry command',
+      !posts.some(p => /\/confirm/.test(p.url)));
+    ok('PC-K3h …and no canonical Inquiry standing is manufactured by the command',
+      inquiriesBefore >= 0 && inquiriesAfter === inquiriesBefore);
+    ok('PC-K3i …while the product says plainly that nothing was saved or shared',
+      /nothing was saved or shared/i.test(afterInquiry));
+
     /* AND THE HALF THAT IS NOT AN ACTION AT ALL. A High and a Low are not created by asking; they
        appear when people in a group have offered the same observation and said which way it
        points. The product must say that plainly rather than failing silently or pretending. */
