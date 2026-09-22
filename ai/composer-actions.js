@@ -271,12 +271,15 @@ function readCommand(text) {
   const rest = String(m[2] || '').trim().replace(/[.!]+$/, '').trim();
   const type = _COMMAND_ACTION[word];
   if (!type) {
-    /* A High or a Low. Named, not acted on: the caller says where an observation becomes one,
-       which is a contribution to a group, and nothing is created here. */
-    return { kind: word === 'high' ? 'high' : 'low', type: null, text: rest };
+    /* High, Low and Inquiry are governed discovery standings. Naming one is useful intent,
+       but never a create action. Preserve WHICH standing the person named so the caller can
+       explain the correct governed path; collapsing `inquiry` into `low` would turn an
+       uncertainty request into a negative conclusion before the kernel has reasoned at all. */
+    const kind = word === 'enquiry' ? 'inquiry' : word;
+    return { kind, type: null, text: rest.slice(0, 300) };
   }
   if (!rest) return null;                 // "create a focus" with nothing after it names nothing
-  return { kind: word === 'focus' ? 'focus' : 'inquiry', type, text: rest.slice(0, 300) };
+  return { kind: 'focus', type, text: rest.slice(0, 300) };
 }
 
 const MODEL_SCHEMA = Object.freeze({
