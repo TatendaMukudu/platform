@@ -121,7 +121,7 @@ const server = app.listen(0, async () => {
     const sent = SEEN.join('\n');
     ok('A1 a turn inside a Focus reaches the provider at all', SEEN.length > 0);
     for (const t of ['record_focus_outcome', 'keep_in_library', 'discuss_with_group',
-                     'share_to_forum', 'attach_material', 'create_inquiry', 'request_research']) {
+                     'share_to_forum', 'attach_material', 'request_research']) {
       ok(`A2 …and is offered ${t}`, sent.includes(t));
     }
     /* THE BOUND. Being offered everything would be the opposite failure — the model could propose
@@ -376,8 +376,9 @@ const server = app.listen(0, async () => {
     console.log('\n  H — AND WITH NO PROVIDER, THE NARROW FALLBACK IS HONEST ABOUT ITS SIZE');
     ok('H1 the fallback reads an explicit create-focus command',
       (actions.readCommand('create a focus about pressing higher') || {}).type === 'create_focus');
-    ok('H2 …and an explicit create-inquiry command',
-      (actions.readCommand('create an inquiry about why we go quiet') || {}).type === 'create_inquiry');
+    ok('H2 …and preserves an explicit inquiry request as a named standing, not a create action',
+      (actions.readCommand('create an inquiry about why we go quiet') || {}).kind === 'inquiry'
+      && (actions.readCommand('create an inquiry about why we go quiet') || {}).type === null);
     ok('H3 …and does NOT pretend to understand the rest, which is the model\'s job',
       actions.readCommand('use this as evidence') === null
       && actions.readCommand('ask the team about this') === null
@@ -385,9 +386,12 @@ const server = app.listen(0, async () => {
     /* THE ASSERTION THAT KEEPS THE ARCHITECTURE HONEST. If this file ever needs changing because
        somebody added a fourth verb, that is the moment to ask whether the regex layer is quietly
        becoming the language understanding architecture. */
-    ok('H4 …and the fallback vocabulary is still exactly the two creates plus high and low',
-      ['focus', 'inquiry', 'enquiry', 'high', 'low'].every(w =>
-        actions.readCommand(`create a ${w} about something`) !== null)
+    ok('H4 …and the fallback has one create plus the governed standing names, no hidden second writer',
+      (actions.readCommand('create a focus about something') || {}).type === 'create_focus'
+      && ['inquiry', 'enquiry', 'high', 'low'].every(w => {
+        const read = actions.readCommand(`create a ${w} about something`);
+        return !!read && read.type === null;
+      })
       && actions.readCommand('remember a thing about something') === null);
 
   } catch (e) { fail++; console.error('  FAIL conversational-commands suite threw:', e && e.stack); }
