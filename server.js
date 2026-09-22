@@ -16257,10 +16257,15 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
         + 'when people in a group have offered the same observation and said which way it points. '
         + 'Open your group and offer it there; if others have seen it too, it becomes one. '
         + 'What you typed is in this private conversation and nothing was saved or shared.'
-      : 'I cannot read that as an action while the language model is unavailable, so I have not '
-        + 'created anything. You can still do it yourself: open the thing it is about and choose '
-        + '"Work on this", or use the group screen. What you typed is in this private '
-        + 'conversation and nothing was saved or shared.';
+      : _k === 'inquiry'
+        ? 'An inquiry is not something I create just because you name it — it is what appears when '
+          + 'a question or unknown is valuable and unresolved enough to deserve standing. Tell me '
+          + 'what you are wondering about or what you have noticed, and it can enter that governed '
+          + 'discovery path. What you typed is in this private conversation and nothing was saved or shared.'
+        : 'I cannot read that as an action while the language model is unavailable, so I have not '
+          + 'created anything. You can still do it yourself: open the thing it is about and choose '
+          + '"Work on this", or use the group screen. What you typed is in this private '
+          + 'conversation and nothing was saved or shared.';
     if (!parts.some(x => String(x).includes('nothing was saved or shared'))) parts.push(_signpost);
   }
   let responseText = parts.join(' ');
