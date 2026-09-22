@@ -27,7 +27,7 @@ process.env.NODE_ENV    = 'test';
 process.env.IQ_COMPOSER = '1';
 
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.CHROMIUM_PATH || chromium.executablePath();
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const S = require('../server.js');
