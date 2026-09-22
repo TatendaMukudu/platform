@@ -16,6 +16,14 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
   ok('CA2 a model cannot propose an action unavailable in the current context',
     actions.normalize({ actions: [{ type: 'settle_inquiry' }] }, { object: { kind: 'focus', id: 'f1' } }).actions.length === 0);
   ok('CA3 the model-facing prompt forbids inventing audience, dates, targets and outcomes', /Do not infer missing dates, targets, audiences, folder names or outcomes/.test(actions.prompt({ text: 'do it' })));
+  const namedInquiry = actions.readCommand('Create an Inquiry into why substitutes feel disconnected.');
+  ok('CA3i explicit Inquiry wording is preserved as governed discovery intent, never a create action',
+    namedInquiry?.kind === 'inquiry' && namedInquiry.type == null && /substitutes feel disconnected/i.test(namedInquiry.text));
+  const namedEnquiry = actions.readCommand('Open an enquiry into communication after conceding.');
+  ok('CA3j enquiry spelling normalizes to Inquiry without becoming Low',
+    namedEnquiry?.kind === 'inquiry' && namedEnquiry.type == null);
+  const namedLow = actions.readCommand('Make a low about communication.');
+  ok('CA3k explicit Low wording remains Low and is not actionable', namedLow?.kind === 'low' && namedLow.type == null);
   const focusActionPrompt = actions.prompt({ text: 'try something else', context: { object: { kind: 'focus', id: 'f1' } } });
   ok('CA3a the real Focus action interpreter separates tactic change, revised B and a separate commitment',
     /changed tactic does not create a new Focus/.test(focusActionPrompt)
