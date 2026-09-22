@@ -97,3 +97,5 @@ jobs:
         run: node scripts/forum-share-browser-check.js
       - name: Walk the Coach pilot in a real browser
         run: node scripts/pilot-coach-browser-check.js
+      - name: Walk the player and group pilot in a real browser
+        run: node scripts/group-loop-browser-check.js
