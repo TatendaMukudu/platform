@@ -615,3 +615,150 @@ Do not allow downstream consumers to reinterpret \`bestForPattern\` as "recommen
 11. Source H/L/I can change after Focus outcome/new evidence without being deleted merely because a Focus existed.
 12. "Why did this work?" can answer from recorded attempt/outcome/evidence with explicit uncertainty and no invented causation.
 
+
+
+## 10. End-to-end object + Composer/material closure map
+
+Source-inspected at \`8f11cc0c76b926c611e91a96bd9290eb38d90504\`. This section is the acceptance map for the founder requirement: High/Low/Inquiry/Focus must each do the correct epistemic job end-to-end, and Composer attachments must be readable/reasonable without laundering files into truth.
+
+### One end-to-end law
+
+Every ordinary path should be explainable as:
+
+\`human turn / file / image / governed system source -> attributed source/material -> admissibility + scope -> canonical evidence only when warranted -> understanding/belief -> governed H/L/I standing -> scoped retrieval -> Composer reasoning -> optional human-confirmed Focus -> Action -> Outcome -> new evidence -> changed standing/learning -> later scoped retrieval\`.
+
+No shortcut may skip from upload/message directly to High/Low/Inquiry standing or Focus merely because the model found the content persuasive.
+
+### High
+
+Expected business:
+- High is a READ projection of governed positive standing (progress/milestone/strength), not a stored user-created record.
+- \`ai/intelligence-feed.js::bucketOf\` remains sole High/Low polarity-to-bucket owner.
+- generic opportunity is not High.
+- High can be discussed, challenged, strengthened or weakened by later evidence.
+- human may deliberately start a Focus to preserve/strengthen what is working; starting Focus itself is not evidence that the High is true.
+- outcome/new evidence can change or withdraw the High.
+
+Required E2E: admitted independent evidence -> reasoned positive standing -> High appears -> private chat about High -> optional confirmed Focus addressing High -> outcome -> later evidence -> High changes/holds; no private source text leaks when Focus audience widens.
+
+### Low
+
+Expected business:
+- Low is the symmetric READ projection of governed risk/friction/negative standing.
+- not a user-created problem label and not automatically a recommendation.
+- may provoke an Inquiry when the reason is unresolved, but Inquiry is not a mandatory waterfall stage.
+- may become Focus only after a human chooses a B.
+- successful Focus does not automatically erase Low; later governed evidence changes the standing.
+
+Required E2E mirrors High with negative/counter-evidence and must prove High <-> uncertain/neither <-> Low transitions are recomputation, not duplicate objects.
+
+### Inquiry
+
+Expected business:
+- Inquiry is governed unresolved understanding / information need, not a user command.
+- \`ai/inquiry.js\` owns information-value/ask-or-derive planning; \`ai/diagnose.js\` owns richer evidence-ref-backed investigation state.
+- a human question/suggestion remains attributed input; it can contribute to the kernel deciding an Inquiry is worth surfacing but cannot command canonical standing.
+- Inquiry may settle into High, Low, neither, or nuanced understanding.
+- Inquiry can also remain unresolved while a human chooses a Focus; no forced sequence.
+
+Required E2E after removal of \`create_inquiry\`: ordinary unresolved question and explicit "make this an Inquiry" both preserve the human contribution; kernel independently decides whether to surface an Inquiry. Provider/model failure must not silently drop the contribution.
+
+### Focus
+
+Expected business:
+- only primary intelligence object deliberately created by human commitment.
+- B remains human choice; model can propose/clarify but cannot silently create.
+- can originate Home, High, Low, Inquiry or direct intention.
+- source is a REFERENCE, never copied conversation.
+- widening Focus audience does not widen predecessor chat.
+- creation converges on canonical owner and exactly one Action-loop record.
+- outcome advances same Action and can generate governed new evidence/learning.
+- prior attempts should influence future options without becoming causal proof/prescription.
+
+### Composer + attachment/media path
+
+The current design is directionally strong and should be preserved:
+
+1. **Picker/capability boundary — \`js/attachments.js\`.**
+   - Composer picker advertises only readable image types plus server-readable material extensions.
+   - image types are explicitly bounded rather than \`image/*\`/HEIC false-green.
+   - legacy Knowledge/Data Sources path is narrower and must never substitute filename/parser receipt for content.
+
+2. **Universal conversation attachment door — \`POST /api/assistant/attachments\`.**
+   - attachment is retained as material/context first, not evidence.
+   - \`ai/material.js\` declares three epistemic classes: external context, personal evidence, organisation evidence.
+   - attaching alone has epistemic effect NONE.
+   - personal evidence requires deliberate classification; organisation evidence requires authority + stated provenance + explicit confirmation, otherwise it is downgraded to readable context.
+
+3. **Images.**
+   - image bytes are read once through the vision-capable gateway and converted to an attributed material description.
+   - later turns reason over the retained description/material, not silently re-read unavailable binary.
+   - the model's description of an image is weak/contextual material, not objective organizational evidence.
+
+4. **Documents/data.**
+   - material follows author structure (slides/headings/sections), not model-invented topic buckets.
+   - \`contextFor\` and \`findIn\` provide bounded relevant passages.
+   - Composer gets material explicitly labelled as attached context and is instructed to work from it first.
+   - external material is explicitly labelled not-local-evidence.
+   - partial/narrowed retrieval is disclosed to the model so prose cannot pretend it saw the whole file.
+
+5. **Reasoning return path — \`ai/composer.js\`.**
+   - Composer receives already-scoped beliefs/evidence/material/conversation/object relationships/attention.
+   - it reasons/writes; deterministic verification checks grounding.
+   - proposals remain candidates until deterministic confirmation/writer.
+   - Forum text is labelled conversation, NOT evidence.
+
+### Attachment hiccups that MUST be runtime-proved before player rollout
+
+The code/comments/tests indicate intended support for JPEG/PNG/WebP/GIF plus DOCX/XLSX/PPTX/text/CSV, with PDF handled as document bytes on the conversational/model path. Do not infer device/provider success from source inspection.
+
+Runnable agent/device acceptance:
+1. iPhone photo from picker -> upload -> vision read -> immediate answer about visible content -> reload -> follow-up answer from retained material.
+2. PNG/JPEG/WebP/GIF each either read or cleanly refuse before upload; HEIC must not be offered/false-green unless server support is added.
+3. PDF -> actual document content reaches model; filename/receipt never substitutes for text/content.
+4. DOCX/PPTX/XLSX -> actual author content/structure reaches server material path; missing browser helper library must not matter on canonical Composer server-reader path.
+5. TXT/MD/CSV -> exact meaningful content retained; quoted CSV/multiline cases do not corrupt meaning.
+6. Unsupported/corrupt/empty binary -> clear refusal, no material-as-evidence, no fake summary.
+7. Provider unavailable during image/document understanding -> honest degraded state; attachment retained if safe; retry can later enrich it without duplicate material/evidence.
+8. malicious prompt text inside a document/image remains untrusted source content and cannot override system/governance or manufacture actions.
+9. private attachment on private conversation cannot become readable from a shared H/L/I/Focus merely because that object references a derivative.
+10. deleting source bytes/history follows lifecycle law while legitimate governed derivatives retain provenance/tombstone rather than dangling copied text.
+11. asking "what does section/slide X say?" retrieves the relevant retained section, not merely the first context window.
+12. multilingual material (at least Shona/Ndebele plus non-Latin script fixture) survives segmentation/retrieval without language allowlist.
+
+### Cross-object Composer acceptance matrix
+
+Run the SAME conversational questions against Home, High, Low, Inquiry and Focus:
+- "What do we actually know?"
+- "Why do you think that?"
+- "What are we missing?"
+- "What contradicts this?"
+- "What have we already tried?"
+- "What happened after that?"
+- "What could we do next?"
+- "Show me the evidence."
+- "I disagree."
+- "Work on this."
+- "Start a new chat about this."
+
+Expected:
+- Home can reason without manufacturing an object.
+- H/L/I answers from their governed standing and authorised basis.
+- Focus prioritizes B/current A/attempts/outcomes/learning.
+- "Work on this" on H/L/I proposes Focus, never mutates immediately.
+- "I disagree" contributes/challenges; it does not directly flip polarity.
+- "Show evidence" deepens within same scope; no privacy widening.
+- New Chat creates a new participant-owned thread around same object, not a duplicate object.
+- explicit depth request may exceed concise-first response while preserving same truth envelope.
+
+### Highest-value runnable closure order
+
+1. Run/fix existing attachment suites: \`attachment-boundary-http-smoke\`, \`attachment-retry-http-smoke\`, \`material-accept-smoke\`, \`material-reach-http-smoke\`, \`material-smoke\`, \`material-classification-smoke\`.
+2. Run/fix \`intelligence-feed-smoke\`, \`inquiry-smoke\`, \`inquiry-http-smoke\`, \`focus-continuity-smoke\`, \`focus-ownership-parity-smoke\`, \`focus-action-owner-smoke\`, \`group-focus-loop-http-smoke\`.
+3. Add the cross-object Composer matrix above through real \`/api/assistant/turn\`.
+4. Add attachment -> object journey: attach -> reason -> deliberate evidence promotion where permitted -> standing changes -> Focus proposal -> confirm -> outcome -> changed standing.
+5. Mutation-test each boundary: attachment becomes evidence on upload; user command creates Inquiry; High/Low bucket owner bypassed; Focus created before confirm; source conversation exposed after audience widening; outcome history rendered as prescription. Every mutation must turn the acceptance suite red.
+6. Full registered suite + PostgreSQL restart proof + Chromium/mobile rendered flows + live provider image/PDF/Office proof.
+
+Do not call Composer/player-ready until those production-path checks are green or the remaining external checks are explicitly named.
+
