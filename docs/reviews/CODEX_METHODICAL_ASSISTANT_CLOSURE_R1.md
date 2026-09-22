@@ -1096,3 +1096,31 @@ This is strong evidence that the red run is concentrated around semantic migrati
 7. Run full \`npm test\` again.
 8. Then browser/mobile gates.
 
+
+
+## 17. CI triage after Inquiry-law change — do not mistake stale acceptance for product regressions
+
+A fresh Truth Layer run on \`da31f9f...\` exposed the remaining blast radius of the ratified rule **Focus is the only human-created primary intelligence object**. The failures are useful: several older end-to-end suites still encode the superseded product where a human utterance proposes/confirms \`create_inquiry\`.
+
+Known stale-law suites from that run:
+- \`scripts/human-origin-http-smoke.js\` — HO-F1 onward explicitly expects a coach to create/confirm a personal Inquiry.
+- \`scripts/conversational-journey-http-smoke.js\` — C1/C3 expect \`create_inquiry\` proposal + created surface object.
+- \`scripts/conversational-commands-http-smoke.js\` — A2/H2 expect \`create_inquiry\`.
+- \`scripts/product-promise-http-smoke.js\` — C1 chain expects old Inquiry proposal.
+- \`scripts/conversational-continuity-http-smoke.js\` — A1-A3 expects “why does that keep happening” to be offered/confirmed into Inquiry.
+- \`scripts/multilingual-universality-http-smoke.js\` — downstream throw after old proposal expectation; inspect before editing, but likely same stale contract.
+- \`scripts/composer-smoke.js\` also failed; inspect exact assertions before classification.
+
+**Do not restore \`create_inquiry\` to make these green.** Rewrite the acceptance around current law:
+- explicit human “create/open an Inquiry” = attributed inquiry/discovery intent, no canonical write merely because they commanded it;
+- the conversation should still reason about the unresolved question;
+- a canonical Inquiry appears only through the governed discovery/kernel path when evidence/standing earns it;
+- deliberate B can become Focus through confirmation.
+
+Separate non-product reds:
+- \`asset-version-smoke.js\` AV5/AV5b — client asset changed without corresponding cache stamp/fingerprint update. This is release hygiene and must be fixed before deployment after UI JS settles.
+- \`docs-status-smoke.js\` — durable status document is 44 commits behind HEAD. Refresh near closure; do not burn cycles updating it after every commit.
+
+This CI run also proves the majority of the system remained green across voice, relationship refs, anonymity, classification scope, dummy pilot, group/objective/Focus owners, curiosity, object conversation screen, notices, pilot rehearsal, roster, Focus reach, web sources, Forum reach, escalation, provider boundary, auth/tenant authority, UI states, chart governance, material reach, shelf HTTP, priority surfaces, onboarding, persistence, Focus continuity, evidence polarity, H/L, org purge, Composer actions, Focus ownership parity, output manifest/channels, cross-evidence, attachment retry, Forum audience, and endpoint smoke.
+
+Interpretation: the current red is concentrated, not evidence that the whole platform is broken. Fix the stale Inquiry acceptance contract at its seams; do not redesign the architecture.
