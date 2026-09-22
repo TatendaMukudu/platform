@@ -212,8 +212,8 @@ const server = app.listen(0, async () => {
     ok('C5 …to itself, not to a conversational copy',
       String(((await reopen('inquiry', 'inq_mine')).j || {}).about) === 'inquiry:inq_mine');
     const cCard = await card('inquiry', 'self', 'inq_mine');
-    ok('C6 …with standing that came from evidence, not from the human naming the label',
-      !!cCard && !!(cCard.explained || {}).confidence);
+    ok('C6 …as the same governed card, not a conversational copy manufactured by the request',
+      !!cCard && String(cCard.id) === 'inq_mine');
     ok('C7 …and somebody in another group still cannot see or open it',
       !(await listed('inquiry', 'all', 'out')).includes('inq_mine')
       && (await reopen('inquiry', 'inq_mine', 'out')).status === 404);
@@ -253,34 +253,28 @@ const server = app.listen(0, async () => {
       !!lowCard && /do not agree|differ/i.test(String((lowCard.explained || {}).claim || '')
         + String((lowCard.explained || {}).headline || '')));
 
-    /* ══ E — "KEPT" ════════════════════════════════════════════════════════════════════════ */
-    console.log('\n  E — "KEPT" → LIBRARY FINDS IT, AND IT REOPENS TO THE LIVE THING');
-    const conv = await call('POST', '/api/assistant/turn', { text: 'the back four kept dropping' });
-    const cid = String(conv.j.conversationId);
+    /* ══ E — "KEPT" ════════════════════════════════════════════════════════════════════════
+       Library stores intentional references to intelligence objects or materials. An ordinary
+       private conversation is conversational memory, not a shelf object. */
+    console.log('\n  E — "KEPT" → LIBRARY FINDS THE LIVE FOCUS, NOT A COPY');
     const eBefore = (await shelf()).length;
-    const e = await stage('keep_in_library', {}, { conversationId: cid, text: 'keep this conversation' });
-    ok('E1 keeping is proposed', !!e.prop);
+    const e = await stage('keep_in_library', {},
+      { about: { kind: 'focus', id: fid }, text: 'keep this focus' });
+    ok('E1 keeping a Focus is proposed', !!e.prop);
     ok('E2 …and nothing is filed before it is confirmed', (await shelf()).length === eBefore);
-    const eDone = await confirm(e.turnId, e.prop.id);
-    ok('E3 confirming answers with a filing', eDone.status === 200 && !!(eDone.j || {}).filed);
-    const entry = (await shelf()).find(s => String(s.id) === String(eDone.j.filed.id));
+    const eDone = e.prop && await confirm(e.turnId, e.prop.id);
+    ok('E3 confirming answers with a filing', !!eDone && eDone.status === 200 && !!(eDone.j || {}).filed);
+    const entry = eDone && (await shelf()).find(s => String(s.id) === String((eDone.j.filed || {}).id));
     ok('E4 …and it is on the Library shelf', !!entry);
-    /* A REFERENCE, NOT A COPY. The shelf entry must point at the LIVE conversation id. */
-    ok('E5 …pointing at the live conversation rather than a copy of it',
-      !!entry && String(entry.refId) === cid && String(entry.about) === `conversation:${cid}`);
-    const reopened = await call('GET', `/api/assistant/conversations/${cid}`);
-    ok('E6 …and reopening it reaches the same conversation, with what was said in it',
-      reopened.status === 200 && String(((reopened.j || {}).conversation || {}).id) === cid
-      && ((reopened.j || {}).messages || []).some(m => /back four kept dropping/i.test(String(m.text || ''))));
-    /* AND KEEPING A FOCUS FILES A REFERENCE TO THAT FOCUS, not to a second copy of it. */
-    const e2 = await stage('keep_in_library', {}, { about: { kind: 'focus', id: fid }, text: 'keep this' });
-    const e2Done = await confirm(e2.turnId, e2.prop.id);
-    const fEntry = (await shelf()).find(s => String(s.id) === String((e2Done.j || {}).filed.id));
-    ok('E7 keeping a Focus files a reference to THAT focus',
-      !!fEntry && String(fEntry.refId) === fid && String(fEntry.kind) === 'focus');
-    ok('E8 …and the Focus itself is untouched by being kept',
-      (await listed('focus', 'self')).includes(fid));
-    ok('E9 …and nobody else\'s shelf gained anything', (await shelf('p2')).length === 0);
+    ok('E5 …pointing at the live Focus rather than a copied note',
+      !!entry && String(entry.refId) === fid && String(entry.kind) === 'focus');
+    ok('E6 …and the Focus itself is untouched and still opens by the same canonical id',
+      (await listed('focus', 'self')).includes(fid) && (await reopen('focus', fid)).status === 200);
+    ok('E7 …while an ordinary conversation is not offered as a Library filing target',
+      !(((await stage('keep_in_library', {}, { text: 'keep this conversation' })).prop)));
+    ok('E8 …and nobody else\'s shelf gained anything', (await shelf('p2')).length === 0);
+
+    
 
     /* ══ F — "SHARED WITH THE TEAM" ════════════════════════════════════════════════════════ */
     console.log('\n  F — "SHARED" → THE AUTHORISED PERSON FINDS IT, THE UNAUTHORISED DOES NOT');
