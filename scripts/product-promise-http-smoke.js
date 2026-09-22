@@ -194,31 +194,31 @@ const server = app.listen(0, async () => {
     ok('B8 …and says outright it is not proof the focus caused anything',
       lim.some(l => /not proof the focus caused it/i.test(String(l))));
 
-    /* ══ C — "INQUIRY OPENED" — THE ROUND 4 DEFECT, PINNED ══════════════════════════════════ */
-    console.log('\n  C — "INQUIRY OPENED" → THE SAME INQUIRY, VISIBLE AND OPENABLE');
+    /* ══ C — INQUIRY HAS NO HUMAN CREATE PROMISE ══════════════════════════════════════════════
+       The round-4 route existed before the founder ratified the sharper object law. The product
+       must now make the stronger promise: a human can ask, suggest and contribute, but only the
+       governed intelligence path may establish High/Low/Inquiry standing. */
+    console.log('\n  C — A HUMAN CANNOT MANUFACTURE AN INQUIRY BY REQUESTING THE LABEL');
     const cBefore = await listed('inquiry', 'self');
     const c = await stage('create_inquiry', { text: 'why we stop talking when we go behind' },
       { text: 'I want to understand why we stop talking when we go behind' });
-    ok('C1 the utterance produces a proposal', !!c.prop);
-    ok('C2 …and nothing is opened before it is confirmed',
+    ok('C1 unsupported create_inquiry is not staged as a consequential proposal', !c.prop);
+    ok('C2 …and the request writes no new canonical Inquiry',
       (await listed('inquiry', 'self')).length === cBefore.length);
-    const cDone = await confirm(c.turnId, c.prop.id);
-    const iid = String(((cDone.j || {}).inquiry || {}).id || '');
-    ok('C3 confirming answers with a canonical id', cDone.status === 200 && !!iid);
-    ok('C4 …and THAT id is on the Inquiries surface — the round-4 defect',
-      (await listed('inquiry', 'self')).includes(iid));
-    ok('C5 …it opens', (await reopen('inquiry', iid)).status === 200);
-    ok('C6 …to the same canonical object',
-      String(((await reopen('inquiry', iid)).j || {}).about) === `inquiry:${iid}`);
-    const cCard = await card('inquiry', 'self', iid);
-    ok('C7 …preserving the question in the person\'s own words',
-      !!cCard && /why we stop talking when we go behind/i.test(String((cCard.explained || {}).headline || '')));
-    /* AND IT INVENTS NOTHING. A question nobody has answered yet must not arrive carrying a band. */
-    ok('C8 …and carrying no confidence, because nobody has said anything about it yet',
-      !(cCard.explained || {}).confidence);
-    ok('C9 …and somebody in another group cannot see or open it',
-      !(await listed('inquiry', 'all', 'out')).includes(iid)
-      && (await reopen('inquiry', iid, 'out')).status === 404);
+    ok('C3 …while an Inquiry the governed kernel already established is still on the human surface',
+      (await listed('inquiry', 'self')).includes('inq_mine'));
+    ok('C4 …and that governed object still opens by its canonical id',
+      (await reopen('inquiry', 'inq_mine')).status === 200);
+    ok('C5 …to itself, not to a conversational copy',
+      String(((await reopen('inquiry', 'inq_mine')).j || {}).about) === 'inquiry:inq_mine');
+    const cCard = await card('inquiry', 'self', 'inq_mine');
+    ok('C6 …with standing that came from evidence, not from the human naming the label',
+      !!cCard && !!(cCard.explained || {}).confidence);
+    ok('C7 …and somebody in another group still cannot see or open it',
+      !(await listed('inquiry', 'all', 'out')).includes('inq_mine')
+      && (await reopen('inquiry', 'inq_mine', 'out')).status === 404);
+
+    
 
     /* ══ D — HIGHS AND LOWS ════════════════════════════════════════════════════════════════
        These are PROJECTIONS, not things a person creates — the product says so in a coach's
