@@ -109,7 +109,11 @@ Object.assign(ai, {
 
      `CHROMIUM_PATH` still wins when it is set, so a machine with a different build overrides it
      the same way it always could. What changes is the fallback: the known path, not a guess. */
-  const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+  /* Resolve the browser from the Playwright installation used by THIS runner. The old
+     hard-coded /opt/pw-browsers/chromium-1194 path was from an earlier image; GitHub Actions now
+     installs Playwright's current Chromium into its cache, so the old path caused an
+     unhandled launch rejection and left the server alive until the job timeout. */
+  const EXE = process.env.CHROMIUM_PATH || chromium.executablePath();
   const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2, isMobile: true, hasTouch: true });
