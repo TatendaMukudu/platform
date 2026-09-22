@@ -263,38 +263,30 @@ const server = app.listen(0, async () => {
     ok('HO-E6 …and the product has not started recommending it as something that works',
       (lowClosed.readiness || {}).state === 'gather_information');
 
-    /* ══ F — A HUMAN-CREATED INQUIRY, WITH NO MODEL ═══════════════════════════════════════ */
-    console.log('\n  F — A COACH OPENS A QUESTION BY SAYING SO, WITH NO MODEL CONFIGURED');
+    /* ══ F — A HUMAN QUESTION DOES NOT MANUFACTURE AN INQUIRY ═══════════════════════════════
+       Ratified product law: High, Low and Inquiry are governed standings. A person may ask a
+       question or explicitly name the standing they want IntelliQ to investigate, but their
+       authority establishes the contribution — it does not create the standing itself. */
+    console.log('\n  F — A COACH NAMES AN INQUIRY, AND THE LABEL DOES NOT BYPASS THE KERNEL');
+    const mineBefore = Object.keys((inquiryStates[C] || {})['member:coach'] || {}).length;
     const turn = await call('POST', '/api/assistant/turn',
       { text: 'Create an Inquiry into why substitutes feel disconnected.' }, 'coach');
     const resp = (turn.j || {}).response || {};
-    const iProp = (resp.proposedActions || []).find(a => a.actionType === 'create_inquiry');
-    ok('HO-F1 the existing action is named from what they said, with no provider anywhere', !!iProp);
-    /* Two halves, because either alone passes for the wrong reason. The store being empty is
-       true of any turn that proposes nothing at all; the proposal carrying requiredApproval is
-       the part that says this particular action is gated rather than merely slow to arrive. */
-    const mineBefore = Object.keys((inquiryStates[C] || {})['member:coach'] || {}).length;
-    ok('HO-F2 …it is offered as something to approve, and nothing is opened before they do',
-      mineBefore === 0 && iProp.requiredApproval === true);
-    const conf = await call('POST', `/api/assistant/turn/${turn.j.turnId}/confirm`, { proposalId: iProp.id }, 'coach');
-    ok('HO-F3 confirming it opens the inquiry through the canonical owner',
-      conf.status === 200 && conf.j.ok === true && conf.j.confirmed === 'create_inquiry');
-    ok('HO-F4 …and it starts UNSETTLED, because asking a question establishes the question and nothing else',
-      () => {
-        const mine = Object.values((inquiryStates[C] || {})['member:coach'] || {});
-        const opened = mine.find(i => /substitutes feel disconnected/i.test(
-          String((i.topic && (i.topic.label || i.topic.canonicalConcept)) || '')));
-        return !!opened && (opened.hypotheses || []).length === 0
-          && (opened.confidence || {}).band !== 'supported';
-      });
-    ok('HO-F5 …and it is the COACH\'S OWN, not the group\'s, because one person asking is not the group asking',
-      () => {
-        const groupOnes = Object.values((inquiryStates[C] || {})['group:first'] || {});
-        return !groupOnes.some(i => /substitutes feel disconnected/i.test(
-          String((i.topic && (i.topic.label || i.topic.canonicalConcept)) || '')));
-      });
+    ok('HO-F1 no create_inquiry action exists for the command to smuggle through',
+      !(resp.proposedActions || []).some(a => a.actionType === 'create_inquiry'));
+    const mineAfter = Object.keys((inquiryStates[C] || {})['member:coach'] || {}).length;
+    ok('HO-F2 …and naming the label does not manufacture canonical standing', mineAfter === mineBefore);
+    ok('HO-F3 …while the turn itself is still accepted as conversation rather than rejected',
+      turn.status === 200 && !!(turn.j || {}).turnId);
+    ok('HO-F4 …and no group Inquiry is created merely because the coach has authority',
+      Object.values((inquiryStates[C] || {})['group:first'] || {}).every(i =>
+        !/substitutes feel disconnected/i.test(String((i.topic && (i.topic.label || i.topic.canonicalConcept)) || ''))));
+    ok('HO-F5 leader authority can establish intent, but still cannot establish empirical standing',
+      !(resp.proposedActions || []).some(a => /high|low|inquiry/i.test(String(a.actionType || ''))));
 
-  } catch (e) { fail++; console.error('  FAIL human-origin suite threw:', e && e.stack); }
+  
+
+    } catch (e) { fail++; console.error('  FAIL human-origin suite threw:', e && e.stack); }
 
   server.close();
   console.log(`\nhuman-origin-http-smoke: ${pass} passed, ${fail} failed\n`);
