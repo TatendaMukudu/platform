@@ -114,21 +114,12 @@ ok('PX-A19 an explicit instruction after hesitation still offers a Focus',
   titled(propose("I'm not sure, create a focus for recovery")) === "I'm not sure, create a focus for recovery");
 ok('PX-A20 a hesitant question gives an actionable clarification rather than silently creating',
   HESITANT_QUESTIONS.every(q => /say what you would want to change/i.test(String(propose(q).needsClarification || ''))));
-/* The gate is for the action that manufactures a commitment. An Inquiry opens a question rather
-   than a promise, so it is deliberately not narrowed here — asserted so that narrowing it later
-   is a decision somebody makes on purpose. */
-ok('PX-A16 create_inquiry is NOT narrowed by this gate — it opens a question, not a commitment',
-  (() => {
-    /* Deliberately NOT ctx('inquiry'): create_inquiry is not offered on an object that already IS
-       an inquiry, so normalize drops it and the assertion would have passed against a surface
-       that refuses everything -- the empty-fixture lie. It is offered on a Focus, so that is
-       where this is asked. Verified: available(ctx('focus')) contains create_inquiry. */
-    const c = ctx('focus');
-    if (!A.available(c).map(a => a.type).includes('create_inquiry')) return false;
-    const r = A.ground(A.normalize({ actions: [{ type: 'create_inquiry', arguments: { text: 'what changed in recovery' }, reason: 'r' }] }, c),
-      { text: 'What changed?', priorMessages: [], context: c });
-    return r.actions.length === 1 && r.actions[0].arguments.text === 'what changed in recovery';
-  })());
+/* High, Low and Inquiry are governed discovery standings. A person can ask a question or
+   name the standing they mean, but there is no create_inquiry action for this Focus-creation gate
+   to narrow. Pin the ABSENCE here so an old action cannot quietly return through a legacy path. */
+ok('PX-A16 create_inquiry is absent from the action vocabulary — Inquiry is governed discovery, not a human-created object',
+  !A.available(ctx('focus')).map(a => a.type).includes('create_inquiry')
+  && !A.available(ctx('home')).map(a => a.type).includes('create_inquiry'));
 ok('PX-A8 the guard reads sentence SHAPE, not sentiment — no lexicon of moods or directions',
   !/\b(worried|anxious|struggl|negative|positive|sentiment|mood|frustrat)\b/i.test(ACTIONS_SRC));
 
