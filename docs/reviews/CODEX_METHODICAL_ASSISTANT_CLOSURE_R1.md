@@ -762,3 +762,52 @@ Expected:
 
 Do not call Composer/player-ready until those production-path checks are green or the remaining external checks are explicitly named.
 
+
+## 11. Founder acceptance priorities — prose-first pilot closure
+
+The founder's release question is not whether every module exists. It is whether the whole product behaves like one methodical intelligence system. Treat the following as the ordered acceptance contract.
+
+1. **Input truth:** conversation, image, file, onboarding, check-in, assessment and system data enter through their declared source/material/evidence boundary. An attachment is readable material first; it never gains evidentiary standing merely because a model read it.
+2. **Prose is the product:** for the same authorised truth envelope, Composer must answer naturally and usefully. It should answer when it can, ask one high-information question when needed, brainstorm/relate when that is the useful move, challenge assumptions when warranted, and propose action only when the conversation has earned it. It must not expose packet/kernel jargon, manufacture certainty, default to interrogation, or default to generic encouragement.
+3. **H/L/I symmetry:** High, Low and Inquiry are sibling governed discovery standings over the same admitted evidence/understanding substrate. High/Low differ by governed polarity; Inquiry differs because uncertainty/information value remains unresolved. None is user-created. None owns evidence. Each can be discussed, challenged and changed by later evidence.
+4. **Focus from every Composer context:** Home, High, Low, Inquiry and existing Focus conversation can all reach the canonical Focus proposal/confirmation machinery when a human deliberately chooses a B. Existing Focus conversation should normally refine B/path/attempt rather than proliferate Focuses.
+5. **Personal vs organisational reasoning:** a member can reason over their own authorised personal evidence. Another player cannot. A coach/leader receives only material granted by scope/governance and aggregate/derived organisational intelligence where permitted; role or relationship alone never grants another person's private evidence/conversation. Test BOTH output and non-interference: private data must not change an unauthorised reader's wording, confidence, recommendations or omissions.
+6. **A->B loop:** individual and collaborative paths must both close: A/understanding -> human B -> Focus -> attempt/action -> outcome -> evidence -> changed understanding -> learning -> next decision. Peer/group collaboration adds governed participants/Forum; it must not replace the individual loop or leak predecessor private conversation.
+7. **Web:** relationships connect canonical objects and make relevant history discoverable; they never grant readership or create truth. The useful Web question is whether authorised reasoning can traverse from current A to relevant evidence, source standing, Focus, attempts/outcomes and learning without copying those records into a second graph.
+8. **Library:** explicit reference/filing surface, not memory gate and not truth store. Filing must not grant access, duplicate evidence, or become the way conversation is remembered. It should make retained authorised material/objects easy to find and reuse.
+9. **Memory:** remember governed facts, evidence refs, object lineage, attempts/outcomes, accepted preferences/decisions and authorised conversation history at the appropriate owner/scope. Do not convert transient model prose, private wording, repeated echoes, inferred sentiment or a filename/parser receipt into durable truth.
+10. **Minimal UI:** show the current meaning and useful next move first; deeper evidence/history is available on demand. No raw confidence dashboards, meaningless event-count graphs, database terminology or action-pill forests. Common H/L/I/Focus screen skeleton; type-specific meaning.
+11. **Syntax is necessary, logic is the gate:** \`node --check\`/registered suite green is required but cannot certify the product. Production-path HTTP, mutation, rendered browser/mobile, persistence/reload and live-provider attachment tests are required for the corresponding claims.
+
+### Prose acceptance matrix
+
+For Home, personal High, personal Low, personal Inquiry, personal Focus, shared/group H/L/I, and shared/group Focus, exercise:
+- direct factual/personal question;
+- organisational question;
+- "Why?";
+- "What do we actually know?";
+- "What contradicts this?";
+- "What are we missing?";
+- "What have I/we tried?";
+- "What happened afterward?";
+- "What could I/we do next?";
+- "Brainstorm with me";
+- "I just want to think this through";
+- "I disagree";
+- "Show me the evidence";
+- "Explain this fully";
+- deliberate "Work on this / make this my focus";
+- ordinary question containing the word focus, which must NOT create one.
+
+Score by invariants, not style preference: answers the asked question; correct scope/person; evidence/interpretation distinction; uncertainty calibrated; no causal overclaim; no privacy inference; no unnecessary question; no unnecessary object/action; concise first; materially deeper on request; natural language; next move proportional to evidence.
+
+### Media parity acceptance
+
+Conversation and retained material need not share the same ingestion mechanics, but after safe ingestion they should be similarly useful to reasoning. Run the same substantive question first against pasted text, then TXT/CSV, DOCX, PPTX, XLSX, PDF and an image containing equivalent information. Expected conclusions should agree within source limitations; differences must come from extraction/visibility/provenance, not arbitrary path behavior.
+
+For images specifically test: chart/table, photographed written note, screenshot containing prose, and ordinary scene relevant to a question. The retained vision description must be attributable and inspectable enough for follow-up, and must not be promoted to organisation evidence automatically.
+
+### Release evidence required
+
+The next runnable coding agent should create one durable matrix/report that records, for every row above: production route, canonical owner, positive assertion, negative/counterexample assertion, mutation, reload proof where relevant, and whether live provider/device proof was actually performed. Do not summarize a missing row as "covered by architecture."
+
