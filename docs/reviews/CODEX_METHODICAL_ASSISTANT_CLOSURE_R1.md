@@ -881,3 +881,28 @@ Some test-file headers/comments still describe the older eighteen-action Compose
 
 Those can consume the night while doing little for the Coach/player experience.
 
+
+
+## 13. Deep-pass defect fixed — Inquiry command was being mislabeled Low
+
+Head after fix/tests: \`fa05acf6c589f08363ed551f56c4ec230f6744d5\`.
+
+Source inspection found a real semantic bug in \`ai/composer-actions.js::readCommand\` after user-created Inquiry was removed. The command regex still recognizes \`inquiry|enquiry|high|low\`, but the no-action branch returned:
+
+\`kind: word === 'high' ? 'high' : 'low'\`
+
+That meant **"Create an Inquiry into X" was deterministically classified as a Low**. It did not create an Inquiry, which was safe for writes, but it corrupted the user's intended epistemic direction before reasoning: an unresolved question became a negative standing label.
+
+Fixed at \`7098141cd9faa0a353fe8b2d2eb68f2119c04142\`:
+- Inquiry/enquiry now normalize to \`kind: inquiry\`, \`type: null\`.
+- High remains High, Low remains Low.
+- only Focus maps to the consequential \`create_focus\` action.
+
+Pinned at \`fa05acf6c589f08363ed551f56c4ec230f6744d5\` in \`scripts/composer-actions-smoke.js\` with explicit Inquiry/enquiry/Low assertions.
+
+**Claude must run this suite.** I could inspect and commit through GitHub but did not execute Node in this environment, so syntax/runtime green is not claimed.
+
+### Deep-pass principle reinforced
+
+Removal of a forbidden mutation is not complete until every upstream intent parser, fallback, test, UI label and downstream reader preserves the replacement semantics. Search for this pattern around every retired action. A fail-closed write path can still be semantically wrong on the read/reasoning path.
+
