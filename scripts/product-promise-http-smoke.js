@@ -446,8 +446,11 @@ const server = app.listen(0, async () => {
       shelf: S.shelfFilings ? S.shelfFilings[C] : null,
     }));
     const flat = JSON.stringify(snap);
-    ok('L1 the opened inquiry survives, with the mark that makes it visible',
-      flat.includes(iid) && flat.includes('openedBy'));
+    const persistedInquiry = Object.values((snap.inquiryStates || {})['member:me'] || {})
+      .find(i => i && String(i.inquiryId) === iid);
+    ok('L1 the governed inquiry survives with its evidence provenance, not a human-opened marker',
+      !!persistedInquiry && (persistedInquiry.signals || []).length === SQUAD.length
+      && !persistedInquiry.openedBy);
     ok('L2 the attached material survives', flat.includes(mid));
     ok('L3 …and the disagreement that produced the Low survives',
       flat.includes('inq_mine') && /dissents|contradicts|disputes/.test(flat));
