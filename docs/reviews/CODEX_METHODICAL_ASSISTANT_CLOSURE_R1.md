@@ -936,3 +936,59 @@ Do not run a comprehensive historical audit before coding. The only historical q
 **"Does this open PR contain a unique pilot-critical behavior that current #90 lacks?"**
 If no, classify it and move on.
 
+
+
+## 15. Deep-pass operating contract — exhaustive without burning agent time
+
+Founder explicitly wants a head-to-toe pass, but this is **verification of the product already built, not permission to expand pilot scope**.
+
+Current remote checkpoint when this section was written: \`3e0f8a9de8cb8de954bcd2263d66524b0d77e015\`.
+
+The repository currently contains **416 JavaScript files** including production modules and harnesses. Do not interpret “look at every bit” as “rewrite every bit.” Use the existing 300+ focused smoke/browser/adversarial suites as executable maps, then inspect owners when a seam fails or when two paths disagree.
+
+### Cheapest-first loop
+
+1. Syntax/static gate across production JS first. A parse/import failure outranks product polish.
+2. Run the registered \`npm test\` suite once at the current head. Do not repeatedly pay for the full suite after every tiny edit.
+3. Group failures by canonical owner and fix root causes, not assertions.
+4. For each repaired owner, run only its focused suite(s) + one hostile opposite/mutation.
+5. Re-run full \`npm test\` after a meaningful batch, not after every commit.
+6. Browser/mobile checks are a separate gate: source tests do not prove a reachable screen.
+7. Live-provider/device/Neon/Render checks remain external proof; never fake them with fixtures.
+
+### End-to-end seams that matter more than file count
+
+Trace each in both self and authorized group scope where applicable:
+- raw conversation -> comprehension -> evidence/provenance -> understanding -> governed High/Low/Inquiry;
+- H/L/I -> participant-owned conversation -> deliberate Focus proposal/confirmation;
+- Focus -> canonical Action -> Outcome -> derived learning -> later Composer reasoning;
+- attachment/image/document -> attributed material -> authorized reasoning -> optional evidence promotion;
+- Library filing -> live referenced object/conversation -> reopen/resume without copying;
+- Web/cross-evidence relationship -> authorized read (relationship must never grant access);
+- Forum -> current authorized audience -> no private predecessor transcript leakage;
+- voice -> same Composer/action path -> no second semantics;
+- onboarding/context -> attributed world context, not automatic empirical truth;
+- provider-down -> honest degraded prose, no false claims/writes;
+- reload/restart -> same identity, audience, object lineage, attempts/outcomes and conversation continuity.
+
+### Finding discipline
+
+Classify findings as:
+- **PILOT-BLOCKING DEFECT** — existing intended behavior is wrong/unreachable/unsafe; fix now if owner is clear.
+- **PILOT PROOF GAP** — implementation looks right but required runtime/browser/provider proof is missing; add/repair the narrow test or leave exact command.
+- **STALE SEMANTICS** — old docs/comments/tests/UX can resurrect obsolete law; correct only where it can mislead execution or behavior.
+- **POST-PILOT** — improvement not required for current intended behavior; record, do not implement.
+
+Every finding should name: symptom, canonical owner, exact path, violated law, smallest proof, and whether code changed.
+
+### Newly proven connection defect fixed during this pass
+
+At \`3e0f8a9\`, \`js/app.js::openFromShelf\` was corrected. A Library entry of kind \`conversation\` navigated to Home and returned, so the “live reference” did not reopen the referenced conversation at all. It now navigates Home and calls the existing canonical \`wsLoadConversation(refId)\` path. This is not a new Library feature; it closes the existing Library-as-index contract.
+
+Add a browser assertion when the browser gate is next run: keep/reference a conversation, leave it, open it from Library, and prove the same conversation id/messages resume rather than merely landing on Home.
+
+### Important execution bias
+
+Prefer **connection defects** over cosmetic cleanup. A route existing is not proof a person can reach it. A test passing is not proof the UI calls it with the right identity/scope. A correct object is not proof later reasoning reads it. A stored outcome is not proof future prose learns from it.
+
+Do not spend Claude time re-reading all 416 files linearly if static gates and focused ownership tests already cover them. Spend it on contradictions between layers and on the end-to-end seams above.
