@@ -114,7 +114,9 @@ const server = app.listen(0, async () => {
     const iid = 'inq_mine';
     const iBefore = (((await call('GET', '/api/objects?kind=inquiry&scope=self')).j || {}).objects || [])
       .find(o => String(o.id) === iid);
-    const standingBefore = JSON.stringify(((iBefore || {}).explained || {}).confidence || null);
+    const kernelInquiry = () => Object.values(((S.inquiryStates[C] || {})['member:me'] || {}))
+      .find(i => i && String(i.inquiryId) === iid);
+    const standingBefore = JSON.stringify((kernelInquiry() || {}).confidence || null);
 
     none();
     const a1 = await say('Why does that keep happening?', { about: { kind: 'inquiry', id: iid } });
@@ -124,9 +126,11 @@ const server = app.listen(0, async () => {
       (await listed('inquiry', 'self')).filter(id => id === iid).length === 1);
     const iCard = (((await call('GET', '/api/objects?kind=inquiry&scope=self')).j || {}).objects || [])
       .find(o => String(o.id) === iid);
-    ok('A3 …with evidence-derived standing still present', !!iCard && !!(iCard.explained || {}).confidence);
-    ok('A4 …and asking the question did not upgrade or erase that standing',
-      JSON.stringify(((iCard || {}).explained || {}).confidence || null) === standingBefore);
+    ok('A3 …with the same governed Inquiry still readable on the human surface',
+      !!iCard && String(iCard.id) === iid);
+    ok('A4 …and asking the question did not upgrade or erase its kernel-owned standing',
+      standingBefore !== 'null'
+      && JSON.stringify((kernelInquiry() || {}).confidence || null) === standingBefore);
 
     picks('create_focus', { text: 'Speak first after we concede' });
     const a6 = await say('I want to work on that — speaking first after we concede',
