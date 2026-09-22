@@ -218,10 +218,13 @@ const server = app.listen(0, async () => {
     ok('CQ-H1d …and writing NOTHING on its own',
       (await countFocuses()) === focusesBefore);
 
+    /* Inquiry now follows the same governed-discovery law as High/Low. A person can offer the
+       unresolved question, but cannot command canonical Inquiry standing into existence. */
     const askInq = await propose('Create an Inquiry into why substitutes feel disconnected.');
-    const iProp = askInq.actions.find(a => a.actionType === 'create_inquiry');
-    ok('CQ-H2 "Create an Inquiry …" names the existing action too',
-      !!iProp);
+    ok('CQ-H2 "Create an Inquiry …" cannot manufacture governed Inquiry standing',
+      !askInq.actions.some(a => a.actionType === 'create_inquiry'));
+    ok('CQ-H2a …and the response does not falsely claim an Inquiry was created',
+      !/created (?:an |the )?inquiry|I have created/i.test(askInq.text));
     ok('CQ-H2b …and writes nothing on its own either',
       (await countInquiries()) === inquiriesBefore);
 
