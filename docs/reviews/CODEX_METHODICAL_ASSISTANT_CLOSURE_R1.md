@@ -1239,3 +1239,47 @@ The object thread opened the most recently updated conversation and said nothing
 ### External gates unchanged
 
 Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery. Chromium in CI is not among them.
+
+## 9. Claude closure round three — 2026-09-23
+
+**Head at end:** `4b3555a`. Nothing merged or deployed.
+
+| SHA | Production change |
+|---|---|
+| `4b3555a` | A focus reply says what was already tried on the same question and the outcome recorded |
+
+### Matrix 12-14 — and the class of defect it belongs to
+
+The experiment law was implemented **only in the layer that runs when a model writes the prose**. `ai/composer.js` carries prior attempts into the model's context and forbids repackaging a materially identical unsuccessful one. Measured: a turn bound to a group focus makes one provider call — the bounded action read — and the prose comes from the deterministic object reader. With models off, which is the pilot's configuration, none of it reached anybody.
+
+A coach on their second attempt, asking what else to try, got: *"You are working on 'Rotate the press in the last twenty'. Nothing has been recorded about how it went yet."* The record held that "Extra fitness block on Tuesdays" had been tried and recorded as `no_change`. The most useful fact available was the one omitted.
+
+This is worth naming as a class: **a rule that lives only in the model's prompt is absent in the pilot.** Anything in `SYSTEM_PROMPT` or `buildContext` should be assumed unreachable until proven on the deterministic path.
+
+**A second finding underneath it.** The focus→source relationship has two spellings: personal focuses store `addresses: {kind,id}`, group focuses store `origin.inquiryId`. The reader looked at one, so it knew a personal focus's question and not a group's. Read under both names rather than renamed — consolidating is a canonical-owner change with its own blast radius, and this is a reader. **Recorded as a real consolidation candidate for a later pass.**
+
+### Test-side correction worth carrying forward
+
+The causal caveat is delivered on `response.qa.limitations`; the turn's top-level `limitations` describes the context it answered from. They are different statements and reading the wrong one makes a present caveat look missing. Any future assertion about an answer's own caveats should read the `qa`.
+
+### Proof
+
+- `prior-attempts-http-smoke` — 10 assertions, registered. Four mutations red: attempts not carried, group spelling ignored, attempts from any question bleeding in, causal limitation dropped.
+- `npm test` — green.
+- Browser gates: pilot-coach 133, group-loop 55.
+
+### Parked, with the reason — Forum "Ask IntelliQ" (PRIORITY_RND P2)
+
+The Forum has its own composer, which sends human speech to the room. There is no Ask IntelliQ.
+
+Building it is **not** a UI task. The assistant answers from `_allObjectsFor(code, userId)` — the individual reader's authorised set. A Forum answer must be bounded by what the ROOM can read, and posting an answer computed for the asker into the room would widen readership, which P2 explicitly forbids.
+
+The safest design, and my recommendation: **IntelliQ answers the asker only**, from the object's own governed projection that every member of the room can already read, and getting it into the room uses the existing governed share action. That needs no new audience owner and cannot widen readership by construction.
+
+That is a founder-facing architecture choice with a privacy cliff, and it is P2 — below the acceptance matrix. Recorded rather than silently built.
+
+### Exact next seam
+
+1. **Option sets for a personal object.** `_inquiryOptions` serves the group-inquiry read only; the personal equivalent has no producer. The external-knowledge source class also has none — deliberately not fabricated.
+2. **Matrix 14 proper** — "tactics exhausted → route to human help". `_inquiryOptions` says another variation is not the useful next move; nothing yet routes to a person.
+3. **Forum Ask IntelliQ**, once the founder rules on the scope question above.
