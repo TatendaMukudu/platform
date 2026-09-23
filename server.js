@@ -14628,12 +14628,38 @@ app.post('/api/assistant/remember', requireAuth, (req, res) => {
    { format, content, sourceName, visibility?, confirmVisibilityIncrease?, captureTime? }.
    Returns an inspectable diagnostics artifact. Private by default; a shared import
    needs the explicit visibility confirmation. */
+/* WHAT A CALLER MAY DECLARE HERE, AND WHY IT IS NARROWER THAN `intake.SUPPORTED`.
+
+   `ai/intake.js` accepts `pdf` and `docx` as ALREADY-EXTRACTED text, and says so in its own
+   warning: "no binary extractor bundled". That is a reasonable module contract for a future
+   connector that genuinely did the extraction and wants the provenance recorded. It is not a
+   reasonable HTTP contract, because over HTTP the claim "this text came out of a PDF" is
+   unverifiable and nothing in this codebase can check it.
+
+   It was being exercised. The Knowledge door advertised .pdf/.doc/.docx that the browser cannot
+   read and fell back to the parser's RECEIPT when there was no content, so "PDF document
+   attached: scouting.pdf" was imported as canonical evidence a coach could later be answered
+   from. That door has since been narrowed to what the browser can really turn into text — but a
+   door being honest is not the same as the owner being safe, and this route is the owner.
+
+   So the route allows the formats a producer can actually deliver today and fails closed on the
+   rest (AGENTS §7: allowlist the good states). No content sniffing: a receipt-detector would be a
+   guess about wording, and the fix is to stop accepting an unverifiable claim rather than to
+   grade the text it arrives with. When a real extractor exists, it arrives with its own
+   provenance and this list is re-ratified deliberately. */
+const IMPORT_FORMATS = Object.freeze(['text', 'markdown', 'md', 'csv', 'json']);
+
 app.post('/api/evidence/import', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const b = req.body || {};
   if (!b.content && b.content !== 0) return res.status(400).json({ error: 'content required' });
-  if (!intake.SUPPORTED.includes(String(b.format || 'text').toLowerCase().replace('md', 'markdown')))
-    return res.status(400).json({ error: 'unsupported_format', supported: intake.SUPPORTED });
+  const _fmt = String(b.format || 'text').toLowerCase();
+  if (!IMPORT_FORMATS.includes(_fmt)) {
+    return res.status(400).json({ error: 'unsupported_format', supported: IMPORT_FORMATS,
+      note: _fmt === 'pdf' || _fmt === 'docx'
+        ? 'IntelliQ does not extract this format here. Attach the file in a conversation, where the server reads it, or paste the text.'
+        : undefined });
+  }
   const out = _ingestArtifact(code, userId, b);
   if (out.needsConfirmation) return res.status(409).json(out);
   res.json(out);
