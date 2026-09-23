@@ -98,6 +98,51 @@ const STUB = `
   });
 `;
 
+/* THE SAME ENGINE, WITH A WORKING PAUSE. Everything else is identical, so any difference in
+   section G below is the product's pause path and nothing about the harness. `paused` is a real
+   readable property here because that is what the product interrogates before it is willing to
+   say the word "Paused" to anybody. */
+/* AND AN ENGINE THAT ACCEPTS `pause()` AND CARRIES ON TALKING. This is the case the product's
+   fail-safe was actually written for, and it is not the same as an engine with no pause at all:
+   here the call succeeds, nothing throws, and only `paused` tells the truth. Without this stub a
+   mutation that says "Paused" without ever asking survives, because section B's engine throws
+   before it can lie and section G's engine really does pause. */
+const STUB_DEAF_PAUSE = STUB + `
+  (function () {
+    var ss = window.speechSynthesis;
+    Object.defineProperty(ss, 'paused', { configurable: true, get: function () { return false; } });
+    ss.pause = function () { window.__iqSpeech.pauses = (window.__iqSpeech.pauses || 0) + 1; };
+    ss.resume = function () {};
+  })();
+`;
+
+/* AND ONE THAT PAUSES BUT WILL NOT RESUME. The mirror of the case above, and the same law:
+   a control reading "Reading aloud…" over silence is the same lie as one reading "Paused" over
+   sound. Here the product must get the reading going again rather than relabel a dead control. */
+const STUB_STUCK_RESUME = STUB + `
+  (function () {
+    var ss = window.speechSynthesis;
+    var isPaused = false;
+    Object.defineProperty(ss, 'paused', { configurable: true, get: function () { return isPaused; } });
+    ss.pause = function () { isPaused = true; };
+    ss.resume = function () { window.__iqSpeech.resumes = (window.__iqSpeech.resumes || 0) + 1; };
+    var origCancel = ss.cancel;
+    ss.cancel = function () { isPaused = false; origCancel.call(ss); };
+  })();
+`;
+
+const STUB_PAUSE = STUB + `
+  (function () {
+    var ss = window.speechSynthesis;
+    var isPaused = false;
+    Object.defineProperty(ss, 'paused', { configurable: true, get: function () { return isPaused; } });
+    ss.pause = function () { isPaused = true; window.__iqSpeech.pauses = (window.__iqSpeech.pauses || 0) + 1; };
+    ss.resume = function () { isPaused = false; window.__iqSpeech.resumes = (window.__iqSpeech.resumes || 0) + 1; };
+    var origCancel = ss.cancel;
+    ss.cancel = function () { isPaused = false; origCancel.call(ss); };
+  })();
+`;
+
 (async () => {
   const server = await new Promise(res => { const s = app.listen(0, () => res(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -178,7 +223,13 @@ const STUB = `
       ok('VOB-A2 …and the row says it is speaking, in the live region beside the control',
         s1 === 'speaking' && /reading aloud/i.test(said1));
 
-      console.log('\n  B — STOPPED: PRESSING IT AGAIN STOPS IT, AND THE ROW SAYS SO');
+      console.log('\n  B — AN ENGINE THAT CANNOT PAUSE FALLS BACK TO STOPPING, AND SAYS STOPPED');
+      /* THIS STUB HAS NO `pause`, WHICH IS THE POINT OF IT. The control is Play/Pause now, and
+         `speechSynthesis.pause()` is not honoured everywhere — some engines have no pause at all,
+         others accept the call and keep talking. On those, a button reading "Paused" over audio
+         the person can still hear is a lie they can hear. So the engine is asked afterwards
+         whether it actually paused, and when it did not, this is what must happen: a real stop,
+         reported as a stop. Section G proves the other half on an engine that can. */
       await buttons[0].click();
       await page.waitForTimeout(200);
       const s2 = await buttons[0].getAttribute('data-voice-state');
@@ -186,6 +237,8 @@ const STUB = `
         document.querySelectorAll('.iq-msg-acts .iq-act-said')[0].textContent);
       ok('VOB-B1 the state is stopped and the person is told',
         s2 === 'stopped' && /stopped/i.test(said2));
+      ok('VOB-B1c …and it never claims a pause this engine could not give it',
+        s2 !== 'paused' && !/paused/i.test(said2));
       ok('VOB-B1b …and the engine was actually cancelled, not merely relabelled',
         (await page.evaluate(() => window.__iqSpeech.cancels)) > 0);
 
@@ -281,6 +334,95 @@ const STUB = `
       !!note && /cannot read replies aloud/i.test(note));
     ok('VOB-E3 …and the Settings row agrees with the control, because both ask the same owner',
       (await p2.evaluate(() => !!(window.IQVoiceOut && window.IQVoiceOut.isSupported() === false))) === true);
+
+    console.log('\n  G — PLAY, PAUSE, AND CARRY ON FROM THE SAME PLACE');
+    /* THE RATIFIED CONTROL. It drew a SPEAKER and pressing it while reading CANCELLED, so one
+       glyph meant both "start" and "throw away where you were", and the only way back into a long
+       answer was the top of it. A triangle when idle, a pause bar while playing, and resume. */
+    {
+      const { page: gp } = await openAs(STUB_PAUSE);
+      await openThread(gp);
+      const b0 = (await gp.$$('.iq-act-voice'))[0];
+      const shape = async () => gp.evaluate(() => {
+        const b = document.querySelector('.iq-act-voice');
+        return { state: b.getAttribute('data-voice-state'), title: b.getAttribute('title'),
+          label: b.getAttribute('aria-label'),
+          rects: b.querySelectorAll('rect').length, paths: b.querySelectorAll('path').length,
+          said: (document.querySelector('.iq-msg-acts .iq-act-said') || {}).textContent || '' };
+      });
+      const idle = await shape();
+      ok('VOB-G1 at rest it is a PLAY triangle, not a speaker',
+        idle.state === 'idle' && idle.paths === 1 && idle.rects === 0 && /play/i.test(idle.title));
+      await b0.click(); await gp.waitForTimeout(200);
+      const playing = await shape();
+      ok('VOB-G2 while it is reading, the control is a PAUSE bar and says so',
+        playing.state === 'speaking' && playing.rects === 2 && /pause/i.test(playing.title)
+        && /pause/i.test(playing.label));
+      /* CANCELS BEFORE THE PRESS, so the claim below is about what THIS press did. Two cancels
+         have already happened legitimately — one when the thread was restored, one that `speak`
+         issues before starting — so a bound like "no more than one cancel in total" would have
+         been asserting the harness's history rather than the product's behaviour. It failed for
+         that reason, which is the assertion being wrong rather than the product. */
+      const cancelsBefore = await gp.evaluate(() => window.__iqSpeech.cancels);
+      await b0.click(); await gp.waitForTimeout(200);
+      const paused = await shape();
+      ok('VOB-G3 pressing it pauses rather than throwing the place away',
+        paused.state === 'paused' && /paused/i.test(paused.said));
+      /* PAUSED, NOT CANCELLED — the distinction the whole change is about. A cancel here would
+         discard the position, which is exactly what the old control did. */
+      ok('VOB-G3b …and the press paused the engine without cancelling it, which is what loses the place',
+        (await gp.evaluate(() => window.__iqSpeech.pauses)) === 1
+        && (await gp.evaluate(() => window.__iqSpeech.cancels)) === cancelsBefore);
+      ok('VOB-G3c …and the icon goes back to PLAY, because that is what pressing it will do next',
+        paused.rects === 0 && paused.paths === 1 && /resume/i.test(paused.title + paused.label));
+      await b0.click(); await gp.waitForTimeout(200);
+      const resumed = await shape();
+      ok('VOB-G4 pressing it again carries on from the same place',
+        resumed.state === 'speaking' && resumed.rects === 2);
+      ok('VOB-G4b …by resuming the engine rather than starting the reading over',
+        (await gp.evaluate(() => window.__iqSpeech.resumes)) === 1
+        && (await gp.evaluate(() => window.__iqSpeech.spoken.length)) === 1);
+    }
+
+    console.log('\n  H — AN ENGINE THAT TAKES THE PAUSE AND KEEPS TALKING IS NOT CALLED PAUSED');
+    /* The honesty half of the control. Saying "Paused" over audio the person can still hear is a
+       lie they can hear, and it is the specific way a pause feature goes wrong in the field. */
+    {
+      const { page: hp } = await openAs(STUB_DEAF_PAUSE);
+      await openThread(hp);
+      const hb = (await hp.$$('.iq-act-voice'))[0];
+      await hb.click(); await hp.waitForTimeout(200);
+      ok('VOB-H1 it is reading', (await hb.getAttribute('data-voice-state')) === 'speaking');
+      await hb.click(); await hp.waitForTimeout(200);
+      const st = await hb.getAttribute('data-voice-state');
+      const said = await hp.evaluate(() =>
+        (document.querySelector('.iq-msg-acts .iq-act-said') || {}).textContent || '');
+      ok('VOB-H2 the engine was asked to pause', (await hp.evaluate(() => window.__iqSpeech.pauses)) === 1);
+      ok('VOB-H3 …and because it did not, the control does NOT claim it paused',
+        st !== 'paused' && !/paused/i.test(said));
+      ok('VOB-H4 …it stops for real and says stopped, so what is on screen matches what is audible',
+        st === 'stopped' && /stopped/i.test(said));
+    }
+
+    console.log('\n  H2 — AND ONE THAT WILL NOT RESUME GETS THE READING GOING AGAIN, NOT A DEAD LABEL');
+    {
+      const { page: ip } = await openAs(STUB_STUCK_RESUME);
+      await openThread(ip);
+      const ib = (await ip.$$('.iq-act-voice'))[0];
+      await ib.click(); await ip.waitForTimeout(180);            // play
+      await ib.click(); await ip.waitForTimeout(180);            // pause (this engine can)
+      ok('VOB-H2a it paused', (await ib.getAttribute('data-voice-state')) === 'paused');
+      const spokenBefore = await ip.evaluate(() => window.__iqSpeech.spoken.length);
+      await ib.click(); await ip.waitForTimeout(250);            // resume, which this engine ignores
+      const st2 = await ib.getAttribute('data-voice-state');
+      ok('VOB-H2b the engine was asked to resume', (await ip.evaluate(() => window.__iqSpeech.resumes)) === 1);
+      /* IT SAYS IT IS READING ONLY IF IT IS. Since this engine will not carry on from where it
+         was, the honest recovery is to read it again — so there must be a NEW utterance behind
+         the label, not just the label. */
+      ok('VOB-H2c …and because it would not, the reading is actually started again rather than relabelled',
+        (st2 === 'speaking' || st2 === 'starting')
+        && (await ip.evaluate(() => window.__iqSpeech.spoken.length)) === spokenBefore + 1);
+    }
 
     console.log('\n  F — NO PAGE ERRORS ALONG THE WAY');
     ok(`VOB-F1 the whole walk raised no uncaught error (${pageErrors.length})`, pageErrors.length === 0);

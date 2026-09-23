@@ -385,14 +385,55 @@ console.log('\n  READING ALOUD SPEAKS WHAT IT WAS APPROVED TO SPEAK, OR SAYS WHY
       && typeof synth.last.onend === 'function');
     if (typeof synth.last.onstart === 'function') synth.last.onstart();
     ok('V25c …then that it is speaking, which is a different fact from having asked it to',
-      b1.said.textContent === V.WORDS.speaking && b1.getAttribute('aria-label') === 'Stop reading aloud');
+      b1.said.textContent === V.WORDS.speaking && b1.getAttribute('aria-label') === 'Pause reading aloud');
 
-    // PRESSING IT AGAIN IS THE STOP CONTROL — and the retry path, since a stopped row can start again.
+    /* PRESSING IT AGAIN PAUSES — ON AN ENGINE THAT CAN. This stub has no `pause`, so the call
+       throws and the product falls back to a real stop, which is what the next two assertions
+       pin. That fallback is deliberate: an engine that cannot pause must not be described as
+       paused. The pause/resume path itself is covered below (V26d) and rendered in
+       voice-output-browser-check sections G, H and H2. */
     const stopped = V.speak(b1, arg(APPROVED));
     ok('V26 pressing the control that is speaking stops it, and the row SAYS it stopped',
       stopped === false && b1.said.textContent === V.WORDS.stopped && b1.getAttribute('data-voice-state') === 'stopped');
     ok('V26b …and it can be started again from there, so a person who stopped it is not stuck',
       V.speak(b1, arg(APPROVED)) === true);
+
+    /* ── AND ON AN ENGINE THAT CAN PAUSE, IT PAUSES ────────────────────────────────────────
+       The ratified control is Play / Pause / Resume: a triangle at rest, a pause bar while it is
+       reading, and carrying on from the same place. The old control drew a SPEAKER and cancelled
+       on a second press, so somebody half way through a long answer who wanted a moment lost
+       their place and had to hear it from the top again.
+
+       Hermetic on purpose. `npm test` does not run the browser gates, so without this the whole
+       pause path would be protected only by a check nobody runs on every commit. */
+    let paused = false;
+    synth.pause = function () { paused = true; this.pauses = (this.pauses || 0) + 1; };
+    synth.resume = function () { paused = false; this.resumes = (this.resumes || 0) + 1; };
+    Object.defineProperty(synth, 'paused', { configurable: true, get: () => paused });
+    const bp = mkBtn();
+    V.speak(bp, arg(APPROVED));
+    if (typeof synth.last.onstart === 'function') synth.last.onstart();
+    const cancelsBefore = synth.cancels, spokenBefore = synth.spoken.length;
+    V.speak(bp, arg(APPROVED));
+    ok('V26c pressing it while it reads PAUSES, without cancelling — cancelling is what loses the place',
+      bp.getAttribute('data-voice-state') === 'paused' && synth.pauses === 1
+      && synth.cancels === cancelsBefore && bp.said.textContent === V.WORDS.paused);
+    ok('V26c2 …and the control now offers to carry on, rather than to start over',
+      bp.getAttribute('aria-label') === 'Resume reading aloud');
+    V.speak(bp, arg(APPROVED));
+    ok('V26d pressing it again resumes the same reading rather than speaking it afresh',
+      bp.getAttribute('data-voice-state') === 'speaking' && synth.resumes === 1
+      && synth.spoken.length === spokenBefore);
+    /* AND AN ENGINE THAT TAKES THE PAUSE AND KEEPS TALKING IS NOT CALLED PAUSED. Saying "Paused"
+       over audio a person can still hear is a lie they can hear. */
+    synth.pause = function () { this.pauses = (this.pauses || 0) + 1; };   // accepted, ignored
+    const bd = mkBtn();
+    V.speak(bd, arg(APPROVED));
+    if (typeof synth.last.onstart === 'function') synth.last.onstart();
+    V.speak(bd, arg(APPROVED));
+    ok('V26e an engine that ignores the pause is reported as STOPPED, never as paused',
+      bd.getAttribute('data-voice-state') === 'stopped' && bd.said.textContent === V.WORDS.stopped);
+    V.stop('stopped');
 
     // A NEWER UTTERANCE REPLACES AN OLDER ONE, DETERMINISTICALLY, and the row it replaced is told.
     const b2 = mkBtn();
@@ -453,8 +494,12 @@ console.log('\n  READING ALOUD SPEAKS WHAT IT WAS APPROVED TO SPEAK, OR SAYS WHY
     ok('V29e every state a person can be in has words — none is the empty string except idle and a finished reading',
       ['unsupported', 'starting', 'speaking', 'stopped', 'interrupted', 'error'].every(k => (V.WORDS[k] || '').length > 3)
       && V.WORDS.ended === '' && V.WORDS.idle === '');
-    ok('V29f …and the vocabulary is closed, so a seventh state cannot arrive without a word for it',
-      V.STATES.length === 8 && V.STATES.every(k => Object.prototype.hasOwnProperty.call(V.WORDS, k)));
+    /* NO NUMBER IN THE NAME. This said "a seventh state" while asserting eight, having already
+       drifted once; the law is that every state has a word for a person to read, not how many
+       there are. Adding `paused` made it nine and the count is now derived from the list itself. */
+    ok('V29f …and the vocabulary is closed, so a new state cannot arrive without a word for it',
+      V.STATES.length >= 8 && V.STATES.includes('paused')
+      && V.STATES.every(k => Object.prototype.hasOwnProperty.call(V.WORDS, k)));
 
     /* THE LAW THAT MAKES THE REST OF IT TRUE: this owner never reads message text. It writes a
        STATE into the live region and nothing else. If it could read the reply it would be a

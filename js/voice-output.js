@@ -41,18 +41,40 @@
 
   /* The closed vocabulary. `idle` and `ended` are the two that are correctly silent — nothing has
      happened yet, and a reading that finished says so by stopping. */
-  var STATES = ['idle', 'unsupported', 'starting', 'speaking', 'stopped', 'interrupted', 'error', 'ended'];
+  var STATES = ['idle', 'unsupported', 'starting', 'speaking', 'paused', 'stopped', 'interrupted', 'error', 'ended'];
 
   var WORDS = {
     idle: '',
     unsupported: 'This browser cannot read replies aloud.',
     starting: 'Starting to read aloud…',
     speaking: 'Reading aloud…',
+    paused: 'Paused — press play to carry on from here.',
     stopped: 'Stopped.',
     interrupted: 'Stopped — a newer reply took over.',
     error: 'Reading aloud failed. Press again to retry.',
     ended: '',
   };
+
+  /* ── ONE PLAYBACK CONTROL, AND IT IS PLAY / PAUSE ──────────────────────────────────────────
+     This drew a SPEAKER, and pressing it while it was reading CANCELLED — so the same glyph
+     meant "start" and "throw away where you were", and the only way back into a long answer was
+     the beginning of it. Ratified direction: a triangle when idle, a pause bar while playing,
+     and resume from the same point where practical.
+
+     `speechSynthesis` has pause/resume, so "where practical" is genuinely available rather than
+     aspirational. Where an engine REFUSES to pause — some platforms accept the call and keep
+     talking — the control does not claim it paused; see `speak`. A button saying "Paused" over
+     audio that is still going is worse than no pause at all. */
+  var ICONS = {
+    play: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="currentColor">'
+      + '<rect x="7" y="5" width="3.4" height="14" rx="1"/><rect x="13.6" y="5" width="3.4" height="14" rx="1"/></svg>',
+  };
+  /* The pause bar is shown ONLY while sound is actually coming out. Paused shows play again,
+     because the next press starts it moving — the icon names what pressing it will do. */
+  function iconFor(state) {
+    return (state === 'speaking' || state === 'starting') ? ICONS.pause : ICONS.play;
+  }
 
   function support() {
     try { return !!(global.speechSynthesis && global.SpeechSynthesisUtterance); } catch (e) { return false; }
@@ -80,10 +102,14 @@
     if (out) out.textContent = word;
     if (btn.setAttribute) btn.setAttribute('data-voice-state', state);
     var speaking = state === 'starting' || state === 'speaking';
+    /* THE LABEL NAMES WHAT PRESSING IT WILL DO, which is the only thing a label on a control is
+       for. Three answers, not two: pause it, carry on from here, or read it. */
     if (btn.setAttribute) {
-      btn.setAttribute('aria-label', speaking ? 'Stop reading aloud' : 'Read this aloud');
-      btn.setAttribute('title', speaking ? 'Stop' : 'Read aloud');
+      btn.setAttribute('aria-label', speaking ? 'Pause reading aloud'
+        : state === 'paused' ? 'Resume reading aloud' : 'Read this aloud');
+      btn.setAttribute('title', speaking ? 'Pause' : state === 'paused' ? 'Resume' : 'Play');
     }
+    if (btn.innerHTML !== undefined) btn.innerHTML = iconFor(state);
     if (btn.classList && btn.classList.toggle) btn.classList.toggle('is-on', speaking);
   }
 
@@ -107,10 +133,33 @@
     if (!support()) { setState(btn, 'error'); return false; }
     if (!String(text).trim()) { setState(btn, 'error'); return false; }
 
-    // Pressing the control that is currently speaking is the stop control: a person who wants it
-    // to stop reaches for the thing that started it.
+    /* ── PRESSING IT AGAIN PAUSES; PRESSING IT ONCE MORE CARRIES ON ─────────────────────────
+       This used to CANCEL, so a person half way through a long answer who wanted a moment lost
+       their place and had to sit through it again from the top. One control, three acts: play,
+       pause, resume.
+
+       AND IT DOES NOT CLAIM A PAUSE IT DID NOT GET. Some engines accept `pause()` and keep
+       talking; on those, saying "Paused" over continuing audio is a lie the person can hear. So
+       the engine is asked afterwards, and if it did not pause, this falls back to stopping and
+       says THAT instead. */
     var state = btn && btn.getAttribute ? btn.getAttribute('data-voice-state') : 'idle';
-    if (liveBtn === btn && (state === 'speaking' || state === 'starting')) { stop('stopped'); return false; }
+    if (liveBtn === btn && (state === 'speaking' || state === 'starting')) {
+      try {
+        global.speechSynthesis.pause();
+        if (global.speechSynthesis.paused) { setState(btn, 'paused'); return false; }
+      } catch (e) {}
+      stop('stopped');
+      return false;
+    }
+    if (liveBtn === btn && state === 'paused') {
+      try {
+        global.speechSynthesis.resume();
+        if (!global.speechSynthesis.paused) { setState(btn, 'speaking'); return false; }
+      } catch (e) {}
+      /* It would not resume. Start the reading again rather than leaving a dead control — the
+         person pressed play and something has to happen. */
+      stop('stopped');
+    }
     if (liveBtn && liveBtn !== btn) stop('interrupted');
 
     try {
@@ -143,12 +192,10 @@
     if (!String(speech == null ? '' : speech).trim()) {
       return '<span class="iq-act-note" data-voice="none">No approved reading for this message.</span>';
     }
-    return '<button type="button" class="iq-act iq-act-voice" aria-label="Read this aloud" title="Read aloud"'
+    return '<button type="button" class="iq-act iq-act-voice" aria-label="Read this aloud" title="Play"'
       + ' data-voice-state="idle" data-voice-for="' + esc(rid) + '"'
       + ' onclick="IQVoiceOut.speak(this, ' + esc(JSON.stringify(JSON.stringify(String(speech)))) + ')">'
-      + '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor"'
-      + ' stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
-      + '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>'
+      + ICONS.play
       + '</button>';
   }
 
