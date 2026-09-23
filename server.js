@@ -17365,7 +17365,39 @@ function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
 
    NO SCORE, NO RANK, NO PROBABILITY, and `ranked: false` says so in the payload rather than
    leaving array order to be read as preference. */
-function _inquiryOptions(inq, frontier, triedBefore) {
+/* WHO THIS PERSON COULD BRING IN ABOUT THIS GROUP'S QUESTION — matrix 14.
+
+   Two filters, and the option only names somebody who survives both:
+
+     STANDING — they lead this node. Leading it is what makes them worth asking about it, and it
+       is held on the node, not inferred from who talks a lot or who is senior somewhere else.
+     ADDRESSABILITY — `_contactsFor` already says. That owner is bounded by the tree and is the
+       existing answer to "the people you can write to"; intersecting with it means this can never
+       disclose somebody the asker could not already have found and named themselves. Suggesting a
+       person is a disclosure, and relevance is not authorisation.
+
+   Fail closed on both: no node, no leaders, no contacts, or a contacts read that throws, and the
+   answer is nobody. An invented person to ask would be worse than the honest silence — which is
+   already a real state elsewhere in this product, the way "nothing worth asking yet" is. */
+function _peopleWithStandingFor(code, nodeId, viewerId) {
+  if (!viewerId || !nodeId) return [];
+  const node = (orgNodes[code] || {})[nodeId];
+  const standing = new Set((Array.isArray(node && node.leaderIds) ? node.leaderIds : []).map(String));
+  if (!standing.size) return [];
+  let addressable = [];
+  try { addressable = _contactsFor(code, viewerId) || []; } catch (_) { return []; }
+  /* THE ASKER IS NEVER IN THIS LIST, and `_contactsFor` is what guarantees it — both its paths
+     skip the requesting user. A leader told to go and ask themselves is the product not knowing
+     who it is talking to, so it matters; it is asserted at EH-C3 against the composed behaviour.
+     A second `c.id !== viewerId` filter stood here first and was removed: no mutation could kill
+     it, which is the signature of a line that does nothing while reading as a safeguard. */
+  return addressable
+    .filter(c => c && standing.has(String(c.id)))
+    .slice(0, 3)
+    .map(c => ({ id: String(c.id), name: String(c.name || ''), role: String(c.role || '') }));
+}
+
+function _inquiryOptions(inq, frontier, triedBefore, helpers) {
   const readiness = (frontier && frontier.readiness) || null;
   if (!readiness || readiness.state !== 'worth_testing') return null;
 
@@ -17405,6 +17437,27 @@ function _inquiryOptions(inq, frontier, triedBefore) {
       uncertainty: 'It helped once here. That is precedent under those conditions, not proof it caused the change or that it will work again.',
     });
   }
+  /* ── AND WHEN VARYING THE TACTIC IS THE WRONG ANSWER, A PERSON IS THE RIGHT ONE (matrix 14) ──
+     Only in the exhausted state, and only naming somebody `_peopleWithStandingFor` has already
+     cleared on both standing and addressability. This is the one place the product is entitled to
+     say "stop trying variations", and it was also the one place it left a person with a shorter
+     list and no next move — which reads as the system giving up exactly where it has the most
+     standing to be useful.
+
+     IT SENDS NOTHING. The option names who could be asked. It does not message them, does not
+     start a Focus, and the person named is never told they were suggested. */
+  const _help = Array.isArray(helpers) ? helpers : [];
+  if (exhausted && _help.length) {
+    options.push({
+      id: `ask_someone:${_help.map(h => h.id).join(',')}`,
+      text: `Ask ${_help.map(h => h.name).filter(Boolean).join(' or ')} to look at this with you`,
+      basis: { sourceClass: 'people_with_standing', people: _help },
+      wouldTeach: 'Whether somebody who carries responsibility here reads the same record differently.',
+      /* A PERSON IS NOT A VERDICT. Bringing somebody in is another account, governed like any
+         other — not a shortcut past the evidence the group does not have. */
+      uncertainty: 'What they say is an account like any other. Agreement is not corroboration, and it does not settle the question by itself.',
+    });
+  }
   /* ALWAYS LAST AND ALWAYS PRESENT. Not acting yet is a position a person can take deliberately;
      leaving it off the list is how a menu turns into pressure. */
   options.push({
@@ -17437,7 +17490,12 @@ function _inquiryOptions(inq, frontier, triedBefore) {
   };
 }
 
-function _groupInquiryProjections(code, nodeId) {
+/* `viewerId` IS OPTIONAL AND ONLY EVER NARROWS. Everything in this projection belongs to the
+   NODE and reads the same for everybody in it — which is the property the Forum ask ruling turns
+   on. The one exception is "who could you bring in", which is a question about the reader by
+   nature: the answer must never name somebody THEY could not already address. Callers that serve
+   no particular person pass nothing and get no such option, which is the fail-closed direction. */
+function _groupInquiryProjections(code, nodeId, viewerId) {
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return [];
   const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
@@ -17577,7 +17635,7 @@ function _groupInquiryProjections(code, nodeId) {
          generated: every option names something the record holds, carries its own basis and
          source class, and the payload states `ranked: false` because array order is not
          preference. See `_inquiryOptions`. */
-      options: _inquiryOptions(i, _frontier, _triedBefore),
+      options: _inquiryOptions(i, _frontier, _triedBefore, _peopleWithStandingFor(code, nodeId, viewerId)),
       // WHAT WOULD SHOW THIS IS WRONG (D12). Computed on every inquiry since diagnose.js was
       // written and never projected, so the one line no competitor can produce reached no caller.
       falsifiers: (i.falsifiers || []).slice(0, 3)
@@ -17662,7 +17720,7 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
   const nodeId = String(req.params.nodeId);
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return res.status(404).json({ error: subject.error });
-  const projected = _groupInquiryProjections(code, nodeId);
+  const projected = _groupInquiryProjections(code, nodeId, userId);
   const routed = projected.filter(p => p.leaderSubject === true && _leaderSubjectReaders(code, nodeId, p).includes(userId));
   const ordinary = _mayReadGroup(code, nodeId, userId);
   if (!ordinary && !routed.length) {
