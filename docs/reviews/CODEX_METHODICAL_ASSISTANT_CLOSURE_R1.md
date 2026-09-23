@@ -1476,3 +1476,75 @@ still asserted, against the composed behaviour.
 ### External gates unchanged
 
 Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery.
+
+## 12. Claude closure round six — 2026-09-23
+
+**Head at end:** `b91f179`. Nothing merged or deployed.
+
+| SHA | Change |
+|---|---|
+| `6d4e89e` | Matrix 10 and 11 proved on a real screen — no production change was needed |
+| `b91f179` | The durable-restart check run for the first time, against a real PostgreSQL |
+
+### Matrix 10 and 11 — and why "no production change" is the finding
+
+Options render as reading and the only door into a Focus is the existing control, so "rejecting an
+option" is not a control to press. Walked rather than assumed: the door opens with an **empty** field
+and no option pre-selected (a textarea arriving pre-filled is a choice made *for* somebody wearing the
+clothes of a choice they made); backing out leaves the record byte-identical; their own words,
+deliberately confirmed, do reach it.
+
+And the **server** is the gate, not the panel — deleting the client-side empty check changes nothing a
+person can see, so the forged calls are asserted directly: a blank commitment is refused 400, and a
+Focus claiming an origin inquiry that is not this group's is refused 404.
+
+### The persistence layer had never been run, and did not need a live database
+
+`scripts/durable-restart-check.js` has always said what the problem was: the truth layer is hermetic,
+`DB_OPTIONAL=1` is an in-memory store, and "nothing survives a restart" is the one failure it is
+structurally unable to see. It was carried as an external gate with live Neon.
+
+**Part of the reason it went unrun is that the documented command does not work.** `db.js` asks for
+SSL; a local PostgreSQL answers "the server does not support SSL connections"; the first boot never
+comes up. `db.js` has had `PG_SSL_DISABLE` for exactly this and the usage line never mentioned it.
+PostgreSQL 16 is in the standard container image — this was a few lines away, not a live database away.
+
+`scripts/local-postgres.sh` now provisions a throwaway cluster and prints the working command.
+**Result: 35 passed, 0 failed**, with the service process actually killed between writes and reads.
+
+**And the check is not vacuous.** Two of my mutations survived first, both because I picked the wrong
+owner: `scheduleSave` is the debounced path and `_saveProtectedUnit` is not what this flow writes
+through. Neutering `db.saveStores` — every durable write, at the lowest level — turns twelve
+assertions red. *That* is the mutation that proves it.
+
+**Report it as what it is.** A local PostgreSQL has no network partition, no connection ceiling, no
+cold start, no pooler and no managed-service failure modes. It is not Neon, not Render, and says
+nothing about the deployed build. It proves the persistence code in this commit writes to a real
+database and reads it back after a restart.
+
+### Acceptance matrix status
+
+| Items | State |
+|---|---|
+| 1-7 | Closed in earlier rounds |
+| **8, 9** | **Open, and founder-facing.** Cited external knowledge supplying an option, and a mixed internal + precedent + external set. There is still no producer for the external-knowledge source class; it has been deliberately not fabricated across four rounds because inventing a citation is the one thing this product must not do. **This needs a decision about where external knowledge comes from, not more engineering.** |
+| 10, 11 | Closed this round, on a real screen |
+| 12, 13, 14 | Closed |
+| 15 | Closed |
+| 16, 17, 18 | Closed |
+| 19 | Covered by `degraded-honesty-http-smoke` and `composer-degraded-http-smoke`, including the recovery half (DH-G1: the very next ordinary request after recovery is the considered one) |
+| 20 | Persistence half proven against a real PostgreSQL this round. Neon and Render remain genuinely external |
+
+### Exact next seam
+
+1. **Matrix 8 and 9** — blocked on the founder decision above, not on engineering.
+2. **"Go deeper." bound to an object** is classified as a statement rather than a question, so it is
+   offered as a note to capture instead of being answered. Reproduced; upstream in `capture.classify`;
+   honest rather than wrong.
+3. **Consolidation candidate (carried, fourth round):** the two spellings of the focus→source
+   relationship, `addresses` vs `origin.inquiryId`.
+
+### External gates, now narrower
+
+Live Render, live Neon (network, pooler, cold start), real provider quality, real iPhone/Safari, real
+invite delivery. **The persistence layer is no longer among them.**
