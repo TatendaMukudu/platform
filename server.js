@@ -17244,6 +17244,114 @@ function _inquiryFrontier(inq, { memberCount = 0, now = Date.now() } = {}) {
     why: wouldHelp.length ? 'open' : 'nothing worth asking yet — see the unknowns' };
 }
 
+/* ── Q6/Q7: REASONABLE OPTIONS, AND WHAT EACH WOULD TEACH US ──────────────────────────────────
+   FOUNDER-RATIFIED, September 2026: when enough is known, offer a SMALL justified option set;
+   keep each option's basis and source class; preserve uncertainty; do not rank a winner; do not
+   auto-create a Focus; require deliberate human choice; allow "learn more / do not act yet"; and
+   do not offer options at all when the evidence is genuinely insufficient.
+
+   THE EARLIER POSTURE WAS RIGHT ABOUT THE DANGEROUS HALF and is preserved exactly. Its argument
+   was that a generator would propose what to do and then, one release later, rank its own
+   proposals — and nothing in the record establishes what will work. That forbids RANKING and
+   INVENTION. It does not forbid offering, and the ratified law now requires offering.
+
+   SO NOTHING HERE IS INVENTED. Every option names something the canonical record already holds:
+
+     test_explanation   the explanation the kernel already judged worth testing, with the very
+                        refs that support it. Question 8 already answers `worth_testing`; naming
+                        the thing worth testing adds no authority, it makes the existing answer
+                        usable.
+     reuse_precedent    something this group actually tried about THIS question that was recorded
+                        as having helped. Precedent, not prescription — and it carries its own
+                        outcome word so a person reads the evidence rather than a recommendation.
+     learn_more         always present, so declining to act is a visible choice rather than the
+                        absence of one.
+
+   THE GATE IS THE KERNEL'S, NOT A NEW ONE. Options exist only at `worth_testing`. While the
+   record is contested, competing or unsupported, the honest answer is the readiness state and
+   `wouldHelp` that already exist — manufacturing a menu there would be inventing choice where
+   the product should be saying "we do not know yet".
+
+   WHAT FAILED IS NOT RE-OFFERED. The founder's experiment law: a materially identical failed
+   tactic must not be resurfaced as new. A prior attempt recorded `no_change` or `worse` becomes a
+   CAUTION carried on the option set, never an option. If every explanation worth testing has
+   already been tried without helping, the option set drops the tactic entirely and says so — the
+   point where another model-generated variation is the wrong next move.
+
+   NO SCORE, NO RANK, NO PROBABILITY, and `ranked: false` says so in the payload rather than
+   leaving array order to be read as preference. */
+function _inquiryOptions(inq, frontier, triedBefore) {
+  const readiness = (frontier && frontier.readiness) || null;
+  if (!readiness || readiness.state !== 'worth_testing') return null;
+
+  const tried = Array.isArray(triedBefore) ? triedBefore : [];
+  const helped = tried.filter(t => t && t.outcome === 'better');
+  const didNotHelp = tried.filter(t => t && (t.outcome === 'no_change' || t.outcome === 'worse'));
+
+  const hyps = ((inq && inq.hypotheses) || []).filter(h => h && h.status !== 'refuted');
+  const supported = hyps.filter(h => (h.supportRefs || []).length > 0);
+  const lead = supported[0] || null;
+
+  const options = [];
+  /* The explanation with something behind it — unless the group already tried acting on this
+     question and it did not help, in which case another tactic is not the honest next move. */
+  const exhausted = didNotHelp.length > 0 && !helped.length;
+  if (lead && !exhausted) {
+    options.push({
+      id: 'test_explanation',
+      text: `Test whether ${String(lead.statement || '').slice(0, 200)}`,
+      basis: { sourceClass: 'internal_evidence',
+        /* REFS, NEVER WORDS. The basis points at the governed evidence that supports the
+           explanation; it does not copy anybody's account into the option. */
+        evidenceRefs: (lead.supportRefs || []).slice(0, 8).map(String),
+        standing: (lead.confidence && lead.confidence.band) || null },
+      wouldTeach: 'Whether the explanation that has support actually accounts for what we are seeing.',
+      /* UNCERTAINTY SURVIVES THE OPTION. Having support is not having proof, and an option is not
+         a prediction that it will work. */
+      uncertainty: 'Support for an explanation is not evidence that acting on it will change anything.',
+    });
+  }
+  for (const t of helped.slice(0, 2)) {
+    options.push({
+      id: `reuse_precedent:${t.focusId}`,
+      text: `Run something like "${String(t.text || '').slice(0, 160)}" again`,
+      basis: { sourceClass: 'organisational_learning', focusId: t.focusId, outcome: t.outcome },
+      wouldTeach: 'Whether what helped before still helps under current conditions.',
+      uncertainty: 'It helped once here. That is precedent under those conditions, not proof it caused the change or that it will work again.',
+    });
+  }
+  /* ALWAYS LAST AND ALWAYS PRESENT. Not acting yet is a position a person can take deliberately;
+     leaving it off the list is how a menu turns into pressure. */
+  options.push({
+    id: 'learn_more',
+    text: 'Learn more before acting',
+    basis: { sourceClass: 'open_questions',
+      unknowns: ((frontier && frontier.unknowns) || []).length,
+      wouldHelp: ((frontier && frontier.wouldHelp) || []).length },
+    wouldTeach: 'What the record still does not establish, before anybody spends effort on it.',
+    uncertainty: null,
+  });
+
+  return {
+    /* Array order is not preference and the payload says so, because a reader who assumes the
+       first item is recommended has been given a ranking nobody computed. */
+    ranked: false,
+    /* NOTHING IS CHOSEN HERE. A Focus exists when a human deliberately starts one through the
+       canonical owner; this is a read. */
+    chosen: null,
+    options,
+    /* WHAT WAS ALREADY TRIED AND DID NOT HELP, carried beside the options rather than inside
+       them. A person seeing an option must be able to see that its family has been attempted. */
+    cautions: didNotHelp.slice(0, 3).map(t => ({
+      focusId: t.focusId, text: t.text, outcome: t.outcome,
+      note: 'Already tried about this question, and nothing recorded says it helped.' })),
+    /* AND THE POINT WHERE ANOTHER TACTIC IS THE WRONG ANSWER, stated rather than implied. */
+    because: exhausted
+      ? 'What this group has already tried about this did not help, so another variation is not the useful next move. More understanding or somebody else\'s help is.'
+      : readiness.because,
+  };
+}
+
 function _groupInquiryProjections(code, nodeId) {
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return [];
@@ -17258,6 +17366,23 @@ function _groupInquiryProjections(code, nodeId) {
     // opposite directions, the group does not agree yet, and reporting it as a High or a Low
     // would settle on the leader's behalf a disagreement they are the one who should see.
     const _frontier = _inquiryFrontier(i, { memberCount: _nodeMembers(code, nodeId).length });
+    /* WHAT THIS GROUP HAS ALREADY TRIED ABOUT THIS, AND WHAT CAME OF IT — hoisted out of the
+       projection below because the option set has to see it. An option that ignores the fact
+       that its family was already attempted and did not help is the exact failure the founder's
+       experiment law names. */
+    const _triedBefore = _teamFocuses(code, nodeId)
+      .filter(f => f && f.origin && String(f.origin.inquiryId || '') === String(i.inquiryId))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 3)
+      .map(f => ({
+        focusId: String(f.focusId || ''),
+        text: String(f.text || '').slice(0, 300),
+        status: String(f.status || 'active'),
+        // The outcome word, or null. Null is "nothing has been recorded yet", which is a
+        // different statement from "it did nothing" and must not be rendered as one.
+        outcome: f.outcome && teamState.OUTCOME_RESULTS.includes(f.outcome.result) ? f.outcome.result : null,
+        at: Number(f.createdAt) || 0,
+      }));
     const forThis = _groupCands(code).filter(c => c.nodeId === nodeId && c.concept === ((i.topic && i.topic.canonicalConcept) || ''));
     const val = teamState.valenceOf(forThis);
     const subjectRef = String(i.subjectRef || subject.subjectRef);
@@ -17361,19 +17486,13 @@ function _groupInquiryProjections(code, nodeId) {
          here would be the system deciding two questions are the same thing, which is exactly the
          kind of claim it is not entitled to make. Only what was explicitly started FROM this
          inquiry counts as having been tried about it. */
-      triedBefore: _teamFocuses(code, nodeId)
-        .filter(f => f && f.origin && String(f.origin.inquiryId || '') === String(i.inquiryId))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        .slice(0, 3)
-        .map(f => ({
-          focusId: String(f.focusId || ''),
-          text: String(f.text || '').slice(0, 300),
-          status: String(f.status || 'active'),
-          // The outcome word, or null. Null is "nothing has been recorded yet", which is a
-          // different statement from "it did nothing" and must not be rendered as one.
-          outcome: f.outcome && teamState.OUTCOME_RESULTS.includes(f.outcome.result) ? f.outcome.result : null,
-          at: Number(f.createdAt) || 0,
-        })),
+      triedBefore: _triedBefore,
+      /* ── Q6/Q7 — REASONABLE OPTIONS, AND WHAT EACH WOULD TEACH US ────────────────────────
+         Null unless the kernel already answered question 8 with `worth_testing`. Nothing here is
+         generated: every option names something the record holds, carries its own basis and
+         source class, and the payload states `ranked: false` because array order is not
+         preference. See `_inquiryOptions`. */
+      options: _inquiryOptions(i, _frontier, _triedBefore),
       // WHAT WOULD SHOW THIS IS WRONG (D12). Computed on every inquiry since diagnose.js was
       // written and never projected, so the one line no competitor can produce reached no caller.
       falsifiers: (i.falsifiers || []).slice(0, 3)

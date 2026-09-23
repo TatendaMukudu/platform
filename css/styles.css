@@ -3605,6 +3605,19 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    answer than "worth trying", and styling it as a warning would make it one. */
 .iqg-inq-ready{margin:.6rem 0 .5rem;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary)}
 .iqg-inq-ready-w{display:block;font-size:var(--fs-sm);color:var(--text-secondary);margin:.15rem 0 0}
+/* AN OPTION IS A POSSIBILITY, AND NOTHING HERE MAY RANK ONE. No numbering, no accent on the
+   first, no colour that reads as recommended — the server sends `ranked:false` and the
+   stylesheet has to mean it. Same wrap/break rules as the sections above, because this is read
+   on a phone and a row that scrolls sideways is a row whose right-hand end nobody reads. */
+.iqg-inq-opt{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 .55rem}
+.iqg-inq-opt-t{flex:1 1 100%;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-inq-opt-w{flex:1 1 100%;font-size:var(--fs-sm);line-height:1.45;color:var(--text-secondary);
+  overflow-wrap:anywhere}
+.iqg-inq-opt-u{flex:1 1 100%;font-size:var(--fs-sm);line-height:1.45;color:var(--text-muted);
+  overflow-wrap:anywhere}
+.iqg-inq-opt-c{font-size:var(--fs-sm);line-height:1.45;color:var(--text-secondary);
+  overflow-wrap:anywhere;margin:.2rem 0 .35rem}
 .iqg-exp-panel,.iqg-start{margin:.6rem 0 0}
 .iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
 .iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}

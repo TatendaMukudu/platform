@@ -13021,6 +13021,36 @@ const MemberApp = {
           : 'Not enough evidence yet to suggest anything worth trying.')}
           <span class="iqg-inq-ready-w">${esc(i.readiness.because)}</span></div>` : ''}
 
+        ${/* ── WHAT WE COULD DO, AND WHAT EACH WOULD TEACH US ───────────────────────────────
+              Only ever present when the server answered `worth_testing`; below that the readiness
+              line above already says the honest thing and a menu would invent choice.
+
+              THESE ARE READING, NOT BUTTONS. The UI subtraction law says a permanent control does
+              not go on screen merely because a backend action exists, and "Work on this as a
+              group" below is already the one governed door into a Focus. So an option shows what
+              it is, what it rests on and what trying it would teach — and the human acts through
+              the control and the Composer that already own that step. A row of action buttons
+              here would be a second path to a canonical write, and a menu of them would read as a
+              recommendation nobody computed.
+
+              NO ORDER MEANING. The server sends `ranked:false`; nothing here numbers, sorts,
+              highlights or marks a default. */''}
+        ${(i.options && (i.options.options || []).length) ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we could do, and what each would teach us</div>
+            ${i.options.options.map(o => `
+              <div class="iqg-inq-opt">
+                <span class="iqg-inq-opt-t">${esc(o.text)}</span>
+                <span class="iqg-inq-opt-w">${esc(o.wouldTeach || '')}</span>
+                ${o.uncertainty ? `<span class="iqg-inq-opt-u">${esc(o.uncertainty)}</span>` : ''}
+              </div>`).join('')}
+            ${(i.options.cautions || []).length ? `
+              <div class="iqg-inq-opt-c">${(i.options.cautions || []).map(c =>
+                `${esc(c.text)} — already tried, and nothing recorded says it helped.`).join(' ')}</div>` : ''}
+            <div class="iqg-note">Possibilities, not a recommendation. They are in no particular
+              order, and none of it happens until somebody decides to work on it.</div>
+          </div>` : ''}
+
         ${leads ? `<button type="button" class="btn btn-outline btn-sm"
           onclick="MemberApp.startGroupFocus('${esc(nodeId)}','${esc(i.inquiryId)}')">Work on this as a group</button>` : ''}
       </div>`;

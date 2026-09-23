@@ -154,16 +154,22 @@ const server = app.listen(0, async () => {
       && (comms2.alternatives || []).every(a => a.band === 'tentative'));
 
     console.log('\n  Q6 / Q7 — REASONABLE OPTIONS, AND WHAT EACH WOULD TEACH US');
-    /* NOT ANSWERED, DELIBERATELY. There is no machinery that could answer either honestly, and
-       the brief forbids manufacturing one. The coach writes the option; the product records what
-       it was about and what came of it. This asserts the ABSENCE, because "we did not build it"
-       and "we built it and it is wrong" are indistinguishable from the outside. */
-    ok('DI-6a the product offers no generated list of options',
-      !('options' in comms2) && !('suggestedActions' in comms2) && !('recommendedAction' in comms2));
+    /* FOUNDER-RATIFIED, September 2026, and this section was rewritten to it. The earlier posture
+       asserted the ABSENCE of any option set. Its argument was right about the dangerous half —
+       a generator would propose what to do and then, one release later, rank its own proposals,
+       and nothing in the record establishes what will work — so the ranking ban below is
+       untouched. What it was wrong about is offering: the ratified law requires a small justified
+       option set WHEN ENOUGH IS KNOWN, each carrying its basis and source class, with uncertainty
+       preserved, no ranked winner, no auto-created Focus, and honest withholding otherwise.
+
+       The withholding half is asserted FIRST and against the same state the old assertion ran in,
+       so the property that mattered is still proven rather than traded away. */
+    ok('DI-6a while the record cannot separate two explanations, no option set is offered at all',
+      comms2.options === null && (comms2.readiness || {}).state === 'gather_information');
     ok('DI-6b …and no ranking, score or probability over anything a group might do',
       () => {
         const s = JSON.stringify(comms2);
-        return !/"bestAction"|"ranked"|"rank":|"probability"|"likelihood"|"successRate"/.test(s);
+        return !/"bestAction"|"ranked":true|"rank":|"probability"|"likelihood"|"successRate"|"score":\s*0\.\d+\s*,\s*"option"/.test(s);
       });
     ok('DI-7a the one thing it does offer is an OBSERVATION that would separate the rivals, which is what would teach us something',
       Array.isArray(comms2.wouldHelp));
@@ -203,6 +209,97 @@ const server = app.listen(0, async () => {
     console.log('\n  Q9 — WHAT SHOULD WE OBSERVE AFTERWARD');
     ok('DI-9a falsifiers travel with the inquiry, computed rather than written by anybody',
       Array.isArray(comms4.falsifiers));
+
+    /* ══ AND THE OTHER HALF: WHEN THE KERNEL SAYS THERE IS SOMETHING WORTH TESTING ═══════════
+       The gate is not a new judgement. `readiness.state === 'worth_testing'` is question 8, which
+       this product has answered deterministically since the spine was built: one explanation with
+       something behind it and nothing competing. Options exist only in that state, and each names
+       something the record already holds rather than a tactic somebody generated.
+
+       THE PRECONDITION IS SEEDED AT THE KERNEL, THE ANSWER IS READ THROUGH THE PRODUCTION ROUTE.
+       Giving a hypothesis support is ordinary kernel state (`signal.supports`); what is under
+       test is the projection a coach reads, so that is driven over HTTP exactly as the rest of
+       this suite drives it. */
+    console.log('\n  Q6 / Q7 — AND WHEN THERE IS SOMETHING WORTH TESTING');
+    {
+      const state = Object.values((S.inquiryStates[O] || {})[`group:squad`] || {})
+        .find(x => x && String(x.inquiryId) === String(late.inquiryId));
+      const h = { id: 'h_late_supported', statement: 'legs go and the shape stretches in the last twenty minutes',
+        supportRefs: [], challengeRefs: [], status: 'open',
+        confidence: { score: 0.6, band: 'tentative' }, createdAt: Date.now() };
+      state.hypotheses = [h];
+      /* Two of the group's existing accounts now bear on that explanation, which is what gives it
+         support. Repetition is not corroboration — these are separate origins already counted. */
+      (state.signals || []).slice(0, 2).forEach(s => { s.supports = h.id; h.supportRefs.push(s.ref); });
+      state.leadingHypothesisId = h.id;
+
+      const ready = await byTopic('coach', 'late_game');
+      ok('DI-6c one explanation with support and nothing competing IS something worth testing',
+        (ready.readiness || {}).state === 'worth_testing');
+      const opt = ready.options || {};
+      ok('DI-6d …and only now does an option set exist at all',
+        !!opt && Array.isArray(opt.options) && opt.options.length > 0);
+      /* SMALL. A menu is not a product feature; three is already generous for a phone. */
+      ok('DI-6e …and it stays small enough to read rather than becoming a catalogue',
+        opt.options.length <= 4);
+      const test = opt.options.find(o => o.id === 'test_explanation');
+      ok('DI-6f …naming the explanation the kernel already judged worth testing, not an invented tactic',
+        !!test && /legs go and the shape stretches/.test(String(test.text)));
+      ok('DI-6g …carrying its basis as REFS to governed evidence, never as somebody\'s words',
+        !!test && test.basis.sourceClass === 'internal_evidence'
+        && Array.isArray(test.basis.evidenceRefs) && test.basis.evidenceRefs.length > 0);
+      ok('DI-6h …and answering question 7: what choosing it would teach us',
+        opt.options.every(o => typeof o.wouldTeach === 'string' && o.wouldTeach.length > 0));
+      /* UNCERTAINTY SURVIVES THE OPTION. Support is not proof, and an option is not a prediction. */
+      ok('DI-6i …while saying plainly that support is not evidence it will work',
+        !!test && /not evidence that acting on it will change anything/i.test(String(test.uncertainty)));
+      /* NO WINNER. The payload says order is not preference rather than leaving it to be guessed. */
+      ok('DI-6j …with nothing ranked, scored or chosen for the group',
+        opt.ranked === false && opt.chosen === null
+        && opt.options.every(o => !('score' in o) && !('rank' in o) && !('recommended' in o)));
+      ok('DI-6k …and "learn more" is one of the choices, so not acting yet is a decision rather than a gap',
+        opt.options.some(o => o.id === 'learn_more'));
+      /* AND NOTHING WAS CREATED BY LOOKING. Reading options is a read, so what must be true is
+         that the count did not MOVE — an absolute zero here would only be asserting that no
+         earlier section of this journey had started anything, which is a different claim. */
+      const triedBeforeReading = (ready.triedBefore || []).length;
+      ok('DI-6l …and reading the options started no Focus',
+        ((await byTopic('coach', 'late_game')).triedBefore || []).length === triedBeforeReading);
+
+      /* ── WHAT WAS ALREADY TRIED AND DID NOT HELP IS NOT OFFERED AGAIN ──────────────────────
+         The founder's experiment law: a materially identical failed tactic must not be
+         resurfaced as new, and when reasonable attempts are exhausted, another model-generated
+         variation is the wrong next move rather than the obvious one. Driven through the real
+         Focus + outcome routes, which is where a group records what happened. */
+      const tryIt = await call('POST', '/api/group/squad/focus',
+        { text: 'Fitness block on Tuesdays', fromInquiryId: late.inquiryId }, 'coach');
+      await call('POST', `/api/group/squad/focus/${((tryIt.j || {}).focus || {}).focusId}/outcome`,
+        { result: 'no_change' }, 'coach');
+      const after = await byTopic('coach', 'late_game');
+      const opt2 = after.options || {};
+      ok('DI-6m a tactic that was tried and did not help is not offered as a fresh option',
+        Array.isArray(opt2.options)
+        && !opt2.options.some(o => /Fitness block/i.test(String(o.text || ''))));
+      ok('DI-6n …it becomes a CAUTION carried beside the options, so the attempt is visible',
+        (opt2.cautions || []).some(c => /Fitness block/i.test(String(c.text)) && c.outcome === 'no_change'));
+      /* THE POINT WHERE ANOTHER SUGGESTION IS THE WRONG ANSWER, stated rather than implied. */
+      ok('DI-6o …and with everything tried about this having failed, no further tactic is offered',
+        !opt2.options.some(o => o.id === 'test_explanation'));
+      ok('DI-6p …leaving learning more, and saying in words why another variation is not the move',
+        opt2.options.every(o => o.id === 'learn_more')
+        && /another variation is not the useful next move/i.test(String(opt2.because || '')));
+      /* AND A PRIOR ATTEMPT THAT DID HELP IS PRECEDENT RATHER THAN PRESCRIPTION. */
+      const helpedTry = await call('POST', '/api/group/squad/focus',
+        { text: 'Rotate the press in the last twenty', fromInquiryId: late.inquiryId }, 'coach');
+      await call('POST', `/api/group/squad/focus/${((helpedTry.j || {}).focus || {}).focusId}/outcome`,
+        { result: 'better' }, 'coach');
+      const opt3 = (await byTopic('coach', 'late_game')).options || {};
+      const prec = (opt3.options || []).find(o => String(o.id).startsWith('reuse_precedent'));
+      ok('DI-6q something that DID help here can be offered again, carried as organisational learning',
+        !!prec && prec.basis.sourceClass === 'organisational_learning' && prec.basis.outcome === 'better');
+      ok('DI-6r …and says it is precedent under those conditions rather than proof it caused anything',
+        !!prec && /not proof it caused the change/i.test(String(prec.uncertainty)));
+    }
 
 
     /* ══ EVERY QUESTION THIS GROUP HAS IS SOMETHING A COACH CAN OPEN ══════════════════════════
@@ -337,12 +434,42 @@ const server = app.listen(0, async () => {
         /What would show we have this wrong/.test(row) && /falsifiers/.test(row));
       ok('DI-R8 and whether there is enough to try something, printed as plainly when the answer is no',
         /readiness/.test(row) && /Not enough evidence yet to suggest anything worth trying/.test(row));
+      /* Q6/Q7 REACH THE SCREEN, AND AS READING RATHER THAN AS A ROW OF BUTTONS. The UI
+         subtraction law: a control does not go on screen merely because a backend action exists,
+         and "Work on this as a group" is already the one governed door into a Focus. A menu of
+         action buttons here would be a second path to a canonical write AND would read as a
+         recommendation nobody computed. */
+      ok('DI-R8b the options reach the row, with what each would teach us',
+        /What we could do, and what each would teach us/.test(row)
+        && /options/.test(row) && /wouldTeach/.test(row));
+      ok('DI-R8c …and what was already tried and did not help is carried with them',
+        /\(i\.options\.cautions \|\| \[\]\)\.length \?/.test(row)
+        && /already tried, and nothing recorded says it helped/.test(row));
       /* CHECKED ON THE CODE, NOT ON THE COMMENTS. The first version of this went red on the very
          comment that explains why there is no ranking — the same trap AB-H4 fell into, where a
          negative check matched the sentence that makes the block safe. */
       const code = row.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
       ok('DI-R9 …with no ranking, star, score or percentage anywhere in the row',
         !/★|%|rank|score|best option/i.test(code));
+      /* AND THE OPTIONS ARE NOT A SECOND DOOR INTO A CANONICAL WRITE. Scoped to the options
+         block rather than to the whole row: the row legitimately carries three controls (open the
+         thread, suggest an explanation, work on this as a group), and counting them all would
+         assert something about unrelated code. What must be true is that no OPTION renders a
+         control — one that could be tapped into existence would bypass the governed
+         propose -> confirm -> canonical owner path that "Work on this as a group" uses. */
+      const optBlock = (() => {
+        const a = code.indexOf('What we could do, and what each would teach us');
+        if (a < 0) return '';
+        /* Ends at the governed Focus control that follows the section. Slicing to the NAME of
+           that control instead would land inside its own onclick and make this assert the
+           opposite of what it means — which is how it failed the first time it ran. */
+        const b = code.indexOf('${leads ?', a);
+        return b < 0 ? code.slice(a) : code.slice(a, b);
+      })();
+      ok('DI-R9b no option renders a control, so none can be tapped into existence',
+        optBlock.length > 100 && !/onclick=|<button/.test(optBlock));
+      ok('DI-R9c …and the options are numbered, sorted or defaulted nowhere',
+        !/\.sort\(|index \+ 1|recommended|default-option/i.test(optBlock));
       /* THE HEADINGS ARE SEPARATE HEADINGS. Running them together is how a candidate explanation
          becomes a finding by layout alone, which is a real way to lie with correct data. */
       ok('DI-R10 …and each section is a section, not one paragraph wearing four names',
