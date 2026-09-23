@@ -1192,3 +1192,50 @@ The acceptance matrix items that still have no registered production-path proof,
 1. **Option sets from organisational precedent and external knowledge across objects.** `_inquiryOptions` covers the group-inquiry read. The equivalent for a personal object, and the external-knowledge source class, have no producer yet — I deliberately did not fabricate one, so `sourceClass` makes room for it without inventing a citation.
 2. **Attachment conversation depth** (matrix 16-18): summarise/compare/question/extract/challenge from the same material producing appropriately different governed answers, and prompt-injection through attachment content.
 3. **P1 conversation navigation** in `PRIORITY_RND.md` — multiple private chats per object; the object thread still opens only the most recently updated matching conversation.
+
+## 8. Claude closure round two — 2026-09-23
+
+**Head at end:** `68e782c`. Nothing merged or deployed. Three further commits.
+
+| SHA | Production change |
+|---|---|
+| `5778e4f` | A document's text is fenced as content in the model prompt; the fence cannot be closed by the document |
+| `4c46bbb` | A summarise request with material bound reaches the document, not the organisation reader; the repeat guard's copy follows what the turn was |
+| `68e782c` | The object thread reports this person's other conversations about the object |
+
+### Matrix 16-18 — attachment conversation depth
+
+Asked one scouting report five ways on the real path. Two defects, neither in a helper:
+
+- **"Summarise this scouting report" was answered by the organisation reader.** The branch catching overview words carries a comment saying it is for an org/team overview "not a topic", and its second alternative never checked — `summar\w*` claimed any turn containing the word. A coach who had just attached a report was told "Afternoon. All good on your side right now." with the document unread in the same call's `materialRow`. A document bound to the turn is what "this" refers to; those unscoped words no longer claim the turn when material is present unless the person also named the organisation.
+- **A comparison question was answered with action machinery.** The repeat-suppression guard's substitute copy assumed a repeat meant the person restating an action, so two questions legitimately retrieving the same passage produced "I heard that as a change to what you wanted. Nothing was saved or shared."
+
+**What this round deliberately did not do:** manufacture a difference between "what does it say about X" and "is that claim supported?". Models are off, deterministic retrieval can report contents and cannot adjudicate support, and the suite asserts that convergence. Inventing a distinction there would be the overclaim the product exists to refuse.
+
+**Prompt fence (item 17).** No exploit was found and none is claimed — a hostile document proposed nothing, created nothing, widened nothing, and the kernel held. What was missing was one layer up: material text is up to 12,000 characters of multi-line content and went into the prompt in the same shape as the instructions around it, arriving *before* the line telling the model to answer only from the document. It is now delimited and explained, and the delimiter is defanged in the content so a document cannot close its own fence.
+
+### A flaky privacy assertion, and why that matters more than it looks
+
+`degraded-honesty` DH-E2 went red once in a full run and passed fourteen times alone. Cause: the leak matcher tested every machine word as a raw substring of the whole JSON envelope, so `turn_a500zjfd` matched "500" and a millisecond field of `.429Z` matched "429". About one generated id in ten thousand contains one, and a turn payload carries several ids and several timestamps.
+
+A flaky guard gets re-run until it is green, and the day it catches something real it is indistinguishable from the noise. The numeric codes now match with digit boundaries against the text a person actually reads; everything else keeps whole-payload matching. Verified strictly stronger against a leaked 500, a leaked 429, a named provider and a raw `Error:`; ten consecutive green runs.
+
+### P1 conversation navigation
+
+The object thread opened the most recently updated conversation and said nothing about the rest — the product deciding silently which of somebody's own conversations they meant. The store and list route already worked; the thread now reports them, read from the same per-person workspace key, ids and labels only. Two people with private chats about one shared object still cannot see each other's, proved from both ends including a direct request for the other's conversation id.
+
+### Proof this round
+
+- `npm test` — green (three times across the round).
+- Browser gates, real Chromium: pilot-coach 133, group-loop 55, stack 114, priority-surface 39, library 33, chart-shape 42.
+- Mutations — 3 attachment-depth, 4 fence, 4 conversation-switcher. All red, then restored.
+
+### Exact next seam
+
+1. **Option sets for a personal object.** `_inquiryOptions` serves the group-inquiry read only. The personal equivalent and the external-knowledge source class have no producer; I did not fabricate one, and `sourceClass` leaves room without inventing a citation.
+2. **Matrix items 12-14** — outcome reported changes what is suggested next; a materially identical failed tactic is not recycled; exhausted tactics route to human help. `_inquiryOptions` implements the shape (`cautions`, `exhausted`); the *conversational* half is unproven.
+3. **Forum Ask IntelliQ** (PRIORITY_RND P2) — every governed Forum should expose it without widening scope. Not yet inspected.
+
+### External gates unchanged
+
+Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery. Chromium in CI is not among them.
