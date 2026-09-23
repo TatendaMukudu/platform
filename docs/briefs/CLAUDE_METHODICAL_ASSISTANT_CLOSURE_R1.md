@@ -162,3 +162,27 @@ A fluent model answer is not a pass. Kernel governance must be able to reject, n
 Do not report “Composer finished” because isolated suites pass.
 
 Exit only when the realistic acceptance matrix above passes through production owners, the existing security/privacy suites remain green, browser Coach/player gates remain green, and the handoff names any genuinely external unverified boundary (live Render, live Neon, real provider, real iPhone/Safari) rather than pretending CI proved it.
+
+
+## Ratified pilot UX direction to preserve
+
+The founder has now ratified the pilot-facing UX direction in `docs/rnd/PRIORITY_RND.md`. Read that file before touching client presentation.
+
+Treat it as presentation law for this closure, not as permission to redesign canonical owners.
+
+Important points for Claude:
+- top-left hamburger/dropdown is the primary navigation; remove dependence on a persistent bottom nav;
+- keep the IntelliQ wordmark beside it;
+- main nav uses uniform neutral/navy icon treatment; High/Low keep their crooked arrow shapes but not green/red nav coloring;
+- account/profile belongs behind the avatar, not a first-class "You" product destination;
+- High/Low/Inquiry/Focus detail pages should converge on the Inquiry-style page grammar while preserving kind-specific semantics;
+- use **Forum** consistently as the collaboration doorway;
+- every governed Forum exposes **Ask IntelliQ** without widening scope;
+- Forum authorship is chosen per message: anonymous where allowed, or deliberate named authorship;
+- reactions/likes are not independent evidence and must not inflate standing/confidence;
+- audio uses consistent Play -> Pause -> Resume controls anywhere listening is available;
+- light is the default pilot theme; original navy remains the dark theme;
+- **do not add generated contextual images during the pilot**; imagery is deferred R&D because it is unnecessary spend;
+- reuse existing conversation, object, Forum, audience and Focus owners. Do not implement a second store or alternate permission path.
+
+If closing the Methodical Assistant requires touching UI, make it fit this direction. Do not spend closure time implementing unrelated post-pilot imagery or ontology work.
