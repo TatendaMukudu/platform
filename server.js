@@ -12661,7 +12661,25 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     if (r && r.count) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `I haven't consolidated any repeated patterns yet — I only name a pattern once the signals actually repeat, rather than guessing one into being. Nothing has crossed that bar so far.`; confidence = 'confirmed'; limitations = ['patterns are named only from real repetition, not inferred']; }
   } else if (/\btell me (?:more )?about (?:the |our |my |this )?(org|organisation|organization|team|squad|club|group|company|department|business|us|everyone|things|it|situation|state|people|staff|side|cohort|class)\b/.test(q)
-    || /\b(overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
+    || (/\b(overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)
+        /* ── AND ONLY WHEN IT IS ABOUT THE ORGANISATION, WHICH THIS DID NOT CHECK ────────────
+           The comment below has always said this branch is for an ORG/team overview and not for
+           a topic. The first alternative above enforces that by naming the org. The second did
+           not: `summar\w*` claimed ANY turn containing the word.
+
+           So a coach who attached a scouting report and typed "Summarise this scouting report"
+           was answered by the organisation reader — "Afternoon. All good on your side right
+           now." — with the document sitting unread in this very call's `materialRow`. Measured
+           through `_assistantAnswer` directly, not inferred.
+
+           A document bound to the turn is what "this" refers to. When one is present, these
+           unscoped words no longer claim the turn unless the person also named the organisation
+           or team, and the material branches further down — which already exist and already
+           handle summarise, retrieval and the honest "not in this document" — get their look.
+
+           Without material in play nothing changes: this is the same branch it was, for the same
+           turns it used to serve. */
+        && (workScoped || !(opts.materialRow || (opts.material && opts.material.title))))) {
     // A GENERAL "where are we" / "summarise this" — but ONLY when it's about the ORG/team, not
     // a topic ("tell me about robotics" is a reasoning question, not an org-overview request).
     // The reasoner's grounded read is the
@@ -16308,9 +16326,29 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (_langNote && responseText) responseText = `${responseText} ${_langNote}`;
   const priorAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant' && m.text);
   if (priorAssistant && responseText.trim() === String(priorAssistant.text).trim()) {
+    /* ── WHY THE ANSWER REPEATED DECIDES WHAT TO SAY ABOUT IT ────────────────────────────────
+       This guard exists so the product does not parrot itself word for word. Its replacement
+       copy assumed one reason for a repeat — the person restating an action — and said so:
+       "I heard that as a change to what you wanted. Nothing was saved or shared."
+
+       That is the wrong sentence for the commonest repeat. Two different questions about the
+       same attached document legitimately retrieve the same passage: asked "what does it say
+       about set pieces?" and then "is the claim about their right back supported?", retrieval
+       returns the section holding both, and the second answer is identical to the first. The
+       person then received a message about changing their mind and about nothing being saved,
+       in reply to a question that asked for neither. Measured on the real path with a scouting
+       report attached.
+
+       So the substitute now follows what this turn actually was. A question whose answer is the
+       same passage is told that plainly, and pointed at the thing that would move it on; an
+       action restated keeps the sentence written for it. */
+    const _answeredAQuestion = !!qa && !actionReading.unavailable;
     responseText = actionReading.unavailable
       ? 'I cannot reliably interpret that change while the language model is unavailable. Your message is still in this private conversation, and nothing was saved or shared.'
-      : 'I heard that as a change to what you wanted. Nothing was saved or shared; tell me which action you want me to prepare.';
+      : _answeredAQuestion
+        ? 'That is the same part of the record I just showed you — it is what I have on both. '
+          + 'Ask about something else in it, or tell me what you want to do with it.'
+        : 'I heard that as a change to what you wanted. Nothing was saved or shared; tell me which action you want me to prepare.';
   }
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).

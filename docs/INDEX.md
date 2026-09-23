@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `219cef6` (restamped during PR #90 Coach-readiness closure after the object-law/browser-gate correction). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
+**Written against:** `3e51986` (restamped during PR #90 Coach-readiness closure after the option-set, import-owner, browser-gate-resolution and attachment-depth corrections). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 

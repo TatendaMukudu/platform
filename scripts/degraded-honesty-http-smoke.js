@@ -68,11 +68,47 @@ _rebuildEmailIndex();
 
 /* EVERY MACHINE WORD THIS PRODUCT MUST NEVER PUT IN FRONT OF SOMEBODY. The thrown message is in
    the list because it is the one actually in flight during this run — if any surface relays it,
-   that is the exact failure, not a hypothetical one. */
+   that is the exact failure, not a hypothetical one.
+
+   ── AND WHY THE HTTP CODES ARE MATCHED DIFFERENTLY ─────────────────────────────────────────
+   This checked every word as a raw substring of the whole JSON envelope, which made the numeric
+   ones FALSE-POSITIVE ON RANDOM DATA. Ids are random alphanumerics and timestamps are ISO
+   strings, so `turn_a500zjfd` or a millisecond field of `.429Z` matched `500` and `429` with
+   nothing whatever wrong. Measured: about one generated id in ten thousand contains one of them,
+   and a turn payload carries several ids and several timestamps.
+
+   That made DH-E2 — a PRIVACY assertion — intermittently red. It went red once in a full run and
+   passed fourteen times standing alone, which is the worst possible property for a leak test: a
+   flaky guard gets re-run until it is green, and the day it catches something real it is
+   indistinguishable from the noise.
+
+   So the ambiguous numeric codes are matched with digit boundaries, and against the text a person
+   actually READS rather than the envelope around it — an id is not prose and was never the thing
+   this guards. Everything else keeps whole-payload matching, because `anthropic`, `ECONNREFUSED`,
+   `Error:` and the rest never legitimately appear anywhere in a response at all. */
 const MACHINE = [THROWN, 'provider', 'ECONNREFUSED', 'ETIMEDOUT', 'anthropic', 'openai',
-  'api key', 'apiKey', 'rate limit', '429', '500', 'stack', 'Error:', '[object', 'undefined'];
+  'api key', 'apiKey', 'rate limit', 'stack', 'Error:', '[object', 'undefined'];
+const HTTP_CODES = ['429', '500'];
+/* What a human is shown: the prose, the notes, the messages — never the ids and timestamps that
+   carry them. Collected by key name so a new human-facing field is covered without listing it. */
+const _humanText = (obj) => {
+  const out = [];
+  const walk = (v) => {
+    if (typeof v === 'string') return;
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (v && typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) {
+        if (typeof val === 'string' && /text|message|note|answer|reason|summary|label|headline|claim|because|title/i.test(k)) out.push(val);
+        else walk(val);
+      }
+    }
+  };
+  walk(obj);
+  return out.join('\n');
+};
 const leaks = obj => MACHINE.filter(w => new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
-  .test(JSON.stringify(obj == null ? '' : obj)));
+  .test(JSON.stringify(obj == null ? '' : obj)))
+  .concat(HTTP_CODES.filter(c => new RegExp(`(^|[^0-9])${c}([^0-9]|$)`).test(_humanText(obj))));
 
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
