@@ -24,7 +24,12 @@ process.env.IQ_COMPOSER = '1';
 
 const { chromium } = require('playwright-core');
 const LOCAL_EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const EXE = process.env.CHROMIUM_PATH || (require('fs').existsSync(LOCAL_EXE) ? LOCAL_EXE : chromium.executablePath());
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". Resolving `chromium.executablePath()` directly returns the
+   build playwright-core was published against, which in this container does not exist — and a
+   launch on a missing executable HANGS rather than failing, so the gate produced no output and
+   looked like an environment without Chromium. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };
 
 const S = require('../server.js');

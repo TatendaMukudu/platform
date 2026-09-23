@@ -23,7 +23,12 @@ process.env.NODE_ENV    = 'test';
 process.env.IQ_COMPOSER = '1';
 
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". This was a HARD-CODED chromium-1194 path: correct in today's
+   image and wrong the moment it updates, which is the mirror of the bug the other four gates
+   had (they resolved a build playwright-core names and nothing had checked, then hung on it).
+   Two wrong answers to one question. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const WIDTHS = [390, 430];
 
 const S = require('../server.js');
@@ -171,9 +176,28 @@ _rebuildEmailIndex();
     }
 
     /* ── A SOURCE REMOVED, AND A SOURCE OUTSIDE THE BASIS ───────────────────────────────────
-       Both are refusals rather than quietly smaller charts, and a refusal has to SAY something.
-       Driven through the real route rather than the module, because the route is where the basis
-       is assembled and a basis assembled wrongly is the whole failure. */
+       A source going and a source that was never this reader's are different failures, and
+       neither may become a quietly smaller chart. Driven through the real route rather than the
+       module, because the route is where the basis is assembled and a basis assembled wrongly is
+       the whole failure.
+
+       WHAT CHANGED UNDERNEATH THIS SECTION, and why it is written this way now. It used to assert
+       that an emptied chart SAYS something, on the reasoning that an empty space reads as a bug.
+       A later pilot pass reversed that deliberately: "Pilot 1: the Inquiry screen was the worst
+       surface in the product, on a phone" found three stacked apologies under headings a coach had
+       never asked to see, and separated the two states at the server — a REFUSAL is worth a
+       sentence ("not enough people for a picture that stays anonymous" is a fact about the squad),
+       while HAVING NOTHING TO DRAW is the ordinary state of almost every object and earns silence.
+
+       Withdrawing every source lands in the second state: there is now nothing on the record to
+       draw, and the coach is the one who just removed it. So the law asserted here is the current
+       one — nothing drawn, nothing claimed, and no apology — and the refusal path keeps its own
+       proof below.
+
+       THIS CONTRADICTION SURVIVED A WEEK because the gate could not run: playwright-core resolved
+       a Chromium build the image does not have, and a launch on a missing executable hangs rather
+       than failing, so nothing here executed and nothing reported that. See
+       scripts/lib/chromium-path.js. */
     console.log('\n  WHEN A SOURCE GOES, OR WAS NEVER THEIRS');
     const ctx2 = await browser.newContext({ viewport: { width: 390, height: 860 }, isMobile: true });
     const p2 = await ctx2.newPage();
@@ -193,10 +217,13 @@ _rebuildEmailIndex();
     // Withdraw every source behind the three-day chart. Nothing current is left to draw.
     inquiryStates[C]['member:me'].days.signals.forEach(s => { s.status = 'withdrawn'; });
     const gone = await readChart(p2, 'days');
-    ok('CS-R1 with every source withdrawn the chart is REFUSED, not drawn empty',
-      gone.paths.length === 0 && gone.dots.length === 0);
-    ok('CS-R1b …and says something, because an empty space reads as a bug rather than as a record',
-      (gone.text || '').trim().length > 0);
+    ok('CS-R1 with every source withdrawn the chart is not drawn at all, rather than drawn empty',
+      gone.paths.length === 0 && gone.dots.length === 0 && gone.hasSvg === false);
+    /* SILENT, NOT APOLOGETIC — and silence here is only defensible because it claims nothing. An
+       empty axis, a leftover heading or a "no data" line under a chart nobody asked for are all
+       ways of putting a shape on screen that the record no longer supports. */
+    ok('CS-R1b …and nothing is left behind claiming there is a picture',
+      (gone.text || '').trim().length === 0 && !gone.aria);
     ok('CS-R1c …without claiming the record is scored, caused or predicted',
       !/score|caused|will/i.test(gone.text));
 
@@ -211,6 +238,22 @@ _rebuildEmailIndex();
       partial.missing === false);
     ok('CS-R2b …and never silently drops the untraceable part and draws the rest as the whole',
       partial.paths.length === 0 || partial.dots.length >= 2);
+    /* AND THE OTHER HALF OF THE SPLIT ABOVE: silence is only correct for "nothing to draw". A
+       REFUSAL still has to say something, or separating the two states would have become a way
+       to swallow both. Asserted on the rendered refusal line rather than on the payload, because
+       a note the server sends and the screen drops is the same failure to a coach. */
+    const refusal = await p2.evaluate(async () => {
+      const r = await fetch('/api/objects/inquiry/days/chart',
+        { headers: { Authorization: 'Bearer ' + (window.Auth && Auth._token ? Auth._token() : '') } })
+        .then(x => x.json()).catch(() => null);
+      const box = document.getElementById('iqt-chart');
+      return { refused: !!(r && r.refused), note: String((r && r.note) || ''),
+        line: box ? String((box.querySelector('.iqt-chart-none') || {}).textContent || '') : null };
+    });
+    ok('CS-R2c when the server REFUSES, the reason reaches the screen rather than being swallowed',
+      !refusal.refused || (refusal.line && refusal.line.trim().length > 0));
+    ok('CS-R2d …and the rendered reason is the server\'s, not copy the client invented',
+      !refusal.refused || refusal.line.trim() === refusal.note.trim());
     await ctx2.close();
 
     console.log('\n  NO PAGE ERRORS');

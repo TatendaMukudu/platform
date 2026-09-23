@@ -113,7 +113,12 @@ Object.assign(ai, {
      hard-coded /opt/pw-browsers/chromium-1194 path was from an earlier image; GitHub Actions now
      installs Playwright's current Chromium into its cache, so the old path caused an
      unhandled launch rejection and left the server alive until the job timeout. */
-  const EXE = process.env.CHROMIUM_PATH || chromium.executablePath();
+  const { chromiumPath } = require('./lib/chromium-path.js');
+  /* One owner for "which browser". Resolving `chromium.executablePath()` directly returns the
+     build playwright-core was published against, which in this container does not exist — and a
+     launch on a missing executable HANGS rather than failing, so the gate produced no output and
+     looked like an environment without Chromium. See scripts/lib/chromium-path.js. */
+  const EXE = chromiumPath(chromium);
   const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2, isMobile: true, hasTouch: true });

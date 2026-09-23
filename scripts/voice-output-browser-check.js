@@ -31,7 +31,10 @@ process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser" — this was a hard-coded build path. See
+   scripts/lib/chromium-path.js for why resolving it per-file kept going wrong. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const S = require('../server.js');

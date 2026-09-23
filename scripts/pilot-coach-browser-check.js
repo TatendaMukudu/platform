@@ -33,7 +33,12 @@ process.env.IQ_DETERMINISTIC_ONLY = '1';
 const { chromium } = require('playwright-core');
 /* The browser gate installs Chromium through this exact Playwright package. Resolve that install
    instead of pinning an old runner path, while preserving CHROMIUM_PATH for local/alternate runs. */
-const EXE = process.env.CHROMIUM_PATH || chromium.executablePath();
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". Resolving `chromium.executablePath()` directly returns the
+   build playwright-core was published against, which in this container does not exist — and a
+   launch on a missing executable HANGS rather than failing, so the gate produced no output and
+   looked like an environment without Chromium. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const S = require('../server.js');

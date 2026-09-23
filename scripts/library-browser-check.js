@@ -18,7 +18,12 @@ process.env.IQ_COMPOSER = '1';
 
 const path = require('path');
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". This was a HARD-CODED chromium-1194 path: correct in today's
+   image and wrong the moment it updates, which is the mirror of the bug the other four gates
+   had (they resolved a build playwright-core names and nothing had checked, then hung on it).
+   Two wrong answers to one question. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const ai = require('../ai/gateway.js');
@@ -215,9 +220,27 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
   })).catch(() => null);
   ok('B7c the picker offers EXACTLY the formats whose reader is present in this browser',
     !!readerState && acc === readerState.exts.join(','));
-  ok('B7d …and a format whose reader did not load is not advertised',
-    !!readerState && (readerState.jszip || !/\.docx|\.pptx/.test(acc))
-    && (readerState.xlsx || !/\.xlsx/.test(acc)));
+  /* ── AND WHAT "READABLE" MEANS CHANGED UNDERNEATH THIS ────────────────────────────────────
+     This used to assert that .docx/.pptx are withheld unless JSZip loaded and .xlsx unless SheetJS
+     did. That was right when the BROWSER parsed them. The founder's September decision moved
+     Office parsing SERVER-SIDE precisely because those two libraries arrive from a CDN this
+     environment cannot reach — so the browser now sends the bytes and the server reads them, and
+     `KIND_NEEDS` is deliberately empty.
+
+     So the old assertion had become the opposite of the law: it demanded that the three formats
+     disappear exactly when the change was designed to keep them working. Measured here —
+     JSZip=false, XLSX=false, and .docx/.xlsx/.pptx correctly on offer.
+
+     What must be true now is the same invariant from the other side: a format is offered IFF
+     something can really read it, whether that reader is in this browser or on the server. PDF is
+     the control — nothing anywhere reads it, so it must never be advertised however the rest
+     moves. (This contradiction survived because the gate could not run; see
+     scripts/lib/chromium-path.js.) */
+  ok('B7d Office formats are offered even with no CDN, because the server reads them now',
+    !!readerState && !readerState.jszip && !readerState.xlsx
+    && /\.docx/.test(acc) && /\.xlsx/.test(acc) && /\.pptx/.test(acc));
+  ok('B7d2 …while a format nothing anywhere can read is not advertised',
+    !!acc && !/\.pdf/.test(acc) && !/\.doc\b/.test(acc.replace(/\.docx/g, '')));
   ok('B7e …while the formats that need no library are always there, so a lost CDN never leaves a dead door',
     !!acc && /\.txt/.test(acc) && /\.csv/.test(acc) && /\.md/.test(acc));
   /* AND THE ENVIRONMENT FACT IS PRINTED rather than inferred, because a future reader of this
