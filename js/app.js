@@ -6673,6 +6673,22 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
     }
     if (!d.ok) throw new Error('confirm failed');
     if (card) card.innerHTML = `<div class="tdy-settled">${_escAdvisor(d.note || 'Done.')}</div>`;
+    /* AND GO WHERE THE SERVER SAYS THE ACTION LANDED. The confirm response carries `forum` or
+       `navigate` for exactly this, and the conversation's own confirm handler has always honoured
+       both. This one dropped them: the same governed action, confirmed from Home instead of from
+       a conversation, settled the card saying "Posted to the forum for this" and then left the
+       person on Home with no way to see what they had just put in front of the group — no
+       check that it reads right, no way back to it. Two doors to one write behaving differently
+       is the kind of difference a person reads as the product being unreliable.
+
+       Delegated to the same owners rather than re-implemented here; `openForum` is what knows
+       how to get onto that page and draw the room. */
+    /* `typeof MemberApp`, not `window.MemberApp`: it is declared `const` at the top level of a
+       classic script, which makes it a global LEXICAL binding — reachable as a bare identifier,
+       never a property of window. A `window.` guard here reads as defensive and is simply always
+       false, which would have made this whole fix a no-op that still passed inspection. */
+    if (d.forum && typeof MemberApp !== 'undefined') MemberApp.openForum(d.forum.nodeId || '', d.forum.objectId, d.forum.room, 'inquiry');
+    else if (d.navigate && typeof MemberApp !== 'undefined') MemberApp.openObjectThread(d.navigate.kind, d.navigate.id);
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
 }
 /* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
@@ -13954,9 +13970,25 @@ const MemberApp = {
   },
 
   async openForum(nodeId, objectId, room = 'group', backKind = 'inquiry') {
-    const box = document.getElementById('iq-inquiries-page');
+    /* NAVIGATE FIRST, THE WAY `openObjectThread` ALREADY DOES. The room draws into the Inquiries
+       page's container, and this is reached from Home too: confirming a share returns `forum:{…}`
+       and the client opens the room. Rendering into a page that is not on screen is, to the
+       person, the app doing nothing — a second after they deliberately put their words in front
+       of the group, which is the worst possible moment for the screen not to move. The sibling
+       function carries a comment saying this exact bug shipped once; this one had never been
+       walked from Home.
+
+       The shell heading goes with it: it belongs to the bucket, not to one room, and leaving it
+       stacks "Inquiries" above "Forum". */
+    let box = document.getElementById('iq-inquiries-page');
+    if (!box || !box.offsetParent) {
+      try { navigate('inquiry'); } catch (_) {}
+      box = document.getElementById('iq-inquiries-page');
+    }
     if (!box) return;
     if (room !== 'focus' && !nodeId) return;
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.setAttribute('hidden', '');
     const esc = s => this._escape(String(s == null ? '' : s));
     this._forumCtx = { nodeId, objectId, room, backKind };
     box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
@@ -13981,6 +14013,24 @@ const MemberApp = {
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
               : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
           : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
+        ${/* ── ASK INTELLIQ, AND WHY IT IS A BUTTON RATHER THAN A SECOND BOX ────────────────
+              Founder ruling: answer the asker privately from the object's governed projection,
+              never publish it to the room, and leave sharing to the deliberate path.
+
+              A BUTTON, DELIBERATELY. The comment below this block records why there is one
+              composer here: two text boxes on this screen would be the costliest ambiguity in
+              the product, because the difference between them is who reads what you type. A
+              second box labelled "ask IntelliQ" would reintroduce exactly that, one careless
+              tap from putting a private question into a room. It would also promise free-form
+              answering that the deterministic path does not have — the server says so itself,
+              `answers: 'current_object_read'`, because with no model the reply is this object's
+              current read and does not vary with phrasing. Offering a box would be a capability
+              claim; offering a button is the truth. */''}
+        <div class="iqf-ask-row">
+          <button type="button" class="iqf-ask" onclick="MemberApp.forumAsk()">Ask IntelliQ about this</button>
+          <span class="iqf-ask-n">Only you see the answer</span>
+        </div>
+        <div class="iqf-answer" id="iqf-answer"></div>
         ${this._composerHTML({ id: 'iq-forum-input', placeholder: this._PLACEHOLDER.forum,
           send: 'MemberApp.forumSend()', mic: 'iqf-mic', state: 'iqf-voice-state', attach: false })}
       </div>`;
@@ -13988,6 +14038,36 @@ const MemberApp = {
        IntelliQ — two boxes on this screen would be the single most costly ambiguity in the
        product, because the difference between them is who reads what you type. */
     this._renderShellComposer();
+  },
+
+  /* ── ASK INTELLIQ FROM INSIDE THE ROOM, PRIVATELY ─────────────────────────────────────────
+     The answer is rendered where only this reader can see it and is never sent to the room. The
+     server refuses to post it and says so (`posted:false`); this shows that fact rather than
+     asking anybody to take it on trust, because "who is going to read this" is the one question a
+     person in a Forum must never have to guess about. */
+  async forumAsk() {
+    const ctx = this._forumCtx;
+    const box = document.getElementById('iqf-answer');
+    if (!ctx || !box) return;
+    box.innerHTML = `<div class="iqf-answer-w">Reading what this room can see…</div>`;
+    try {
+      const r = await fetch(`/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.objectId)}/ask`,
+        { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({}) });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || 'That could not be answered right now.');
+      const esc = s => this._escape(String(s == null ? '' : s));
+      /* THE BANNER IS NOT DECORATION. It is the difference between this and the room. */
+      box.innerHTML = `
+        <div class="iqf-answer-w">
+          <div class="iqf-answer-h">Only you can see this</div>
+          <p class="iqt-p">${esc(d.answer)}</p>
+          ${(d.limitations || []).length
+            ? `<ul class="iqf-answer-l">${(d.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+          <p class="iqf-answer-n">${esc(d.note || '')}</p>
+        </div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="iqf-answer-w">${this._escape(err.message)}</div>`;
+    }
   },
 
   async forumSend() {

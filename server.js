@@ -18647,6 +18647,84 @@ app.get('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
   });
 });
 
+/* POST /api/group/:nodeId/forum/:inquiryId/ask — ASK INTELLIQ, INSIDE THE ROOM, WITHOUT
+   SPEAKING IN IT.
+
+   FOUNDER RULING, September 2026: *answer the asker privately using only the Forum/object-governed
+   projection; never automatically publish that answer to the room. Sharing into the Forum must
+   remain deliberate through the existing governed share path.*
+
+   That ruling is what makes this implementable without a new audience owner, and the shape follows
+   it exactly:
+
+     THE SCOPE IS THE OBJECT, NOT THE ASKER. Every other assistant answer is built from
+     `_allObjectsFor(code, userId)` — the individual reader's whole authorised set, which is WIDER
+     than the room and differs between two people in it. Answering a Forum question from that set
+     and then letting it reach the room would widen readership by exactly the gap between them.
+     This reads ONE projection: the group inquiry every member of this room can already open. Two
+     people in the room asking the same question are answered from the same material, because the
+     material is the object's rather than theirs.
+
+     NOTHING IS POSTED. The reply is returned to the caller and the thread is not touched — no
+     message, no author, no timestamp. `share_to_forum` remains the only way anything enters a
+     room, with its audience preview and its confirmation, and this route deliberately does not
+     shortcut it.
+
+     AND IT IS DETERMINISTIC. A rule that lives only in a model prompt is not implemented — this
+     pass found that the experiment law was doing exactly that. So the answer is composed here,
+     from the projection's own fields, and says plainly that it is the record rather than a fresh
+     reading of it. */
+app.post('/api/group/:nodeId/forum/:inquiryId/ask', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const t = _forumThread(code, nodeId, req.params.inquiryId);
+  if (!t.ok) return res.status(t.status).json({ error: t.error });
+  /* THE SAME LIVE GATE THE ROOM ITSELF USES. Somebody who may not read the room may not ask
+     IntelliQ about it either, and membership is re-resolved here rather than remembered. */
+  const access = _forumAccess(code, nodeId, userId, t.inquiry);
+  if (!forum.mayRead(access)) return res.status(403).json({ error: 'not part of this group' });
+
+  const proj = (_groupInquiryProjections(code, nodeId) || [])
+    .find(p => String(p.inquiryId) === String(t.inquiry.inquiryId));
+  if (!proj) return res.status(404).json({ error: 'not found' });
+
+  const parts = [];
+  const limitations = [];
+  parts.push(`On "${String(proj.topicLabel || '').replace(/\.$/, '')}": ${
+    proj.hypothesis ? `the explanation on the record is that ${proj.hypothesis}.`
+      : 'nobody has offered an explanation yet.'}`);
+  if (proj.independentOrigins) {
+    parts.push(`That rests on ${proj.independentOrigins} separate ${
+      proj.independentOrigins === 1 ? 'account' : 'accounts'}.`);
+  }
+  if (proj.contested) limitations.push('accounts of this do not agree, and that disagreement is part of the finding');
+  const unknown = (proj.stillUnknown || []).filter(Boolean)[0];
+  if (unknown) parts.push(`Still open: ${unknown}`);
+  const tried = (proj.triedBefore || []).filter(x => x && x.outcome);
+  if (tried.length) {
+    parts.push(`Already tried: ${tried.slice(0, 3)
+      .map(x => `"${String(x.text).replace(/\.$/, '')}" — recorded as ${
+        String(present.outcomeText(x.outcome) || x.outcome).toLowerCase()}`).join('; ')}.`);
+    limitations.push('what was recorded after an earlier attempt is not proof that attempt caused it');
+  }
+  if (proj.readiness && proj.readiness.because) parts.push(String(proj.readiness.because));
+  limitations.push('this is what the room can already see on this question, not a wider read of anybody');
+
+  res.json({ ok: true,
+    answer: parts.join(' '),
+    limitations,
+    /* AN EXPLICIT BOUNDED DEGRADATION, rather than a quiet one. With no model the answer is this
+       object's current governed read and does NOT vary with how the question was phrased. Saying
+       so in the payload is what lets the screen offer a button rather than a text box that would
+       promise free-form answering the deterministic path cannot do. */
+    answers: 'current_object_read',
+    /* SAID OUT LOUD IN THE PAYLOAD, because the whole safety of this route is that it did not
+       speak in the room, and a client should not have to infer that from an absence. */
+    posted: false,
+    note: 'Only you can see this. To put something to the room, say it in the Forum or share it deliberately.',
+  });
+});
+
 /* POST /api/group/:nodeId/forum/:inquiryId — say something. { text, replyTo? }
 
    THE EPISTEMICALLY INERT PATH. Note what this handler does NOT do: it never reaches

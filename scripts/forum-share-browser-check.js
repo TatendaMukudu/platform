@@ -193,6 +193,19 @@ Object.assign(ai, {
     ]);
     ok('FB-7 clicking Home Confirm posts those edited words for another member',
       homeResponse.status() === 200 && (await room()).j.messages.some(m => m.text === homeWords));
+    /* AND THEN THE APP HAS TO TAKE THEM THERE. Confirming this action returns `forum:{…}` and the
+       client opens the room — but the room renders into #iq-inquiries-page, which lives inside
+       the Inquiries page, and this confirmation was on Home. Rendering into a hidden page is
+       indistinguishable, to the person, from the app doing nothing: they have just deliberately
+       put their words in front of twelve people and the screen does not move.
+
+       `openObjectThread` already carries the fix for precisely this, with a comment saying the
+       bug shipped once ("tapping the card on Home silently did nothing"). Its sibling never got
+       it. This assertion is what makes that a shipped fix rather than a comment. */
+    await page.waitForTimeout(1100);
+    ok('FB-7a …and the room they just posted into is actually on screen, not drawn on a hidden page',
+      await page.locator('#iq-inquiries-page .iq-object-thread').isVisible()
+      && (await page.locator('#iq-inquiries-page .iqt-turns').innerText()).includes(homeWords));
 
     const beforeStale = (await room()).j.messages.length;
     const stale = await stage();
@@ -232,6 +245,59 @@ Object.assign(ai, {
       /people who can read|audience changed/i.test(await homeCard.innerText())
       && await homeCard.locator('button:has-text("Confirm")').count() === 0);
     orgNodes[C].sq.memberIds = roster;
+
+    /* ── ASKING INTELLIQ FROM INSIDE THE ROOM, ON A PHONE ────────────────────────────────────
+       The HTTP suite proves the route never posts. That is the server's half. This is the half
+       that decides whether a person believes it: they are standing in a room with other people's
+       speech on screen, and they tap something. If the answer lands looking like a message, or
+       the room gains a line, the product has told them the opposite of the truth — and no
+       server-side assertion can catch that, because nothing about the response would change.
+
+       It also replaces six assertions that read js/app.js as text. Source text is not a screen.
+       A button can be present in the file and unreachable, off-viewport, or under the fixed
+       composer bar — which is exactly how FB-4 failed once before. */
+    const beforeAsk = (await room()).j.messages.length;
+    await page.evaluate(() => MemberApp.openForum('sq', 'inq_q', 'group', 'inquiry'));
+    await page.waitForTimeout(900);
+    const askBtn = page.locator('button.iqf-ask');
+    ok('FB-13 the real room renders an Ask IntelliQ control',
+      await askBtn.count() === 1 && await askBtn.isVisible());
+    const box = await askBtn.boundingBox();
+    ok('FB-14 …big enough to hit with a thumb, and inside a 390px screen',
+      !!box && box.height >= 40 && box.x >= 0 && (box.x + box.width) <= 390);
+    /* ONE BOX, NOT TWO. The room's composer sends to the room; asking must not look like a
+       second place to type, because the difference between two boxes here is who reads you. */
+    ok('FB-15 …and the room still offers exactly one place to type',
+      await page.locator('#iq-forum-input').count() === 1
+      && await page.locator('.iqf-ask-row textarea, .iqf-ask-row input').count() === 0);
+    const [askResponse] = await Promise.all([
+      page.waitForResponse(r => /\/forum\/inq_q\/ask$/.test(r.url()) && r.request().method() === 'POST'),
+      askBtn.click(),
+    ]);
+    await page.waitForTimeout(400);
+    const answerText = (await page.locator('#iqf-answer').innerText()).trim();
+    ok('FB-16 tapping it answers the asker on screen, under a heading naming who can see it',
+      askResponse.status() === 200 && answerText.length > 40
+      && /only you can see this/i.test(answerText));
+    /* NOT A MESSAGE. Not in the list, and not wearing a message's clothes. */
+    /* `.iqt-turns` IS THE LIST, and naming it exactly is the whole assertion. This first read
+       `.iqf-msgs, .iqf-list, #iqf-messages` — three plausible names, none of which exist in the
+       markup. `querySelector` returned null, the clause fell through to true, and moving the
+       answer bodily inside the real list left it green. A selector that matches nothing is not a
+       weak check, it is an absent one wearing the costume of a check. */
+    ok('FB-17 …rendered outside the room\'s message list, not as another line of speech',
+      await page.locator('#iqf-answer .iq-msg, #iqf-answer .iqf-msg').count() === 0
+      && await page.evaluate(() => {
+        const a = document.getElementById('iqf-answer');
+        const list = document.querySelector('.iqt-turns');
+        return !!a && !!list && !list.contains(a);
+      }));
+    ok('FB-18 …and the room itself gained nothing from the asking',
+      (await room()).j.messages.length === beforeAsk);
+    /* AND THE OTHER PERSON. The one who would have been spoken to, had this leaked. */
+    ok('FB-19 …so the other member reads the room and finds none of that answer',
+      !JSON.stringify((await room()).j.messages).includes(answerText.slice(-60)));
+
     ok('FB-12 these rendered journeys raised no uncaught client error', errors.length === 0);
   } catch (e) { fail++; console.error('  FAIL browser fixture threw:', e && e.stack); }
   finally {

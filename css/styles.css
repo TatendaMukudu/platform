@@ -2965,6 +2965,24 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    a row that runs off the right of a phone is a row whose later items nobody reaches. The current
    chat is marked by weight and border rather than by colour, because this is navigation and
    colour here would compete with the object's own meaning. */
+/* ASK INTELLIQ INSIDE A FORUM. The answer is private to the reader, so the panel has to LOOK
+   unlike the room's messages rather than sitting among them — a private answer that reads like
+   room speech is the mistake this whole route exists to avoid. Bordered and labelled, never
+   styled as a message bubble. */
+.iqf-ask-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.6rem 0 .4rem}
+.iqf-ask{min-height:40px;padding:.35rem .8rem;border:1px solid var(--border);border-radius:999px;
+  background:transparent;color:var(--text-primary);font-size:var(--fs-sm);cursor:pointer}
+.iqf-ask:hover{border-color:var(--text-muted)}
+.iqf-ask-n{font-size:var(--fs-xs);color:var(--text-muted)}
+.iqf-answer:empty{display:none}
+.iqf-answer-w{border:1px dashed var(--border);border-radius:10px;padding:.7rem .8rem;margin:0 0 .6rem}
+.iqf-answer-h{font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-muted);margin:0 0 .35rem}
+.iqf-answer-l{margin:.4rem 0 0;padding-left:1.1rem}
+.iqf-answer-l li{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;
+  overflow-wrap:anywhere}
+.iqf-answer-n{font-size:var(--fs-sm);color:var(--text-secondary);margin:.45rem 0 0;
+  overflow-wrap:anywhere}
 .iqt-convs{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:0 0 .5rem}
 .iqt-convs-l{font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;
   color:var(--text-muted);margin-right:.15rem}
