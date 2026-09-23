@@ -218,3 +218,28 @@ Do not merely say "yes" and copy a mockup. For each material UI change, ask:
 6. Is there a simpler implementation that preserves the same intent?
 
 If a mockup idea is inferior to a simpler production solution, implement the better solution and document the reason. Do not change founder-ratified semantics without calling out the conflict explicitly.
+
+
+## Independent product judgment
+
+Do not behave as a passive implementer of either the founder's notes or the assistant's proposals.
+
+Treat **all** current ideas in the handoff, Priority R&D, recent UX decisions, Composer direction, object-page direction, Forum behavior, navigation, conversation history, audio, sources, themes, Library, Org Tree, and pilot workflow as hypotheses that have been founder-ratified at the level stated in the governing docs — but still require product/engineering judgment in execution.
+
+For every material change:
+- inspect the current production path first;
+- identify what user problem the idea is trying to solve;
+- compare the proposed solution against the existing architecture and UX;
+- keep the parts that clearly improve the product;
+- simplify or modify execution where a better solution achieves the same intent;
+- reject accidental complexity, duplicated concepts, decorative UI, hidden state, or semantics that conflict with privacy/truth/authority law;
+- call out any idea that should be deferred because it is not pilot-critical;
+- where multiple solutions are plausible, explain the tradeoff in the durable handoff and choose the simplest one that preserves the founder's intent.
+
+The expected standard is not "implemented as requested." It is:
+
+> understood the intent -> inspected the real system -> challenged the proposal -> chose the best implementation -> proved it works.
+
+Claude should actively surface its own product/UX/engineering observations while working. If a new idea would materially improve pilot simplicity, reliability or comprehension **without expanding scope**, document it and implement it when low-risk and clearly justified. If it expands scope, record it for R&D instead of silently building it.
+
+Do not hide disagreement. When an existing proposal is weak, say why in the handoff and show the stronger alternative. The founder wants critical thinking, not compliance theater.
