@@ -205,6 +205,34 @@ const server = app.listen(0, async () => {
     ok('DP-F3 …and admits it is the end of the record',
       /everything the record holds on this/i.test(a3));
 
+    console.log('\n  H — AND "IT" MEANS THE THING THEY ARE STANDING IN');
+    /* THE PRONOUN DEFECT. "it", "things", "situation" and "state" sat in the same list as
+       "organisation" and "squad" in the branch that answers org-overview questions — so a coach
+       inside a Focus who typed "Tell me more about it." was answered with an area brief:
+       "Evening, Dana. The First Team area is ticking along; nothing's asking for you today."
+       Measured with models off. The bound object was resolved and its read was computed; this
+       branch claimed the turn before it could be used. */
+    const pron = threadFor('coach');
+    const h1 = await pron('Tell me more about it.', 'f_press', 'focus');
+    ok('DP-H1 "tell me more about it" inside a Focus is about the Focus',
+      /Press from the first touch/i.test(h1));
+    ok('DP-H2 …and not an area brief about the whole organisation',
+      !/ticking along|nothing's asking for you|looks steady|All calm across/i.test(h1));
+    /* THE NEAREST NEGATIVE, because the fix must not close the org path. Naming the team is not a
+       pronoun, so it still reaches the organisation reader from inside an object. */
+    const named = await pron('Tell me about the team.', 'f_press', 'focus');
+    ok('DP-H3 …while naming the team still reaches the organisation reader from inside it',
+      !/Press from the first touch/i.test(named) && named.length > 0);
+    /* AND THE SAME PRONOUN WITH NOTHING BOUND IS UNCHANGED. This is the behaviour that shipped
+       before the fix, and narrowing a branch must not quietly close it: asked from nowhere in
+       particular, "it" has nothing else to refer to and the organisation reader is the right
+       answer. Without this, deleting the guard entirely would go unnoticed. */
+    const loose = await fetch(base + '/api/assistant/turn', { method: 'POST', headers: H('coach'),
+      body: JSON.stringify({ text: 'Tell me more about it.' }) }).then(x => x.json()).catch(() => null);
+    const looseText = String(((loose || {}).response || {}).responseText || '');
+    ok('DP-H4 …and with nothing bound at all the same words are still answered, not dead-ended',
+      looseText.length > 40 && !/Press from the first touch/i.test(looseText));
+
     console.log('\n  G — AND A QUESTION IS NEVER REPORTED AS AN UNINTERPRETABLE CHANGE');
     /* THE GUARD HAS TO ACTUALLY FIRE FOR THIS TO MEAN ANYTHING. A fourth ask on the thin inquiry
        produces the exhausted answer a second time, byte for byte, which is exactly the case the
@@ -218,7 +246,7 @@ const server = app.listen(0, async () => {
        was reported as a change request the product could not interpret. A coach who asked "Why?
        Show me the evidence." was told "I cannot reliably interpret that change while the language
        model is unavailable." */
-    const all = [a1, a2, a3, b1, b2, b3, b4, d1, pl, f1, f2];
+    const all = [a1, a2, a3, b1, b2, b3, b4, d1, pl, f1, f2, h1, named, looseText];
     ok('DP-G1 no answered question is reported as an uninterpretable change',
       all.every(t => !/cannot reliably interpret that change/i.test(t)));
     ok('DP-G2 …nor as a change of mind about an action nobody proposed',

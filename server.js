@@ -12759,7 +12759,21 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     const r = _reasonReadAnswer(code, userId, { patterns: true, lead: "Here are the patterns I've picked up across your area — grounded in recorded signals, never guessed:" });
     if (r && r.count) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `I haven't consolidated any repeated patterns yet — I only name a pattern once the signals actually repeat, rather than guessing one into being. Nothing has crossed that bar so far.`; confidence = 'confirmed'; limitations = ['patterns are named only from real repetition, not inferred']; }
-  } else if (/\btell me (?:more )?about (?:the |our |my |this )?(org|organisation|organization|team|squad|club|group|company|department|business|us|everyone|things|it|situation|state|people|staff|side|cohort|class)\b/.test(q)
+  } else if (/\btell me (?:more )?about (?:the |our |my |this )?(org|organisation|organization|team|squad|club|group|company|department|business|us|everyone|people|staff|side|cohort|class)\b/.test(q)
+    /* ── "IT", "THINGS", "SITUATION" AND "STATE" ARE GONE FROM THAT LIST, DELIBERATELY ───────
+       They are pronouns, and they sat among "organisation" and "squad" as though they named the
+       org. Measured with models off, which is the pilot's state: a coach inside a Focus called
+       "Press from the first touch" typed "Tell me more about it." and was answered "Evening,
+       Dana. The First Team area is ticking along; nothing's asking for you today." The bound
+       object had been resolved and its read computed; this branch claimed the turn first.
+
+       A pronoun refers to whatever the person is standing in, which is exactly what the material
+       guard below already says about "this". The first attempt at this fix kept them behind a
+       `!(opts.object)` guard — and no mutation could kill that guard, because with nothing bound
+       these words are claimed earlier by the reasoning register anyway. So the alternative was
+       dead code, and the honest correction is the smaller one: they are not org words.
+
+       Naming the org, the team or the squad still reaches the organisation reader from anywhere. */
     || (/\b(overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)
         /* ── AND ONLY WHEN IT IS ABOUT THE ORGANISATION, WHICH THIS DID NOT CHECK ────────────
            The comment below has always said this branch is for an ORG/team overview and not for
