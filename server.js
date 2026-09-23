@@ -12427,7 +12427,11 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
    AND A REPORTED OUTCOME IS NOT A CAUSE. "It helped" is what somebody observed after working on
    something. Saying it caused the change would be the causality claim this product does not make,
    so the limitation travels with the answer rather than being left to the phrasing. */
-function _objectSelfRead(code, userId, object) {
+/* `depth` IS 0 OR 1, AND IT IS NOT CHOSEN BY MATCHING ENGLISH. The call site picks it by whether
+   the concise read has already been said in this conversation — see the branch in
+   `_assistantAnswer`. Matching cues like "show me the evidence" here would rebuild the allowlist
+   problem one layer down, which is the decision recorded at that call site and still correct. */
+function _objectSelfRead(code, userId, object, depth = 0) {
   try {
     if (!object || !object.kind || object.kind === 'conversation' || object.kind === 'material') return null;
     const live = _allObjectsFor(code, userId)
@@ -12440,6 +12444,7 @@ function _objectSelfRead(code, userId, object) {
     if (!title) return null;
     const parts = [];
     const limitations = [];
+    let added = 0;   // what the deeper layer genuinely contributed
 
     if (object.kind === 'focus') {
       const out = detail.outcome;
@@ -12510,14 +12515,61 @@ function _objectSelfRead(code, userId, object) {
       const claim = String((live.explained || {}).claim || '').trim();
       if (!claim) return null;
       parts.push(`On "${title}": ${claim}`);
-      const because = (detail.because || []).filter(Boolean).slice(0, 2);
-      if (because.length) parts.push(`That rests on ${because.join(', ')}.`);
-      const unknown = (detail.stillUnknown || []).filter(Boolean)[0];
-      if (unknown) parts.push(`Still open: ${unknown}`);
+      const because = (detail.because || []).filter(Boolean);
+      const unknowns = (detail.stillUnknown || []).filter(Boolean);
+      if (!depth) {
+        if (because.length) parts.push(`That rests on ${because.slice(0, 2).join(', ')}.`);
+        if (unknowns[0]) parts.push(`Still open: ${unknowns[0]}`);
+      } else {
+        /* ── THE SECOND LAYER: WHAT THE RECORD HOLDS BEYOND THE HEADLINE ───────────────────
+           Acceptance matrix 15 — concise first, materially deeper when the short answer was not
+           enough. Every line here is already computed and already on the card; the only thing
+           that was missing was a reply willing to say it.
+
+           EVIDENCE IS REFERENCED, NEVER COPIED. The shape of it is reported — how many separate
+           accounts, how many people, how many were later corrected — and not one word anybody
+           contributed. The alternatives and the falsifier are the inquiry's OWN computed
+           statements, not somebody's account of anything. */
+        if (because.length > 2) parts.push(`That rests on ${because.slice(0, 6).join(', ')}.`);
+        else if (because.length) parts.push(`That rests on ${because.join(', ')}.`);
+        if (unknowns.length) parts.push(`Still open: ${unknowns.slice(0, 3).join('; ')}.`);
+        const alts = (detail.alternatives || []).filter(a => a && a.statement).slice(0, 2);
+        if (alts.length) {
+          parts.push(`Other explanations on the record: ${alts
+            .map(a => `"${a.statement}"${a.standing ? ` (${a.standing})` : ''}`).join('; ')}.`);
+          added++;
+        }
+        /* THE ONE LINE NO COMPETITOR PRODUCES, and it belongs in the answer as much as on the
+           card: what would show this is wrong. */
+        const fals = (detail.falsifiers || []).filter(Boolean).slice(0, 2);
+        if (fals.length) { parts.push(`What would show this is wrong: ${fals.join('; ')}.`); added++; }
+        const shape = [];
+        const o = Number(detail.independentOrigins) || 0;
+        const c = Number(detail.contributors) || 0;
+        const fixed = Number(detail.corrected) || 0;
+        if (o) shape.push(`${o} separate ${o === 1 ? 'account' : 'accounts'}`);
+        if (c) shape.push(`from ${c} ${c === 1 ? 'person' : 'people'}`);
+        if (fixed) shape.push(`${fixed} since corrected`);
+        if (shape.length) {
+          parts.push(`Behind it: ${shape.join(', ')}. I can say what it rests on; I do not repeat what anybody said.`);
+          added++;
+        }
+        if (unknowns.length > 1) added++;
+        if (because.length > 2) added++;
+      }
       if (detail.contested) limitations.push('accounts of this do not agree, and that disagreement is part of the finding');
     }
+    /* A DEEPER READ THAT ADDED NOTHING RETURNS THE SAME SENTENCES, and that is deliberate rather
+       than an oversight: the call site already decides by comparing against what this conversation
+       has been told, so an unchanged text IS the signal that there is no second layer, and it is
+       answered with "that is everything" rather than served again.
+
+       An `if (depth && !added) return null` guard stood here and was removed. No mutation could
+       kill it — both paths reach the same exhausted answer — and by the standard this pass has
+       been applying, a line that reads as a safeguard while changing nothing is worse than its
+       absence, because the next person to read it will believe it is load-bearing. */
     parts.push('That is what is on the record here, not a fresh reading of it.');
-    return { text: parts.join(' '), limitations };
+    return { text: parts.join(' '), limitations, depth: depth && added ? 1 : 0 };
   } catch (_) { return null; }
 }
 
@@ -12915,8 +12967,37 @@ function _assistantAnswer(code, userId, question, opts = {}) {
            presenter the card renders from (`ai/present.js`), so the screen and the sentence can
            never disagree, and a reported outcome is reported as what somebody observed — never as
            proof the focus caused it. */
-        const _self = _objectSelfRead(code, userId, opts.object);
-        answer = _self.text;
+        /* ── AND IT GOES DEEPER RATHER THAN REPEATING ITSELF (acceptance matrix 15) ─────────
+           "Start concise, then go materially deeper when they ask for depth or evidence" lived
+           only in `ai/composer.js`'s system prompt. With models off — the pilot's configuration —
+           a coach who asked "what is going on?", then "why? show me the evidence", then "walk me
+           through the whole history" received the SAME 186 characters three times. Measured.
+
+           THE TRIGGER IS REPETITION, NOT VOCABULARY. Matching "show me the evidence" would
+           rebuild the allowlist problem this branch was written to avoid, and would work in
+           English only. Asking again while standing in the same object IS the signal that the
+           short answer was not enough, whatever language it was asked in — so the deeper read is
+           chosen when the concise one has already been said in this conversation.
+
+           `_objectSelfRead` returns null for a depth that would add nothing, so "there is no more
+           on the record" stays distinguishable from "here is more" and is never padded. */
+        const _said = new Set((opts.saidBefore || []).map(s => String(s || '').trim()));
+        let _self = _objectSelfRead(code, userId, opts.object, 0);
+        let _exhausted = false;
+        if (_self && _said.has(_self.text.trim())) {
+          const _deeper = _objectSelfRead(code, userId, opts.object, 1);
+          if (_deeper && !_said.has(_deeper.text.trim())) _self = _deeper;
+          /* BOTH LAYERS ALREADY GIVEN. Falling back to the CONCISE read here is what the first
+             version did, and it is the worst of the three options: the person asks a third time
+             and receives less than they were given a moment ago, which reads as the product
+             forgetting. The repeat guard downstream does not catch it either, because it only
+             compares against the immediately previous message and this repeats across a gap.
+             So: keep the fullest read, and say plainly that it is everything. */
+          else { _self = _deeper || _self; _exhausted = true; }
+        }
+        answer = _exhausted
+          ? `${_self.text} That is everything the record holds on this. Anything further has to come from somebody adding to it.`
+          : _self.text;
         confidence = 'confirmed';   // about WHAT IS ON THE RECORD, which is the only claim made
         limitations = _self.limitations;
       }
@@ -16066,7 +16147,12 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
              resolves through the same owner and returns nothing for a document this reader could
              not open. */
           materialRow: _conversationMaterialRow(code, userId, _conv),
-          object: actionContext && actionContext.object ? actionContext.object : null });
+          object: actionContext && actionContext.object ? actionContext.object : null,
+          /* WHAT THIS CONVERSATION HAS ALREADY BEEN TOLD, so a bound-object read can go deeper
+             instead of repeating itself. Texts only, from this person's own conversation — the
+             same store every other surface reads, and no new one. */
+          saidBefore: ((_conv && _conv.messages) || [])
+            .filter(m => m && m.role === 'assistant' && m.text).map(m => String(m.text)) });
     } catch (_) { qa = null; }
   }
   // ── RECALL ───────────────────────────────────────────────────────────────────
@@ -16389,12 +16475,22 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
        So the substitute now follows what this turn actually was. A question whose answer is the
        same passage is told that plainly, and pointed at the thing that would move it on; an
        action restated keeps the sentence written for it. */
-    const _answeredAQuestion = !!qa && !actionReading.unavailable;
-    responseText = actionReading.unavailable
-      ? 'I cannot reliably interpret that change while the language model is unavailable. Your message is still in this private conversation, and nothing was saved or shared.'
-      : _answeredAQuestion
-        ? 'That is the same part of the record I just showed you — it is what I have on both. '
-          + 'Ask about something else in it, or tell me what you want to do with it.'
+    /* AND A QUESTION THAT WAS ANSWERED IS NEVER REPORTED AS AN UNINTERPRETABLE CHANGE. This read
+       `!!qa && !actionReading.unavailable`, and the unavailable arm came FIRST — so with models
+       off, which is the pilot's whole configuration, `actionReading.unavailable` is always true
+       and every repeated answer was reported as a change request the product could not interpret.
+       Measured: a coach bound to an inquiry asked "Why? Show me the evidence." and was told "I
+       cannot reliably interpret that change while the language model is unavailable."
+
+       The action reader being unavailable says nothing about a question that WAS answered, and
+       `qa` is the record of that. So an answered question wins the branch, and the unavailable
+       sentence is kept for what it was written for: a change nobody could read. */
+    const _answeredAQuestion = !!qa;
+    responseText = _answeredAQuestion
+      ? 'That is the same part of the record I just showed you — it is what I have on both. '
+        + 'Ask about something else in it, or tell me what you want to do with it.'
+      : actionReading.unavailable
+        ? 'I cannot reliably interpret that change while the language model is unavailable. Your message is still in this private conversation, and nothing was saved or shared.'
         : 'I heard that as a change to what you wanted. Nothing was saved or shared; tell me which action you want me to prepare.';
   }
 
