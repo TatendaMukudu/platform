@@ -243,3 +243,24 @@ The expected standard is not "implemented as requested." It is:
 Claude should actively surface its own product/UX/engineering observations while working. If a new idea would materially improve pilot simplicity, reliability or comprehension **without expanding scope**, document it and implement it when low-risk and clearly justified. If it expands scope, record it for R&D instead of silently building it.
 
 Do not hide disagreement. When an existing proposal is weak, say why in the handoff and show the stronger alternative. The founder wants critical thinking, not compliance theater.
+
+
+## Founder decision — external knowledge provenance
+
+Matrix 8/9 must not be closed by model memory or fabricated citations.
+
+External knowledge enters IntelliQ only through an **explicit retrievable source with durable provenance**. The model may reason over that material, but it does not become local organizational evidence merely because it was retrieved.
+
+For pilot closure:
+
+- treat external knowledge as optional, not required for every answer;
+- when external knowledge is used, the response must retain a source record sufficient to render a compact Sources disclosure beneath the IntelliQ message;
+- distinguish source classes in the record: current/internal evidence, prior organizational learning, user/library material, external/public source;
+- preserve source title/label, origin, stable URL or document identity where available, retrieval/observation time when relevant, and the exact claim/option the source supports;
+- never cite model pretraining as a source;
+- never fabricate a citation when no retrievable source exists;
+- external/public material may justify a candidate option or provide background, but does not prove that option works in this organization;
+- user/library documents retain their own privacy/audience constraints and must not be exposed merely because they were used in reasoning;
+- source rendering should be compact and inspectable rather than a bibliography wall.
+
+Do not build a broad autonomous research subsystem merely to satisfy matrix 8/9 before the pilot. Close those cases only if an existing governed retrieval path can supply real external/public material with provenance. Otherwise mark external-web production as deferred R&D and preserve the response/source schema so the producer can be added cleanly later.
