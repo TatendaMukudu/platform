@@ -18434,6 +18434,28 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   if (!object) return res.status(404).json({ error: 'not found' });
   const conversation = (assistantConversations[_wsKey(code, userId)] || [])
     .filter(c => c && c.about === object.about).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+  /* ── AND THE OTHER CHATS THIS PERSON HAS HAD ABOUT THIS ────────────────────────────────────
+     The line above opens the most recently updated matching conversation, which is the right
+     DEFAULT and was the whole answer. A person who talked about an object in March and again in
+     June saw only June, with nothing on screen saying March existed — the product quietly
+     deciding which of their own conversations they meant.
+
+     The store already holds them and `/api/assistant/conversations?about=…` already returns them.
+     What was missing was the thread SAYING SO, so this is the same read through the same key:
+     no second store, no copied bodies, and the `_wsKey(code, userId)` scoping means these are
+     this person's own conversations and can be nobody else's — two people with private chats
+     about one shared object still cannot see each other's, because neither is ever in the other's
+     list to begin with.
+
+     Ids and labels only. The bodies stay behind `/api/assistant/conversations/:id`, which already
+     gates them, so the switcher costs one small array rather than every transcript. */
+  const conversations = (assistantConversations[_wsKey(code, userId)] || [])
+    .filter(c => c && c.about === object.about)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    .slice(0, 20)
+    .map(c => ({ id: c.id, title: c.title || null, updatedAt: c.updatedAt,
+      messageCount: (c.messages || []).length,
+      current: !!conversation && c.id === conversation.id }));
   // `present` carries the rival explanation and the human title; `explained` carries the
   // composed prose. The thread needs both, and neither should be rebuilt on the client.
   // A FORUM EXISTS where the thread is not just you and IntelliQ. Today that is a group
@@ -18503,6 +18525,10 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
        absence a reader has to interpret. The count is of the room, never a list of who is in it. */
     forumReadable: _aud.readable, forumWhy: _aud.available ? null : _aud.reason,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
+    /* EVERY CHAT THIS PERSON HAS HAD ABOUT THIS, newest first, with the open one marked. The
+       thread opens the newest by default and always did; this is what stops that default being a
+       silent decision about which of somebody's own conversations they meant. */
+    conversations,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
 

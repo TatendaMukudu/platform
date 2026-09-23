@@ -12410,6 +12410,35 @@ const MemberApp = {
      It is NOT an access claim. `_objectBucket` decides what is in a scope, and a person asking for
      a group they are not in gets an empty bucket and a 404 -- the same answer a stranger gets, so
      asking reveals nothing. */
+  /* ── OPEN ONE OF THIS PERSON'S OTHER CHATS ABOUT THIS OBJECT ──────────────────────────────
+     Reads the conversation through `/api/assistant/conversations/:id`, the route that already
+     owns and gates a transcript, and paints its turns into the thread that is already on screen.
+     Nothing is copied and no second store is consulted: the object's opening, chart, material and
+     verdicts all belong to the object and are unchanged by which chat you are reading.
+
+     The route is self-scoped on the server, so a chosen id that is not this reader's own answers
+     404 and the thread simply says so rather than rendering somebody else's words. */
+  async openObjectConversation(kind, objectId, conversationId) {
+    try {
+      const r = await fetch('/api/assistant/conversations/' + encodeURIComponent(conversationId),
+        { headers: Auth._headers() });
+      if (!r.ok) throw new Error('That conversation is not available.');
+      const d = await r.json();
+      const turns = document.getElementById('iq-object-turns');
+      if (turns) {
+        turns.innerHTML = (d.messages || []).map(m => this._threadTurn(m)).join('');
+        turns.scrollTop = turns.scrollHeight;
+      }
+      this._objectConversationId = conversationId;
+      document.querySelectorAll('.iqt-conv').forEach(b => {
+        const mine = b.getAttribute('onclick') || '';
+        const isIt = mine.includes(`'${conversationId}'`);
+        b.classList.toggle('is-current', isIt);
+        if (isIt) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+      });
+    } catch (err) { showToast(err.message, 'error'); }
+  },
+
   async openObjectThread(kind, objectId, scope = 'self') {
     // The thread renders into the bucket page's container, which does not exist on Home — so
     // tapping the card on Home silently did nothing. Navigate there first, then render.
@@ -12632,6 +12661,31 @@ const MemberApp = {
               </button>`}
 
           </div>
+          ${/* ── YOUR OTHER CHATS ABOUT THIS ────────────────────────────────────────────────
+                The thread opens the most recently updated conversation about this object, which
+                is the right default. It was also the whole answer: somebody who talked about
+                this in March and again in June saw only June, with nothing saying March existed
+                — the product deciding, silently, which of their own conversations they meant.
+
+                ONE LINE, AND ONLY WHEN THERE IS SOMETHING TO SAY. A person with a single chat
+                sees nothing new, which is almost everybody almost always; a switcher that is
+                always on screen is a dashboard for a problem most people do not have. Rendered
+                as plain buttons rather than a select, because a select on a phone opens a system
+                picker for what is a two-item choice.
+
+                These are THIS reader's own conversations — the server lists them from their own
+                workspace key — so two people with private chats about one shared object still
+                cannot see each other's. */''}
+          ${(data.conversations || []).length > 1 ? `
+            <div class="iqt-convs">
+              <span class="iqt-convs-l">Your chats about this</span>
+              ${(data.conversations || []).map(c => `
+                <button type="button" class="iqt-conv${c.current ? ' is-current' : ''}"
+                  ${c.current ? 'aria-current="true"' : ''}
+                  onclick="MemberApp.openObjectConversation('${esc(kind)}','${esc(objectId)}','${esc(c.id)}')">
+                  ${esc(this._ago(c.updatedAt))}<span class="iqt-conv-n">${esc(String(c.messageCount || 0))}</span>
+                </button>`).join('')}
+            </div>` : ''}
           ${body}
           ${this._composerHTML({ id: 'iq-object-input', placeholder: this._placeholderFor(kind),
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
