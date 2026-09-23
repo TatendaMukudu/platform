@@ -1283,3 +1283,102 @@ That is a founder-facing architecture choice with a privacy cliff, and it is P2 
 1. **Option sets for a personal object.** `_inquiryOptions` serves the group-inquiry read only; the personal equivalent has no producer. The external-knowledge source class also has none — deliberately not fabricated.
 2. **Matrix 14 proper** — "tactics exhausted → route to human help". `_inquiryOptions` says another variation is not the useful next move; nothing yet routes to a person.
 3. **Forum Ask IntelliQ**, once the founder rules on the scope question above.
+
+## 10. Claude closure round four — 2026-09-23
+
+**Head at end:** `33acd6d`. Nothing merged or deployed.
+
+| SHA | Production change |
+|---|---|
+| `33acd6d` | Ask IntelliQ inside a Forum, answered privately; and the two ways the app failed to take you to a room |
+
+### The founder ruling, and what it made buildable
+
+> Answer the asker privately using only the Forum/object-governed projection; never automatically
+> publish that answer to the room. Sharing into the Forum must remain deliberate through the
+> existing governed share path.
+
+That resolves the privacy cliff recorded in §9 by removing it rather than managing it. `POST
+/api/group/:nodeId/forum/:inquiryId/ask` is gated by the room's own live `_forumAccess`, is bounded
+to one `_groupInquiryProjections` entry, and composes its answer **deterministically** — no model in
+the path, and the response says so (`answers: 'current_object_read'`) instead of implying free-form
+answering it does not have. It posts nothing, persists nothing and touches no thread.
+
+The three properties the suite exists for are privacy properties, not answer quality: the room's
+gate decides who may ask; two members of one room receive the **same** answer, because the scope is
+the object rather than the asker; and the room is byte-for-byte unchanged by asking.
+
+**It is a button, not a second text box.** Two boxes on that screen would be the costliest ambiguity
+in the product — the difference between them is who reads what you type — and a box would promise
+answering the deterministic path does not have. A box would be a capability claim; a button is the
+truth.
+
+### Two defects the rendered gate found, both on the founder-walked share path
+
+Neither was visible to any server-side assertion, because nothing about the responses changed.
+
+1. **`openForum` drew the room into a page that was not on screen.** Confirming a share returns
+   `forum:{...}` and the client opens the room — including from Home, where `#iq-inquiries-page` is
+   hidden. The room rendered into nothing. A second after deliberately putting their words in front
+   of twelve people, the person's screen did not move. `openObjectThread` already carries this exact
+   fix *with a comment saying the bug shipped once*; its sibling never got it.
+
+2. **`todayTurnConfirm` received `d.forum` and dropped it.** The same governed action, confirmed from
+   Home rather than from a conversation, settled the card saying "Posted to the forum for this" and
+   left the person on Home with no way to see what they had just posted. Two doors to one write
+   behaving differently is read as the product being unreliable.
+
+### The mutation that matters most this round
+
+Replacing the navigation guard with `window.MemberApp` — which **is always false**, because
+`MemberApp` is a top-level `const` and therefore a global *lexical* binding, never a property of
+`window`. It is a fix that passes inspection and does nothing. `FB-7a` catches it. Carry this
+forward: in this codebase a `window.X` guard on a top-level `const` silently disables the code it
+appears to protect.
+
+### Two of my own assertions were false green, and were corrected before being trusted
+
+- **`FA-E1`** searched the whole of `js/app.js` for `forumAsk()` — which also matches the handler's
+  own definition. Deleting the button a person actually taps would have left it green. Now scoped to
+  the room's markup.
+- **`FB-17`** asked whether the private answer sits outside the message list using three plausible
+  selector names, none of which exist in the markup. `querySelector` returned null, the clause fell
+  through to true, and moving the answer bodily into the real list did not fail it. The list is
+  `.iqt-turns`. **A selector that matches nothing is not a weak check; it is an absent one wearing
+  the costume of a check.** Worth adding to the false-green list alongside source-text assertions.
+
+This is also why six source-text assertions about `js/app.js` were backed by rendered ones: source
+text is not a screen. A button can be present in the file and unreachable, off-viewport, or under the
+fixed composer bar — which is how `FB-4` failed once before.
+
+### Proof
+
+- `forum-ask-http-smoke` — 21 assertions, registered. Deterministic (`IQ_DETERMINISTIC_ONLY=1`).
+- `forum-share-browser-check` — 13 to 21 assertions; the room is opened, tapped and read on a real
+  390px Chromium, and the other member reads the room afterwards.
+- **Sixteen mutations, each required red then restored:** drop the live gate; answer per-asker; post
+  into the room; `posted:true`; delete the tappable control; point the fetch at the room route; add a
+  second composer; dress the answer as a message bubble; solid border; 26px tap target; remove the
+  navigate guard; drop `d.forum`; the `window.MemberApp` no-op; hide the control with `display:none`;
+  move the answer into `.iqt-turns`; wrap the answer in `iq-msg`.
+- `npm test` — full Truth Layer green (twice this round).
+- **All ten browser gates green on real Chromium**, 535 assertions: chart-shape 42, forum-share 21,
+  group-loop 55, library 33, onboard 34, pilot-coach 133, priority-surface 39, settings-tiers 45,
+  stack 114, voice-output 19.
+- Asset stamp `20260923d` recorded.
+
+### Exact next seam
+
+1. **Matrix 14 proper** — "tactics exhausted → route to human help". `_inquiryOptions` already drops
+   the tactic when `didNotHelp.length > 0 && !helped.length`, so it says another variation is not the
+   useful next move; **nothing then routes to a person.** The person who has tried everything gets a
+   shorter list and no next move. Must use existing audience/authority owners — no new store, no new
+   lifecycle.
+2. **Option sets for a personal object.** `_inquiryOptions` serves the group-inquiry read only. The
+   external-knowledge source class still has no producer and is deliberately not fabricated.
+3. **Consolidation candidate (carried):** the two spellings of the focus→source relationship,
+   `addresses` vs `origin.inquiryId`.
+
+### External gates unchanged
+
+Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery.
