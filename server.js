@@ -12453,10 +12453,57 @@ function _objectSelfRead(code, userId, object) {
       } else {
         parts.push(`You are working on "${title}". Nothing has been recorded about how it went yet.`);
       }
-      const rel = (live.raw || {}).addresses;
+      /* WHERE THIS FOCUS CAME FROM, UNDER EITHER OF THE TWO NAMES THE RECORD USES. A personal
+         focus stores `addresses: {kind,id}`; a group focus stores `origin.inquiryId`. They are
+         the same relationship with two spellings, and reading only one is why this reply knew
+         about a personal focus's question and not a group's. Read here rather than renamed:
+         consolidating the two field names is a canonical-owner change with its own blast radius,
+         and this is a reader. */
+      const _origin = (live.raw || {}).origin;
+      const rel = (live.raw || {}).addresses
+        || (_origin && _origin.inquiryId ? { kind: 'inquiry', id: String(_origin.inquiryId) } : null);
       if (rel && rel.kind && rel.id) {
         const src = _allObjectsFor(code, userId).find(o => o.kind === rel.kind && String(o.id) === String(rel.id));
         if (src) parts.push(`You started it from ${rel.kind === 'inquiry' ? 'the question' : 'the ' + rel.kind} "${String((src.explained || {}).headline || '').replace(/\.$/, '')}".`);
+        /* ── AND WHAT WAS ALREADY TRIED ON THE SAME QUESTION, WITH WHAT CAME OF IT ───────────
+           The founder's experiment law: repeated failure is itself an outcome, a materially
+           identical failed tactic must not be resurfaced as new, and a successful one is
+           precedent under its conditions rather than proof.
+
+           `ai/composer.js` already carries prior attempts into the MODEL's context and already
+           forbids repackaging an unsuccessful one. Measured on the real path: a group focus turn
+           makes one provider call — the bounded action read — and the prose comes from here, so
+           with models off, which is the pilot's state, none of that reached anybody. A coach who
+           asked "what else could we try?" on their second attempt was told what they were working
+           on and that nothing had been recorded about it, while the record held that the first
+           attempt had been tried and had not helped.
+
+           So the deterministic reply carries it too, from the same canonical focuses every other
+           surface reads. It states what was tried and the outcome word that was recorded, and
+           nothing more: no ranking, no suggestion, and explicitly not a claim that the attempt
+           caused what followed it. Scoped to focuses started FROM THE SAME source, because a
+           resemblance judgement across questions would be the system deciding two things are the
+           same, which it is not entitled to do. */
+        const _srcOf = (o) => {
+          const a = (o.raw || {}).addresses;
+          if (a && a.kind && a.id) return `${a.kind}:${a.id}`;
+          const g = (o.raw || {}).origin;
+          return g && g.inquiryId ? `inquiry:${g.inquiryId}` : null;
+        };
+        const _here = `${rel.kind}:${rel.id}`;
+        const tried = _allObjectsFor(code, userId)
+          .filter(o => o.kind === 'focus' && String(o.id) !== String(live.id) && _srcOf(o) === _here)
+          .map(o => ({ label: String(((o.present || {}).summary || {}).title
+              || (o.explained || {}).headline || '').replace(/\.$/, '').slice(0, 160),
+            outcome: (((o.present || {}).detail || {}).outcome || {}).result || null }))
+          .filter(x => x.label && x.outcome)
+          .slice(0, 3);
+        if (tried.length) {
+          parts.push(`Already tried on that question: ${tried
+            .map(t => `"${t.label}" — recorded as ${String(present.outcomeText(t.outcome) || t.outcome).toLowerCase()}`)
+            .join('; ')}.`);
+          limitations.push('what was recorded after an earlier attempt is not proof that attempt caused it');
+        }
       }
     } else {
       // A High, a Low or an Inquiry. Its claim and its standing are the card's own words.
