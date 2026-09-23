@@ -1382,3 +1382,97 @@ fixed composer bar — which is how `FB-4` failed once before.
 ### External gates unchanged
 
 Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery.
+
+## 11. Claude closure round five — 2026-09-23
+
+**Head at end:** `20d1ead`. Nothing merged or deployed.
+
+| SHA | Production change |
+|---|---|
+| `305b322` | Matrix 14 — when everything the group tried did not help, name somebody who can look at it with them |
+| `d0881fc` | Matrix 15 — ask again and get more, not the same 186 characters back |
+| `20d1ead` | "Tell me more about it" inside a Focus is about the Focus, not the organisation |
+
+### Matrix 14 — routing to a person without disclosing one
+
+`_inquiryOptions` already knew the state and already said "somebody else's help" was the useful next
+move; it offered no way to get it. `_peopleWithStandingFor` now names somebody, and only if they pass
+**both** filters: they lead this node (standing, held on the node), **and** `_contactsFor` already
+returns them (addressability, bounded by the tree). The intersection is what makes this safe —
+suggesting a person is a disclosure, and relevance is not authorisation.
+
+Where the two filters come apart is the test that matters: a leader of **this** node who has left is
+still in `leaderIds`, so standing alone would name them. Being told to go and ask somebody who is
+gone is the failure the filter exists to prevent.
+
+The projection gained an optional `viewerId`. Everything else in it belongs to the node and reads the
+same for everyone — the property the Forum ask ruling turns on — and "who could you bring in" is the
+one question that is about the reader by nature. Callers that serve no particular person pass nothing
+and get no option, which is the fail-closed direction. **No client change was needed**: the group
+screen's option renderer already reads that route.
+
+### Matrix 15 — and the same model-only-layer class, for the third time
+
+"Start concise, then go materially deeper when they ask for depth or evidence" lived only in
+`ai/composer.js`'s system prompt. With models off a coach asking three escalating questions received
+**the same 186 characters three times**. Measured.
+
+**The trigger is repetition, not vocabulary.** The call site carries a standing decision that matching
+English question cues there "would rebuild the allowlist problem one layer down" — and it would work
+in English only. Asking again while standing in the same object *is* the signal that the short answer
+was not enough, in any language. Depth is chosen by whether the concise read has already been said in
+this conversation, from the same per-person store, with no new state.
+
+Two more defects on the same path: a third ask used to fall back to the **concise** answer, repeating
+across a gap the repeat guard cannot see (it only compares the immediately previous message), so the
+person received *less* than a moment earlier. And the guard read `!!qa && !actionReading.unavailable`
+with the unavailable arm first — with models off that is always true, so every repeated answer was
+reported as a change request the product could not interpret.
+
+### The rule this round adds to the false-green list
+
+**A mutation that does not run proves nothing, and neither does one that does not mutate.** Three
+mutations "survived" this round and every one was a harness fault or a real finding:
+
+- the leak mutation injected an empty string, so the privacy assertion was never tested;
+- two left `server.js` unparseable and the suite never started — the mutation harness now runs
+  `node --check` and refuses to report a result otherwise;
+- `if (depth && !added) return null` was a genuine equivalent mutant.
+
+### Three dead safeguards removed, on the same principle
+
+`c.id !== viewerId` in `_peopleWithStandingFor` (`_contactsFor` already excludes the asker), `if
+(depth && !added) return null` (both paths reach the same exhausted answer), and a `!(opts.object)`
+guard on the pronoun branch (those words are claimed earlier by the reasoning register anyway, so the
+alternative was dead code). **A line that reads as a safeguard while changing nothing is worse than
+its absence, because the next reader will believe it is load-bearing.** In each case the law itself is
+still asserted, against the composed behaviour.
+
+### Proof
+
+- `exhausted-help-http-smoke` 18, `exhausted-help-browser-check` 16, `answer-depth-http-smoke` 32 —
+  all new, all registered (the browser gate is run by name, as its ten siblings are).
+- **Eighteen mutations**, each required red then restored, across the three seams.
+- `npm test` — full Truth Layer green after every round.
+- **All eleven browser gates green on real Chromium**: chart-shape 42, exhausted-help 16, forum-share
+  21, group-loop 55, library 33, onboard 34, pilot-coach 133, priority-surface 39, settings-tiers 45,
+  stack 114, voice-output 19.
+
+### Exact next seam
+
+1. **"Go deeper." bound to an object** is classified as a statement rather than a question, so it is
+   offered as a note to capture instead of being answered. Reproduced. Upstream of the branch fixed
+   here, in `capture.classify`; honest rather than wrong, so recorded rather than forced.
+2. **Matrix 8 and 9** — cited external knowledge supplying an option with provenance, and a mixed
+   internal + precedent + external set. There is still no producer for the external-knowledge source
+   class, and it has been deliberately not fabricated across three rounds. **This is a founder-facing
+   gap, not an oversight**: it needs a decision about where external knowledge comes from.
+3. **Matrix 10 and 11** — rejecting an option writes nothing; choosing one reaches a governed
+   confirmation and a Focus. The option sets are rendered as reading, and the governed door is the
+   existing "Work on this as a group" control, so this is likely provable without new production code.
+4. **Consolidation candidate (carried, third round):** the two spellings of the focus→source
+   relationship, `addresses` vs `origin.inquiryId`.
+
+### External gates unchanged
+
+Live Render, live Neon, real provider quality, real iPhone/Safari, real invite delivery.
