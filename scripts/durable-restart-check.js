@@ -23,7 +23,21 @@
    simulated result wearing the word "live".
 
    Usage:
-     DATABASE_URL=postgres://postgres@127.0.0.1:5432/intelliq node scripts/durable-restart-check.js */
+     DATABASE_URL=postgres://postgres@127.0.0.1:5432/intelliq node scripts/durable-restart-check.js
+
+   AGAINST A LOCAL POSTGRES, ADD `PG_SSL_DISABLE=1`. Without it `db.js` asks for SSL, a local
+   server answers "the server does not support SSL connections", and the first boot never comes up —
+   so the line above, run exactly as written, fails on every machine that does not have a managed
+   database. That is very likely why this check sat unrun for so long while the handoff recorded the
+   whole persistence layer as verified by nothing. `scripts/local-postgres.sh` provisions one and
+   prints the full command.
+
+     PG_SSL_DISABLE=1 DATABASE_URL=postgres://postgres@127.0.0.1:55432/intelliq \
+       node scripts/durable-restart-check.js
+
+   `PG_SSL_DISABLE` is a local-development switch and nothing else: it is read only here and in
+   `db.js`, it is never set in any deployment path, and a managed database still gets SSL because
+   the flag is absent there. */
 
 'use strict';
 
