@@ -186,3 +186,35 @@ Important points for Claude:
 - reuse existing conversation, object, Forum, audience and Focus owners. Do not implement a second store or alternate permission path.
 
 If closing the Methodical Assistant requires touching UI, make it fit this direction. Do not spend closure time implementing unrelated post-pilot imagery or ontology work.
+
+
+## UX judgment standard
+
+Do **not** treat the founder-approved mockups or the assistant's UI proposals as pixel-perfect implementation orders.
+
+The ratified direction is binding at the level of product intent:
+- simple before dense;
+- minimal but insightful;
+- consistent High/Low/Inquiry/Focus page grammar;
+- top-left hamburger navigation;
+- uniform navigation icon treatment;
+- Forum as the collaboration surface;
+- Ask IntelliQ available inside governed Forums;
+- clear private-vs-Forum distinction;
+- multiple-conversation navigation;
+- per-message anonymous/named Forum authorship;
+- consistent Play/Pause audio controls;
+- light default theme with navy/dark alternative;
+- no generated imagery for the pilot.
+
+Within those constraints, **apply senior product/UX judgment**. Inspect the real current UI, test the actual flows, and improve the proposal where the mockup is cluttered, redundant, inaccessible, misleading, technically awkward, or inconsistent with existing product law.
+
+Do not merely say "yes" and copy a mockup. For each material UI change, ask:
+1. Does this make the common task easier?
+2. Does it preserve privacy/authority semantics?
+3. Does it reduce cognitive load?
+4. Is the same interaction used consistently elsewhere?
+5. Does it work at phone width without hiding important state?
+6. Is there a simpler implementation that preserves the same intent?
+
+If a mockup idea is inferior to a simpler production solution, implement the better solution and document the reason. Do not change founder-ratified semantics without calling out the conflict explicitly.
