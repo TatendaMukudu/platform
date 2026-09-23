@@ -160,6 +160,83 @@ _rebuildEmailIndex();
       !/Test whether the legs go in the last twenty/i.test(coachText)
       && /Learn more before acting/i.test(coachText));
 
+    console.log('\n  F — READING AN OPTION IS NOT CHOOSING ONE (matrix 10 and 11)');
+    /* THE TWO HALVES THE MATRIX ASKS FOR, on the screen where options actually appear. Options are
+       rendered as reading rather than as buttons, so "rejecting" one is not a control to press —
+       the proof that matters is that reading a set and then backing out of the governed door
+       leaves the record exactly as it was, and that the door never arrives pre-filled with an
+       option the person did not write. A textarea carrying a suggestion is a choice made FOR them
+       wearing the clothes of a choice they made. */
+    const groupState = () => c.page.evaluate(async () => {
+      const t = JSON.parse(localStorage.getItem('iq_auth')).token;
+      const r = await fetch('/api/group/n/state', { headers: { Authorization: 'Bearer ' + t } });
+      const j = await r.json().catch(() => null);
+      /* COUNT DISTINCT FOCUS IDS. The response carries `focus` (the active one) and `history`
+         (those that have run); `focuses` is an INPUT to buildTeamState and is not on the wire at
+         all. Reading a key that is never sent returns 0 every time, which would have made every
+         "the record is unchanged" assertion below compare 0 to 0 and prove nothing. */
+      const ids = new Set();
+      if ((j || {}).focus && j.focus.focusId) ids.add(j.focus.focusId);
+      for (const f of ((j || {}).history || [])) if (f && f.focusId) ids.add(f.focusId);
+      return ids.size;
+    });
+    const before = await groupState();
+    ok('EHB-F1 the leader is offered the one governed door beside the options',
+      await c.page.locator('button[onclick*="startGroupFocus"]').count() >= 1);
+    await c.page.locator('button[onclick*="startGroupFocus"]').first().click();
+    await c.page.waitForTimeout(500);
+    ok('EHB-F2 …and it opens asking for their own words, with nothing chosen for them',
+      await c.page.locator('.iqg-start textarea').count() === 1
+      && (await c.page.locator('.iqg-start textarea').inputValue()) === '');
+    ok('EHB-F3 …with no option pre-selected anywhere in the panel',
+      !/Ask Dana Coach|Learn more before acting/i.test(
+        await c.page.locator('.iqg-start').innerText()));
+    /* MATRIX 10 — BACKING OUT WRITES NOTHING. */
+    await c.page.locator('.iqg-start button:has-text("Not now")').click();
+    await c.page.waitForTimeout(500);
+    ok('EHB-F4 backing out closes it', await c.page.locator('.iqg-start').count() === 0);
+    ok('EHB-F5 …and the record is exactly as it was — reading options wrote nothing',
+      (await groupState()) === before);
+    /* MATRIX 11 — AND CHOOSING GOES THROUGH THE GOVERNED DOOR, IN THEIR OWN WORDS. */
+    await c.page.locator('button[onclick*="startGroupFocus"]').first().click();
+    await c.page.waitForTimeout(400);
+    await c.page.locator('.iqg-start textarea').fill('');
+    await c.page.locator('.iqg-start button:has-text("Set this focus")').click();
+    await c.page.waitForTimeout(600);
+    ok('EHB-F6 an empty commitment is refused rather than saved as a blank focus',
+      (await groupState()) === before && await c.page.locator('.iqg-start').count() === 1);
+    /* AND THE SERVER OWNS THAT, not the panel. Deleting the client-side empty check changes
+       nothing a person can see, because the route refuses it anyway — which is the right shape
+       (hiding a control is a courtesy) but means the assertion above cannot tell the two apart.
+       This forges the call the bypassed panel would have made. */
+    const forgedEmpty = await c.page.evaluate(async () => {
+      const t = JSON.parse(localStorage.getItem('iq_auth')).token;
+      const r = await fetch('/api/group/n/focus', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '   ', fromInquiryId: 'q1' }) });
+      return r.status;
+    });
+    ok('EHB-F6b …and the server refuses it too, so the panel check is a courtesy and not the gate',
+      forgedEmpty === 400 && (await groupState()) === before);
+    /* AND A FOCUS CANNOT CLAIM IT CAME OUT OF AN INQUIRY THAT IS NOT THIS GROUP'S. */
+    const forgedOrigin = await c.page.evaluate(async () => {
+      const t = JSON.parse(localStorage.getItem('iq_auth')).token;
+      const r = await fetch('/api/group/n/focus', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Something real', fromInquiryId: 'not_ours' }) });
+      return r.status;
+    });
+    ok('EHB-F6c …nor claim an origin inquiry that does not belong to this group',
+      forgedOrigin === 404 && (await groupState()) === before);
+    await c.page.locator('.iqg-start textarea').fill('Rotate the press in the last twenty');
+    await c.page.locator('.iqg-start button:has-text("Set this focus")').click();
+    await c.page.waitForTimeout(1200);
+    ok('EHB-F7 …and their own words, deliberately confirmed, do reach the record',
+      (await groupState()) === before + 1);
+    ok('EHB-F8 …and the screen comes back showing what the group is now working on',
+      /Rotate the press in the last twenty/i.test(
+        await c.page.evaluate(() => (document.querySelector('.iq-group-thread') || {}).innerText || '')));
+
     console.log('\n  E — NOTHING WAS SENT BY ANY OF THAT');
     const inbox = await c.page.evaluate(async () => {
       const t = JSON.parse(localStorage.getItem('iq_auth')).token;
