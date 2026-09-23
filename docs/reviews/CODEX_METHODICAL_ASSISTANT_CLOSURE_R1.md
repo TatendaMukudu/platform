@@ -1124,3 +1124,71 @@ Separate non-product reds:
 This CI run also proves the majority of the system remained green across voice, relationship refs, anonymity, classification scope, dummy pilot, group/objective/Focus owners, curiosity, object conversation screen, notices, pilot rehearsal, roster, Focus reach, web sources, Forum reach, escalation, provider boundary, auth/tenant authority, UI states, chart governance, material reach, shelf HTTP, priority surfaces, onboarding, persistence, Focus continuity, evidence polarity, H/L, org purge, Composer actions, Focus ownership parity, output manifest/channels, cross-evidence, attachment retry, Forum audience, and endpoint smoke.
 
 Interpretation: the current red is concentrated, not evidence that the whole platform is broken. Fix the stale Inquiry acceptance contract at its seams; do not redesign the architecture.
+
+---
+
+## 7. Claude closure round — 2026-09-23
+
+**Branch head at start:** `62413af` · **Head at end:** `260c4ed` · **Nothing merged or deployed.**
+
+Four commits, each reversible on its own:
+
+| SHA | What changed in production |
+|---|---|
+| `db65514` | `IQVoice.stop` releases the microphone lease and aborts the recogniser when `stop()` throws |
+| `5d58ff6` | `POST /api/evidence/import` allowlists deliverable formats; an unverifiable pdf/docx extraction claim is refused |
+| `843fd27` | `_inquiryOptions` — a small justified option set at `worth_testing`, plus its render |
+| `260c4ed` | One owner for Chromium resolution; ten browser gates actually run; two stale assertions corrected |
+
+### HIGH 1-3 re-verified by mutation, not by reading
+
+The three blockers fixed before this round were reproduced and mutation-proven rather than taken on trust:
+
+- **HIGH 1** — reverting `/api/auth/me` to direct `verifyToken` turns `session-authority-http-smoke` red (4 failures: inactive, suspended, future-status, deleted).
+- **HIGH 2** — reverting `_forumAccess` to remembered node membership turns `forum-audience-smoke` red (FA-C6c/d/e); removing the live gate from PATCH alone turns FA-C6g/h red.
+- **HIGH 3** — removing `interruptActive` turns `voice-input-smoke` red (V20a-d).
+
+**HIGH 3 was incomplete.** Mutating the second half of `isLive` survived, which exposed that `IQVoice.stop`'s catch path cleared the target's session while leaving both the app-wide lease and the recogniser itself alive. Two reachable consequences from one ordinary tap: `cancelAll` (sign-out, every navigation) iterated the session registry, found nothing and released nothing; and the next Composer told a control that had already stopped that listening "moved to another composer". The first attempted fix released the lease without aborting — V20j caught that, proving two started unaborted recognizers. Fixed at the owner; V20g-V20k added; mutations of each half die separately.
+
+**HIGH 4 was already closed on the browser side by this branch**, and closed better than the approach I had started: the Knowledge door now offers only what `AttachmentHandler` can itself turn into text, with Office files going to the conversation/material server reader. The **owner** was still permissive — driven straight at the route with the browser bypassed, `{format:'pdf', content:'PDF document attached: scouting.pdf'}` returned `200 {imported:1}`. A door being honest is not the same as the owner being safe.
+
+### Methodical Assistant — the named option-set gap is closed
+
+`decision-intelligence-http-smoke` asserted the **absence** of option sets. That posture was right about the dangerous half and it is preserved exactly: nothing is ranked, scored or auto-selected. What it was wrong about is offering.
+
+Nothing generated. Every option names something the record already holds, gated by the kernel's own answer to question 8 (`readiness.state === 'worth_testing'`): the supported explanation with its evidence refs, a prior attempt about *this* question recorded as having helped, and `learn_more` — always present, so declining is a visible choice. Below that state, options are `null` and the existing readiness/`wouldHelp` remain the honest answer.
+
+A tactic recorded `no_change`/`worse` becomes a **caution**, never an option; when everything tried has failed the tactic is dropped and the payload says another variation is not the useful next move.
+
+Rendered as reading rather than buttons — the row's one governed door into a Focus is unchanged, so no second path to a canonical write. 75 assertions; nine mutations red (five owner, four render).
+
+### The browser gates were not running, and that is why two assertions were stale
+
+The previous section of this handoff recorded local Chromium as unavailable. **It was not.** playwright-core resolves chromium-1228; the image ships chromium-1194; a launch on a missing executable hangs rather than failing, so the gates emitted nothing and the absence was written down as an environment limitation.
+
+All ten pass here against the real binary: pilot-coach 133, group-loop 55, forum-share 13, settings-tiers 45, chart-shape 42, library 33, onboard 34, priority-surface 39, stack 114, voice-output 19.
+
+Resolution now has one owner (`scripts/lib/chromium-path.js`, 14 registered assertions). Six other checks had the mirror bug — hard-coded chromium-1194, correct today and wrong at the next image update.
+
+Two stale assertions surfaced the moment the gates ran, both correct product changes no test could contradict while nothing executed:
+
+- `CS-R1b` demanded an emptied chart say something; the Sep-16 pilot pass deliberately reversed that (a refusal earns a sentence, nothing-to-draw earns silence). Corrected, and `CS-R2c/d` added to prove a real refusal still reaches the screen in the server's own words — the half that was missing.
+- `library B7d` demanded `.docx/.pptx` disappear unless JSZip loaded, which after the server-side Office decision required the formats to vanish exactly when the change was designed to keep them working. Corrected, with PDF as the control.
+
+### Proof run this round
+
+- `npm test` — green, every registered suite, twice (after the option work and after the browser-gate work).
+- Ten browser gates — green, real Chromium, listed above.
+- Mutations — 9 on the option set, 5 on voice, 1 on the import owner, 2 on HIGH 1/2, 4 on the render. Every one red, then restored.
+
+### Still external, not claimed
+
+Live Render; live Neon durability/restart; real provider quality and recovery; actual iPhone/Safari microphone, picker, layout and session behaviour; real invite/email delivery. Chromium in CI is **no longer** in this list.
+
+### Exact next seam
+
+The acceptance matrix items that still have no registered production-path proof, in the order I would take them:
+
+1. **Option sets from organisational precedent and external knowledge across objects.** `_inquiryOptions` covers the group-inquiry read. The equivalent for a personal object, and the external-knowledge source class, have no producer yet — I deliberately did not fabricate one, so `sourceClass` makes room for it without inventing a citation.
+2. **Attachment conversation depth** (matrix 16-18): summarise/compare/question/extract/challenge from the same material producing appropriately different governed answers, and prompt-injection through attachment content.
+3. **P1 conversation navigation** in `PRIORITY_RND.md` — multiple private chats per object; the object thread still opens only the most recently updated matching conversation.
