@@ -751,3 +751,28 @@ Questions to settle:
 - How does a temporary cohort avoid becoming a shadow org tree?
 
 The governing law remains: **readership is not subjecthood, relevance is not authorization, and selected people are not collective evidence merely because they were selected.**
+
+
+---
+
+## R&D addition — generated contextual imagery
+
+**Status: DEFERRED / POST-PILOT R&D.**
+
+Do not generate contextual imagery for Highs, Lows, Inquiries, Focuses, Home priority cards, Forum objects or conversation surfaces during the pilot.
+
+Reason: generated imagery adds avoidable inference/serving cost without improving the core pilot thesis enough to justify that budget. The product should remain text-first, simple, insightful and fast.
+
+Revisit only after the pilot and once there is enough budget to justify experimentation.
+
+Future R&D questions:
+- when an image materially improves recognition, comprehension or motivation rather than decorating the interface;
+- whether approved organization-owned media should be preferred over generated imagery;
+- explicit permission/provenance rules for organization media;
+- whether generated imagery should be clearly treated as illustrative rather than evidence;
+- caching/reuse policy so the same object does not repeatedly regenerate visuals;
+- cost ceilings and generation triggers;
+- accessibility and text-only fallbacks;
+- interaction with light and navy/dark IntelliQ themes.
+
+**Pilot law:** no automatic contextual image generation. Preserve the current product budget for conversation, reasoning, evidence, persistence and pilot reliability.
