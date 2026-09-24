@@ -171,7 +171,20 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
    The count going up is the honest record of a new boundary existing, not of scope being
    loosened: before this route there was no way for anybody, at any level, to put an explanation
    on a group inquiry. */
-ok('W4 inventory names every current scope reference', inventory.length === 76 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 76 -> 77, September 2026. ONE call site, on GET /api/contacts, which answers "who can I
+   address" and now answers "and which groups" alongside it.
+
+   It is `_inNode`, asked of the person about their own membership, and it NARROWS: the route
+   lists only groups this person belongs to, and only those that resolve to somebody they can
+   already address. Nothing is granted on the strength of it — the audience resolver asks the same
+   question again at write time, against membership as it stands then, so this is a display of
+   what that resolver would accept rather than a second opinion about it.
+
+   The count going up is the honest record of a capability gaining a DOOR rather than of scope
+   loosening. `_resolvePersonalAudience` has accepted a `groupId` since it was written and no
+   control could ask for one (live iPhone findings R1 #33), which is the vertical slice law: a
+   capability reachable from no control is a capability nobody has. */
+ok('W4 inventory names every current scope reference', inventory.length === 77 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

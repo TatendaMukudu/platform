@@ -3728,9 +3728,40 @@ function _contactsFor(code, userId) {
 }
 
 /* GET /api/contacts — the people you can address. Names and roles only, by construction. */
+/* ── WHO YOU CAN ADDRESS, AND THAT INCLUDES A GROUP YOU ARE IN ────────────────────────────────
+   LIVE iPHONE, findings R1 #33: "support existing selected-person audiences and eligible org-group
+   audiences through the canonical audience owner only."
+
+   The org-group audience already worked. `_resolvePersonalAudience` has taken a `groupId` since it
+   was written — it checks `_inNode`, expands the node's roster, and filters it through the same
+   contact set every named-person share goes through — and the audience route spreads the body into
+   it, so all four kinds already accept one. What did not exist was any way for a person to SAY so:
+   the sheet offered private, whoever-leads-a-group, and people-I-choose. A third audience the
+   canonical owner supports and no control reaches is the vertical slice law again.
+
+   THE GROUPS RIDE ON THE CONTACTS ROUTE rather than getting one of their own, because this is the
+   same question — who can I address — and a second endpoint is a second answer waiting to disagree.
+
+   AND ONLY GROUPS THAT RESOLVE TO SOMEBODY. The resolver filters a roster through the contact set
+   and, if nothing survives, an audience of nobody is indistinguishable from private — so offering
+   such a group would be a control that silently does the opposite of what it says. The count that
+   would actually result is computed here and travels with the name, so the sheet can say who this
+   would reach rather than implying a roster it has not checked. */
 app.get('/api/contacts', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  res.json({ ok: true, contacts: _contactsFor(code, userId) });
+  const contacts = _contactsFor(code, userId);
+  const reachable = new Set(contacts.map(c => String(c.id)));
+  const groups = Object.values(orgNodes[code] || {})
+    .filter(n => n && _inNode(code, n.nodeId || n.id, userId))
+    .map(n => {
+      const id = String(n.nodeId || n.id);
+      const people = (n.memberIds || []).map(String)
+        .filter(m => m !== String(userId) && reachable.has(m));
+      return { id, name: String(n.name || 'your group'), people: people.length };
+    })
+    .filter(g => g.people > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ ok: true, contacts, groups });
 });
 
 
@@ -9329,7 +9360,20 @@ function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = fals
   if (groupId) {
     const node = (orgNodes[code] || {})[groupId];
     if (!node || !_inNode(code, groupId, userId)) return { ok: false, status: 403, error: 'audience unavailable' };
-    requested = (node.memberIds || []).map(String).filter(id => id !== String(userId));
+    /* ── A ROSTER IS NOT A CLAIM, AND A STALE ENTRY IS NOT A REFUSAL ────────────────────────
+       NAMING A PERSON is the sharer's own claim that they can reach somebody, so naming one they
+       cannot is refused outright under `strict` — silently dropping it would let them believe
+       they had told somebody they had not. That rule is untouched below.
+
+       NAMING A GROUP is a reference to a list the ORGANISATION maintains, and `memberIds` keeps
+       people who have since been removed. Refusing the whole share because the org's own roster
+       has not been tidied tells the person nothing they can act on and takes away an audience the
+       product supports; the honest answer is that the audience is everybody in that group who can
+       actually be reached. So the expansion filters here, which leaves `rejected` empty by
+       construction — the reachability rule still decides, it simply decides quietly for a list
+       nobody personally asserted. */
+    requested = (node.memberIds || []).map(String)
+      .filter(id => id !== String(userId) && contacts.has(id));
   }
   const participantIds = [...new Set(requested.filter(id => id !== String(userId) && contacts.has(id)))].sort();
   const rejected = requested.filter(id => id !== String(userId) && !contacts.has(id));

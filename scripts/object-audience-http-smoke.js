@@ -62,9 +62,28 @@ _loadAllStores({
     /* SOMEBODY IN THE SAME ORGANISATION BUT NOT REACHABLE FROM `mem`. Without them, "only people
        you could actually address" is a rule no assertion can distinguish from "anybody". */
     out:  { id: 'out',  name: 'Out',  email: 'o@a.io', role: 'member', orgCode: O, status: 'active' },
+    /* STILL ON THE SQUAD'S ROSTER AND NO LONGER HERE. A group's `memberIds` is a list somebody
+       maintains; `_contactsFor` is who you can actually address, and it drops a person who has
+       been removed. Without this fixture those two sets are identical for every group in the org,
+       so the reachability filter on a group roster is structurally untestable — and a mutation
+       that removed that filter survived exactly that way. */
+    gone: { id: 'gone', name: 'Gone', email: 'g@a.io', role: 'member', orgCode: O,
+      status: 'removed', assignedNodeIds: ['squad'] },
   } },
-  orgNodes: { [O]: { squad: { nodeId: 'squad', name: 'Squad', parentId: null, childNodeIds: [],
-    memberIds: ['mem', 'pal'], leaderIds: ['lead'], rev: 1 } } },
+  orgNodes: { [O]: {
+    squad: { nodeId: 'squad', name: 'Squad', parentId: null, childNodeIds: [],
+      memberIds: ['mem', 'pal', 'gone'], leaderIds: ['lead'], rev: 1 },
+    /* A GROUP `mem` IS IN THAT REACHES NOBODY — they are the only member. Without it, "only
+       groups that reach somebody are offered" is satisfied for free by the membership filter,
+       and a mutation that removed the reachability filter survived exactly that way. */
+    solo:  { nodeId: 'solo', name: 'Solo', parentId: null, childNodeIds: [],
+      memberIds: ['mem'], leaderIds: [], rev: 1 },
+    /* AND A GROUP `mem` IS NOT IN. Naming it must be refused BY THE RESOLVER, and the only way to
+       see that is to have the owner of the object name it — a stranger naming it is refused far
+       earlier, by the object read, which is a different rule passing for a different reason. */
+    other: { nodeId: 'other', name: 'Other', parentId: null, childNodeIds: [],
+      memberIds: ['pal'], leaderIds: [], rev: 1 },
+  } },
 });
 _rebuildEmailIndex();
 
@@ -248,6 +267,72 @@ const server = app.listen(0, async () => {
         orgUsers[O].mem.status = 'active';
         return !!seen && gone;
       })());
+
+
+    console.log('\n  L — AND A GROUP YOU ARE IN IS AN AUDIENCE, THROUGH THE SAME OWNER');
+    /* LIVE iPHONE, findings R1 #33: "support existing selected-person audiences and eligible
+       org-group audiences through the canonical audience owner only."
+
+       THE CAPABILITY WAS ALREADY THERE AND HAD NO DOOR. `_resolvePersonalAudience` has taken a
+       `groupId` since it was written — it checks membership, expands the roster, and filters it
+       through the same contact set every named-person share goes through — and the audience route
+       spreads the body into it, so all four kinds already accepted one. The sheet offered private,
+       whoever-leads-a-group and people-I-choose, and nothing else, so nobody could ask for it. */
+    const asGroup = await aim('high', hid, { groupId: 'squad' }, tM);
+    ok('OA-L1 a whole group can be named as the audience for a High',
+      asGroup.status === 200 && (asGroup.j || {}).visibility === 'invited');
+    ok('OA-L2 …and it resolves to the group\'s people, not to the group as a thing',
+      ((asGroup.j || {}).participants || []).includes('pal'));
+    ok('OA-L3 …so everybody in it can read it', (await ids(tP, 'high')).includes(hid));
+    /* THE ROSTER IS FILTERED BY THE SAME REACHABILITY RULE, not accepted because a group named
+       somebody. `out` is in the organisation and in no group with `mem`, and naming them directly
+       is refused a few sections above; arriving through a group must not be a way round that. */
+    ok('OA-L4 …while somebody the group does not contain still cannot',
+      !(await ids(tO, 'high')).includes(hid));
+    ok('OA-L5 …and the owner is not listed as their own audience',
+      !((asGroup.j || {}).participants || []).includes('mem'));
+    /* A ROSTER IS NOT AN AUDIENCE. `squad` still lists somebody who has left, and the audience is
+       who can actually be addressed — the same filter a named-person share goes through, applied
+       to a roster nobody re-checked. */
+    ok('OA-L5b …and a person still on the roster who is no longer here is not in the audience',
+      !((asGroup.j || {}).participants || []).includes('gone'));
+    /* A GROUP SOMEBODY IS NOT IN IS NOT THEIRS TO ADDRESS. The resolver asks `_inNode`; this is
+       the assertion that the route did not quietly stop asking. */
+    const foreign = await aim('high', hid, { groupId: 'other' }, tM);
+    ok('OA-L6 a group the OWNER is not in is refused by the resolver, not by the object read',
+      foreign.status === 403);
+    ok('OA-L6b …and the audience that was already set is left exactly as it was',
+      (await ids(tP, 'high')).includes(hid) && !(await ids(tO, 'high')).includes(hid));
+
+    console.log('\n  M — AND THE CONTACTS ROUTE OFFERS THE GROUPS THAT REACH SOMEBODY');
+    /* THE DOOR. Everything in L is unreachable from the product unless a person can see which
+       groups they may choose — and it is answered by the server, on the same route that answers
+       who they can address, because a roster assembled in a browser is a second answer to a
+       question the resolver owns. */
+    const cM = await call('GET', '/api/contacts', undefined, tM);
+    ok('OA-M1 the contacts route names the groups this person can address',
+      cM.status === 200 && ((cM.j || {}).groups || []).some(g => g.id === 'squad'));
+    ok('OA-M2 …with how many people it would actually reach, rather than a roster size',
+      (((cM.j || {}).groups || []).find(g => g.id === 'squad') || {}).people === 1);
+    /* AND ONLY GROUPS THAT REACH SOMEBODY. A group whose roster resolves to nobody would save as
+       private, so offering it would be a control that quietly does the opposite of what it says.
+       `out` is in no group at all, which is the cleanest form of that case. */
+    /* THE CASE THAT MATTERS, and the one a mutation survived before this fixture existed: `mem`
+       IS in `solo`, so the membership filter admits it, and it reaches nobody. Choosing it would
+       resolve to an empty audience and save as private — a control doing the opposite of what it
+       says. It must not be offered. */
+    ok('OA-M3 …and a group they are in that reaches nobody is not among them',
+      !((cM.j || {}).groups || []).some(g => g.id === 'solo'));
+    const cO = await call('GET', '/api/contacts', undefined, tO);
+    ok('OA-M3b …nor is anything offered to somebody in no group with anybody',
+      cO.status === 200 && (((cO.j || {}).groups) || []).length === 0);
+    /* AND THE SHEET ACTUALLY USES IT. */
+    const _ui = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
+    ok('OA-M4 the audience sheet offers the group mode, hidden until the server says there is one',
+      /data-mode="group" hidden id="\$\{id\}-groupchip"/.test(_ui)
+      && /Array\.isArray\(j\.groups\) && j\.groups\.length\) chip\.hidden = false/.test(_ui));
+    ok('OA-M5 …and sends the group by id, so the roster is expanded by the resolver at write time',
+      /mode === 'group' \? \{ groupId: pickedGroup\.gid, share: false \}/.test(_ui));
 
   } catch (e) { fail++; console.error('  FAIL object-audience suite threw:', e && e.stack); }
 

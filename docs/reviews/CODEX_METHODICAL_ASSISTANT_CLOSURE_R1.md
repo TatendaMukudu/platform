@@ -2020,3 +2020,50 @@ from a sentence about conceding to "this did not help" is still dropped and stil
 control accepting any word rather than the vocabulary (D1 and D3, the two grains collapsing); the
 note dropped at grounding (3 red); the canonical writer no longer storing it (C1, C2); and the
 control removed from the Focus screen (F1).
+
+### A group you are in is an audience — findings #35 and #33
+
+**#35 is ratified and was already built.** "Who can see this" exists on all four kinds, goes through
+one canonical owner, and `object-audience-http-smoke` already drove it end to end — including the
+parts that matter most: a share is one-way (the person you shared with cannot pass it on), narrowing
+revokes Forum readership on the very next request, naming somebody out of reach is refused outright
+rather than silently dropped, and a departed owner takes their shares with them.
+
+**#33 was the half with no door.** `_resolvePersonalAudience` has taken a `groupId` since it was
+written — it checks membership, expands the roster, and filters it through the same contact set every
+named-person share goes through — and the audience route already spreads the body into it, so all
+four kinds accepted one. The sheet offered private, whoever-leads-a-group and people-I-choose, and
+nothing else. A third audience the canonical owner supports and no control can ask for is the
+vertical slice law again.
+
+The groups ride on `GET /api/contacts` rather than getting a route of their own, because it is the
+same question — who can I address — and a second endpoint is a second answer waiting to disagree.
+Only groups that resolve to somebody are offered: a group whose roster reaches nobody would save as
+private, so the chip would be a control that quietly does the opposite of what it says. And the sheet
+sends the **group id**, never the roster it happens to hold, so membership is expanded by the
+resolver at write time.
+
+**One judgment call, documented at the line.** Naming a *person* is the sharer's own claim that they
+can reach somebody, so naming one they cannot is refused outright — silently dropping it would let
+them believe they had told somebody they had not. Naming a *group* is a reference to a list the
+organisation maintains, and `memberIds` keeps people who have since been removed. Refusing the whole
+share because the org's roster has not been tidied tells the person nothing they can act on and takes
+away an audience the product supports, so the group expansion filters to reachable people and the
+strict check sees nothing rejected. The reachability rule still decides; it decides quietly for a
+list nobody personally asserted.
+
+**Two mutations survived first, and both were the fixture's fault rather than the code's** — recorded
+because that is exactly the false-green shape this repository keeps finding. "Groups that reach
+nobody are offered anyway" survived because the only person in the fixture with no reachable group
+was in no group at all, so the membership filter covered for the missing reachability filter; a
+`solo` node containing only the owner now separates them. "The resolver stops checking membership"
+survived because the stranger naming a foreign group was already refused by the object read, one rule
+passing for another's reason; the owner now names a group they are not in, which reaches the resolver.
+A third — "the group roster skips the reachability filter" — was structurally untestable, because
+every member of a group is by construction a contact; a person still on the roster and **removed**
+from the organisation makes the two sets differ, and that is a real law worth having: a roster is not
+an audience.
+
+`object-audience-http-smoke` 57. `scope-parity-smoke` counts scope references deliberately and went
+76 → 77; the new one is `_inNode` on the contacts route, asked of a person about their own
+membership, and it narrows — recorded with its reason as that gate requires.

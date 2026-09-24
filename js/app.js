@@ -12342,8 +12342,21 @@ const MemberApp = {
             onclick="MemberApp._audMode('${id}','node_leaders',this)">Whoever leads a group I am in</button>
           <button type="button" class="iq-make-chip" data-mode="named_people"
             onclick="MemberApp._audMode('${id}','named_people',this)">People I choose</button>
+          ${/* AND A GROUP YOU ARE IN — findings R1 #33. The canonical resolver has taken a
+                `groupId` since it was written: it checks membership, expands the roster and
+                filters it through the same contact set a named-person share goes through, and the
+                audience route hands it the body. There was simply no control that said so, which
+                is the vertical slice law on an audience the product already supports.
+
+                It is offered only when there IS one that reaches somebody — the server answers
+                that, on the same route that answers who you can address, because a group whose
+                roster resolves to nobody would save as private and the chip would be a control
+                that quietly does the opposite of what it says. */''}
+          <button type="button" class="iq-make-chip" data-mode="group" hidden id="${id}-groupchip"
+            onclick="MemberApp._audMode('${id}','group',this)">A group I am in</button>
         </div>
         <div class="iq-focus-people" id="${id}-people" hidden></div>
+        <div class="iq-focus-people" id="${id}-groups" hidden></div>
         <div class="iq-focus-who" id="${id}-who" role="status" aria-live="polite">Only you can see this.</div>
         <div class="iq-proposal-actions">
           <button type="button" class="btn-primary btn-sm"
@@ -12353,6 +12366,15 @@ const MemberApp = {
         </div>
       </div>`);
     this._audMode(id, 'self', document.querySelector(`#${id} [data-mode="self"]`));
+    /* THE GROUP CHIP APPEARS ONLY IF THERE IS ONE. Asked of the server, which owns the answer, and
+       asked once per sheet rather than every time the mode changes. A chip that opens onto "you
+       are not in a group with anybody yet" is a control offering a capability this person does not
+       have — the mirror of the defect this whole round keeps finding, and just as misleading. */
+    try {
+      const j = await fetch('/api/contacts', { headers: this._authHeaders() }).then(r => r.json());
+      const chip = document.getElementById(`${id}-groupchip`);
+      if (chip && j && Array.isArray(j.groups) && j.groups.length) chip.hidden = false;
+    } catch (_) { /* no chip, which is the safe direction */ }
   },
 
   _audMode(id, mode, btn) {
@@ -12363,16 +12385,56 @@ const MemberApp = {
     sheet.querySelectorAll('.iq-fp-aud .iq-make-chip').forEach(b => b.classList.remove('is-on'));
     if (btn) btn.classList.add('is-on');
     const people = document.getElementById(id + '-people');
+    const groups = document.getElementById(id + '-groups');
     const who = document.getElementById(id + '-who');
     if (people) {
       people.hidden = mode !== 'named_people';
       if (mode === 'named_people') this._loadContacts(id, people);
     }
+    if (groups) {
+      groups.hidden = mode !== 'group';
+      if (mode === 'group') this._loadAudienceGroups(id, groups);
+    }
     if (who) {
       who.textContent = mode === 'self' ? 'Only you can see this.'
         : mode === 'node_leaders' ? 'Whoever leads a group you are in will be able to see this. Your squad will not.'
+        : mode === 'group' ? 'Everybody in the group you choose will be able to see this.'
         : 'Only the people you choose will be able to see this.';
     }
+  },
+
+  /* THE GROUPS THE SERVER SAYS THIS PERSON CAN ADDRESS, from the same route that answers who they
+     can address — see GET /api/contacts. Nothing is computed here: a roster assembled in a browser
+     is a second answer to a question the audience resolver already owns, and the two would
+     eventually disagree about who a share reaches. The chip that opens this stays hidden until the
+     answer arrives, so a person is never offered a choice with nothing behind it. */
+  async _loadAudienceGroups(id, box) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div class="iq-focus-who">Loading…</div>`;
+    try {
+      const j = await fetch('/api/contacts', { headers: this._authHeaders() }).then(r => r.json());
+      const list = (j && j.groups) || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="iq-focus-who">You are not in a group with anybody yet.</div>`;
+        return;
+      }
+      box.innerHTML = list.map(g => `
+        <button type="button" class="iq-contact" data-gid="${esc(g.id)}"
+          onclick="MemberApp._pickAudienceGroup(this)">
+          <span class="iq-contact-name">${esc(g.name)}</span>
+          <span class="iq-contact-with">${esc(String(g.people))} ${g.people === 1 ? 'person' : 'people'}</span>
+        </button>`).join('');
+    } catch (_) {
+      box.innerHTML = `<div class="iq-focus-who">Could not load your groups just now.</div>`;
+    }
+  },
+
+  /* ONE GROUP, NOT SEVERAL. Two groups is two audiences, and the resolver answers for one roster;
+     letting somebody tick both would quietly union them into a set neither group's name describes. */
+  _pickAudienceGroup(btn) {
+    const box = btn.parentElement;
+    if (box) box.querySelectorAll('.iq-contact').forEach(b => b.classList.remove('is-on'));
+    btn.classList.add('is-on');
   },
 
   async _saveAudience(id, kind, objectId) {
@@ -12381,14 +12443,21 @@ const MemberApp = {
     const tell = m => { if (who) who.textContent = m; };
     const mode = (this._audModes || {})[id] || 'self';
     const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    const pickedGroup = (document.querySelector(`#${id}-groups .iq-contact.is-on`) || {}).dataset;
     if (mode === 'named_people' && !picked.length) { tell('Choose at least one person, or switch back to Only me.'); return; }
+    if (mode === 'group' && !(pickedGroup && pickedGroup.gid)) { tell('Choose a group, or switch back to Only me.'); return; }
     tell('Saving…');
     try {
       /* `share: true` is how this client has always asked for "whoever leads a group I am in" —
          see the focus sheet. Writing the visibility string here instead would be a second way to
          say the same thing, which is the exact shape library-door-smoke L3b exists to forbid: a
          quieter rule beside the governed audiences. The server's resolver owns the mapping. */
+      /* A GROUP IS SENT AS A GROUP, not as the roster this browser thinks it holds. The resolver
+         expands `groupId` itself, against the membership as it stands at the moment of the write —
+         so a person who joined or left since this sheet opened is included or excluded correctly,
+         and there is one definition of who a group is. */
       const body = mode === 'named_people' ? { participants: picked, share: false }
+        : mode === 'group' ? { groupId: pickedGroup.gid, share: false }
         : mode === 'node_leaders' ? { share: true, participants: [] }
         : { share: false, participants: [] };
       const r = await fetch(`/api/me/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/audience`,
