@@ -223,6 +223,24 @@ function buildContext({
   const ev = (Array.isArray(evidence) ? evidence : []).filter(e => e && e.text).slice(0, 10);
   L.push(ev.length ? 'THEIR OWN RECORDS AND NOTES (you may quote these):' : 'THEIR OWN RECORDS AND NOTES: none on this topic.');
   for (const e of ev) L.push(`  - ${_clip(e.text, 240)}${e.source ? ` [${_clip(e.source, 60)}]` : ''}`);
+  /* AND THE LINE THAT STOPS "none on this topic" BEING READ AS "they have told you nothing".
+
+     LIVE iPHONE FAILURE (findings R1 #2): the person typed a season's figures into the message and
+     was told the figures were not in anything IntelliQ had access to — then the same answer
+     reasoned from fifteen draws out of twenty-eight. The figures were in the conversation directly
+     above. What the block above says is true of the RECORD STORE and was being read as true of the
+     exchange.
+
+     This is not the implementation of the rule. The deterministic path carries it, and is asserted
+     — a law that lives only in a prompt reaches nobody with models off, which is the pilot's own
+     configuration. This is the model being brought into line with behaviour that is already proven
+     underneath it. */
+  L.push('WHAT THEY HAVE JUST TOLD YOU IN THIS CONVERSATION IS SOMETHING YOU HAVE. Figures, scores or');
+  L.push('facts typed into the exchange are USER-REPORTED: you may use and restate them, attributed');
+  L.push('to them ("you have reported…"), even when the records above say none. Never tell somebody');
+  L.push('you cannot see what they just wrote. They are NOT verified by having been typed, they are');
+  L.push('not evidence, and nothing is recorded from them — so do not present them as established,');
+  L.push('and do not reason past them into causes, timings or motives the figures cannot carry.');
   L.push('');
 
   const work = (Array.isArray(assignedWork) ? assignedWork : []).filter(w => w && w.title).slice(0, 10);

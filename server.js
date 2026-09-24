@@ -12679,6 +12679,43 @@ function _learningRead(code, userId, question) {
   } catch (_) { return null; }
 }
 
+/* WHAT THIS PERSON HAS REPORTED IN THIS CONVERSATION — and nothing more than that.
+
+   NOT EVIDENCE, AND THE DISTINCTION IS THE WHOLE POINT. Nothing here is written, indexed, or
+   allowed to move a standing; human speech becomes evidence only when its author deliberately
+   offers it through the governed path. What it IS, is something IntelliQ plainly has — so saying
+   "the figures are not in anything I have access to" while they sit in the thread is false about
+   the thread even while it is true about the evidence store.
+
+   BOUNDED TO WHAT CARRIES FACTS. Returning a person's last message for every unanswerable question
+   would be a parrot, not an answer. Only messages carrying reportable specifics — numbers, scores,
+   counts — qualify, because those are what the refusal was wrongly denying; a bare opinion is not
+   something to hand back as though it settled anything.
+
+   AND IT DOES NOT REASON FROM THEM. With models off the deterministic path can restate and
+   attribute; it cannot weigh. The live answer's worst moment was reasoning from fifteen draws out
+   of twenty-eight one sentence after refusing to use the number. */
+const _REPORTED_CAP = 3;
+function _reportedRead(said, q) {
+  const msgs = (Array.isArray(said) ? said : [])
+    .map(t => String(t || '').trim())
+    .filter(Boolean)
+    /* CARRIES A REPORTABLE SPECIFIC: a digit that is part of a figure, score or count. */
+    .filter(t => /\d/.test(t) && t.length <= 1200)
+    .slice(-_REPORTED_CAP);
+  if (!msgs.length) return null;
+  const quoted = msgs.map(t => `“${t.replace(/\s+/g, ' ').slice(0, 300)}”`).join(' and ');
+  return {
+    text: `You have told me ${quoted}. That is what you reported, and I have it — I have not `
+      + 'checked it against anything, and nothing has been recorded about anybody from it. '
+      + 'Weighing what it means needs the reasoning engine, which is off right now.',
+    limitations: [
+      'these are your own reported figures, not something independently verified',
+      'nothing was saved and no standing changed',
+    ],
+  };
+}
+
 function _assistantAnswer(code, userId, question, opts = {}) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -13044,6 +13081,29 @@ function _assistantAnswer(code, userId, question, opts = {}) {
            narrowed answer reports records, the broad one reports a list. */
         confidence = _l.asked ? 'none' : 'confirmed';
         limitations = _l.limitations;
+      }
+      /* ── AND WHAT THEY THEMSELVES TOLD ME, WHICH IS NOT EVIDENCE AND IS NOT NOTHING ──────
+         LIVE iPHONE BLOCKER (findings R1 #2). The founder typed a season's figures straight into
+         the message — 28 played, 9 wins, 15 draws — and was told the figures were not in anything
+         IntelliQ had access to and that it could not use numbers it had not received. The numbers
+         were in the conversation. The same answer then reasoned from fifteen draws out of
+         twenty-eight, contradicting its own refusal in its own next sentence.
+
+         BOTH HALVES OF THAT ARE WRONG AND THE LAW IS NOT. Human speech is not automatically
+         evidence: nothing here is written, nothing becomes a claim about anybody, and no standing
+         moves. But "I have no authorised evidence" is a statement about the EVIDENCE STORE, and it
+         was being offered as an answer to "what do you make of what I just told you?" — where the
+         honest answer is that they reported it, IntelliQ has it, and it has not been checked.
+
+         SO IT IS REPORTED BACK, LABELLED, AND NOT REASONED FROM. With models off the deterministic
+         path can restate and attribute; it cannot analyse, and it says so rather than implying the
+         figures have been weighed. That is the bounded degradation, stated — not a refusal
+         dressed as one. */
+      else if (_reportedRead(opts.reportedByThem, q)) {
+        const _r = _reportedRead(opts.reportedByThem, q);
+        answer = _r.text;
+        confidence = 'none';   // about THE WORLD. What they said is certain; whether it holds is not.
+        limitations = _r.limitations;
       }
       else {
         answer = `I don't have enough authorised evidence to answer that yet.`;
@@ -16180,7 +16240,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
              instead of repeating itself. Texts only, from this person's own conversation — the
              same store every other surface reads, and no new one. */
           saidBefore: ((_conv && _conv.messages) || [])
-            .filter(m => m && m.role === 'assistant' && m.text).map(m => String(m.text)) });
+            .filter(m => m && m.role === 'assistant' && m.text).map(m => String(m.text)),
+          /* WHAT THIS PERSON HAS TOLD ME IN THIS CONVERSATION. Not evidence — human speech is
+             never automatically evidence, and nothing here is written anywhere — but it is
+             plainly something IntelliQ has, and saying otherwise while it sits in the thread is
+             the live iPhone failure in findings R1 #2. Their own words, their own conversation. */
+          reportedByThem: ((_conv && _conv.messages) || [])
+            .filter(m => m && m.role === 'user' && m.text).map(m => String(m.text)) });
     } catch (_) { qa = null; }
   }
   // ── RECALL ───────────────────────────────────────────────────────────────────
