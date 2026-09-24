@@ -6567,9 +6567,25 @@ async function todayAsk() {
 
    It does not retract the reply. The kernel decided, and a decision is not made wrong by the
    model being unavailable to phrase it. */
+/* ── AND IT IS SAID ONCE, NOT ONCE A TURN ─────────────────────────────────────
+   LIVE iPHONE, findings R1 #28: "if fallback is used, allow silent recovery on the next turn and
+   avoid repeatedly surfacing the full degradation banner". On a weak link several turns in a row
+   degrade, and the full paragraph under every one of them turns a temporary state into the loudest
+   thing on the screen — three explanations of the same fact, each longer than the answer it sits
+   under. A person needs telling that the voice has changed; they do not need telling three times.
+
+   So the full sentence is the FIRST one, and while it stays that way the note shrinks to a phrase.
+   It is never dropped altogether: an unmarked degraded reply is the defect this function exists to
+   remove. A normal reply resets it, which is what makes recovery silent — nothing announces that
+   the model is back, the answers simply read like themselves again. */
+let _iqDegradedShown = false;
 function iqDegradedNote(composer) {
-  if (!composer || !composer.degraded) return '';
-  return `<div class="iq-degraded" role="status">IntelliQ's normal response isn't available right now. This reply was put together from your record instead — what it says still holds, the wording is just plainer than usual.</div>`;
+  if (!composer || !composer.degraded) { _iqDegradedShown = false; return ''; }
+  const first = !_iqDegradedShown;
+  _iqDegradedShown = true;
+  return `<div class="iq-degraded" role="status">${first
+    ? "IntelliQ's normal response isn't available right now. This reply was put together from your record instead — what it says still holds, the wording is just plainer than usual."
+    : 'Still the plainer wording — what this says holds.'}</div>`;
 }
 
 function todayBubble(role, text, qa) {
@@ -14950,11 +14966,27 @@ const MemberApp = {
          twice, which is what the founder saw on a live iPhone around a degraded response. Minted
          per send, not per keystroke: a genuinely new message gets a genuinely new id. */
       const clientTurnId = 'ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
-        text, conversationId: thread.conversationId || undefined, about: thread.about,
-        surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
-        clientTurnId,
-      }) });
+      /* AND THE SAME BOUNDED RETRY THE MAIN COMPOSER HAS, findings R1 #28. This surface had the
+         id and no retry at all, so a dropped connection on a phone put the person's sentence back
+         in the box and made them press send again — with the reply quite possibly already
+         composed on the server. The id makes a re-send the same turn, and the server replays the
+         answer it already gave, so trying again costs nothing and risks nothing. A response that
+         ARRIVES is never retried, however unwelcome: retrying a judgement is how a product argues
+         with its own server. */
+      const _send = async (attempt = 0) => {
+        try {
+          return await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
+            text, conversationId: thread.conversationId || undefined, about: thread.about,
+            surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
+            clientTurnId,
+          }) });
+        } catch (netErr) {
+          if (attempt >= 2) throw netErr;
+          await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt)));
+          return _send(attempt + 1);
+        }
+      };
+      const response = await _send();
       const data = await response.json().catch(() => null);
       if (!response.ok || !data || !data.ok) {
         throw new Error((data && data.error) || `server said ${response.status}`);
@@ -15600,7 +15632,32 @@ const MemberApp = {
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
      hint. Returns { ok, j } or { ok:false, reason } so the caller can recover gracefully. A
      30s timeout prevents a hung request leaving "thinking…" forever. */
-  async assistantTurn(text, targetEl) {
+  /* ── ONE SEND, ONE ID, AND A WEAK LINK IS NOT A FAILURE ───────────────────────────────────
+     LIVE iPHONE, findings R1 #28. The founder's phone had Wi-Fi and cellular and a brief patch of
+     weakness, and the product answered from the deterministic path with the full degradation
+     banner. Driven from the real path, two things were true here and neither was the provider.
+
+     THIS SURFACE HAD NO CLIENT TURN ID AT ALL. The object thread's composer mints one — that is
+     what makes a re-send the same turn rather than a second one — and the MAIN conversation, the
+     surface a person uses most, did not. So the durable-turn guarantee stopped at the object page.
+
+     AND ONE DROPPED REQUEST WAS THE WHOLE ANSWER. There was no retry: an aborted fetch on a train
+     or in a lift produced "I couldn't reach IntelliQ just now" and a button, with the reply that
+     may well have been composed on the server thrown away. What the brief asks for is a bounded
+     retry that preserves the pending turn, and that is only safe once a re-send cannot produce two
+     of anything — which is exactly what the id and the server's replay of it now guarantee.
+
+     WHAT IS NOT DONE HERE, deliberately. Nothing is queued for later, and a send is never retried
+     after a response arrives. A 4xx, a 401 and a refusal are ANSWERS: they are returned as they
+     are, because retrying a judgement is how a product argues with its own server. Only a turn
+     that never got an answer at all is sent again.
+
+     `attempts` is three and the waits are short, because a person is holding a phone waiting for
+     a reply. A longer budget would be a worse product than an honest failure. */
+  async assistantTurn(text, targetEl, opts = {}) {
+    const clientTurnId = opts.clientTurnId
+      || ('ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+    const attempt = Number(opts.attempt) || 0;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
     // Thread the plain personal chat like the leader's (same runtime, same endpoints). A
@@ -15618,6 +15675,7 @@ const MemberApp = {
           lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined,
           subjectMemberId: this._wsSubjectMemberId || undefined, about: this._composerAbout || undefined,
           surface: this._composerAbout?.kind || 'home', requestedAction: this._pendingComposerAction || undefined,
+          clientTurnId,
           attachment: this._pendingAttachment || undefined }) });
       clearTimeout(timer);
       // Through the one classifier: a composer POST discovering an ended session must end it for
@@ -15631,7 +15689,19 @@ const MemberApp = {
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
       return { ok: true, j };
-    } catch (e) { clearTimeout(timer); return { ok: false, reason: (e && e.name === 'AbortError') ? 'timeout' : 'network' }; }
+    } catch (e) {
+      clearTimeout(timer);
+      const reason = (e && e.name === 'AbortError') ? 'timeout' : 'network';
+      /* NOTHING CAME BACK, so this turn has no answer — not a bad one. Send it again under the
+         same id, which the server recognises as this send rather than a new one, and wait a
+         little longer each time. After three there is no more waiting worth doing and the honest
+         failure is shown, with the person's words still in hand. */
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt)));
+        return this.assistantTurn(text, targetEl, { clientTurnId, attempt: attempt + 1 });
+      }
+      return { ok: false, reason };
+    }
   },
 
   // One IntelliQ voice. Distinguishes grounded vs suggested; shows privacy clearly; renders a

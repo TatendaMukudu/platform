@@ -1931,3 +1931,51 @@ by degrading everything. **Four mutations, each red then restored:** the compose
 whether the reply was cut off (6 red); the gateway no longer marking a `max_tokens` stop (7 red);
 degrading instead of keeping the finished sentences (3 red, including B4, which is what proves the
 keeping half is not vacuous); and the loss no longer said in the prose (C1).
+
+### A weak link is not a failure — finding #28
+
+The founder's phone had Wi-Fi and cellular and a brief patch of weakness, and IntelliQ dropped to
+the deterministic path and printed the full degradation banner. **Reading the real path found two
+things, and neither of them was the provider.**
+
+**The main conversation minted no client turn id at all.** The object thread's composer has one —
+that is what makes a re-send the same turn rather than a second one — and the surface a person uses
+most did not. The durable-turn guarantee stopped at the object page.
+
+**And the turn was not idempotent even where the id existed.** `_already` protected the person's own
+words and nothing else: a second POST recomposed the answer, appended a **second assistant message**
+under one question, and ran the intake over the same sentence again. A client that retried a dropped
+connection would have mended the visible half of #13 and left the other half — so the retry the
+brief asks for could not have been added safely first.
+
+So the property is stronger than "the sentence is not doubled": **sending the same turn again
+produces the same turn** — same `turnId`, same words, same proposals to confirm — replayed from a
+three-deep cache that lives and dies with the conversation it belongs to. Nothing is written, no
+model is asked anything, and the ears do not hear the sentence a second time.
+
+On top of that: both composers now retry a **dropped** request up to twice with a short backoff,
+under the same id, with the person's words still on screen. A response that *arrives* is never
+retried, however unwelcome — a 4xx, a 401 and a refusal are answers, and retrying a judgement is how
+a product argues with its own server. The budget is deliberately short (two retries, 600ms then
+1.2s) because somebody is holding a phone waiting for a reply; a longer wait would be a worse
+product than an honest failure.
+
+And the degradation note is said **once**. On a weak link several turns in a row degrade, and the
+full paragraph under every one of them turns a temporary state into the loudest thing on the screen
+— three explanations of the same fact, each longer than the answer it sits under. The full sentence
+is the first; after that it shrinks to a phrase, and it is never dropped altogether, because an
+unmarked degraded reply is the defect that note exists to remove. An ordinary reply resets it, which
+is what makes recovery silent: nothing announces that the model is back, the answers simply read
+like themselves again.
+
+**What is deliberately not done.** Nothing is queued for later. The brief's "never queue canonical
+writes that could execute twice" is met by not queueing at all — a proposal still requires a
+confirmation that happens in its own request, and the replay returns the turn's decision rather than
+re-taking it.
+
+`turn-resilience-http-smoke` (22). Section C is the control — people say the same thing twice, a new
+id is a new turn, and a send carrying no id at all is still answered — so none of section A can pass
+by a server that caches every repeat. **Four mutations, each red then restored:** no replay (6 red,
+including the second assistant message); an unbounded cache (D1); a retry that mints a fresh id (E2,
+which would be the duplicate arrived at by the mechanism meant to prevent it); and the full
+paragraph on every degraded turn (F1).

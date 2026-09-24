@@ -16226,6 +16226,29 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
      say "yes" twice, and deduplicating on content would eat the second one. */
   const _turnKey = String(opts.clientTurnId || '').trim().slice(0, 64) || null;
   const _already = _turnKey && (_conv.messages || []).some(m => m && m.clientTurnId === _turnKey);
+  /* ── AND A RE-SEND OF A TURN THAT ALREADY ANSWERED IS THE SAME TURN ────────────────────────
+     LIVE iPHONE, findings R1 #28. The founder's device had connectivity and a weak link, and the
+     product fell to the deterministic path and showed the full degradation banner. The brief asks
+     for bounded retry while the pending turn is preserved — and a retry is only safe if sending
+     the same turn twice cannot produce two of anything.
+
+     `_already` above already protects the PERSON'S OWN WORDS. It does not protect the rest of the
+     turn: a second POST recomposed the answer, appended a SECOND assistant message to the
+     conversation, and ran the intake over the same sentence again. So a client that retried a
+     dropped connection would have mended the visible half of #13 and left the other half.
+
+     The whole answer is replayed instead, verbatim, from a small bounded cache keyed on the
+     client's own id. It is the same turn: the same turnId, the same proposals to confirm, the
+     same sources. Nothing is written, no model is asked anything, and the ears do not hear the
+     sentence a second time.
+
+     KEPT SMALL AND ON THE CONVERSATION, not in a global map: it lives exactly as long as the
+     conversation it belongs to, it is capped, and it cannot become a store nobody is responsible
+     for. Three is enough for a retry loop and far short of anything worth calling history. */
+  if (_already && _conv.replayOf && _conv.replayOf[_turnKey]) {
+    console.log(`[assistant] replaying turn ${_turnKey} — same send, already answered`);
+    return _conv.replayOf[_turnKey].payload;
+  }
   const _userMsgAt = new Date().toISOString();
   if (!_already) {
     _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _userMsgAt,
@@ -16824,9 +16847,21 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // than "the last one in the conversation" — which is the same thing right now and stops being
   // the same thing the moment two turns land close together.
   const _saidId = (_conv.messages[_conv.messages.length - 1] || {}).id || null;
-  return { turn, response, saved, capturePrompt, conversationId: _conv.id, messageId: _saidId, at: _nowIso, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
+  const _payload = { turn, response, saved, capturePrompt, conversationId: _conv.id, messageId: _saidId, at: _nowIso, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
     confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
+  /* KEPT SO A RETRY OF THIS EXACT SEND GETS THIS EXACT ANSWER — see the replay guard near the top
+     of this function. Three deep, oldest dropped, and only when the client named the send. */
+  if (_turnKey) {
+    _conv.replayOf = _conv.replayOf || {};
+    _conv.replayOf[_turnKey] = { at: _nowIso, payload: _payload };
+    const _keys = Object.keys(_conv.replayOf);
+    if (_keys.length > 3) {
+      _keys.sort((a, b) => String(_conv.replayOf[a].at).localeCompare(String(_conv.replayOf[b].at)));
+      for (const k of _keys.slice(0, _keys.length - 3)) delete _conv.replayOf[k];
+    }
+  }
+  return _payload;
 }
 
 /* POST /api/assistant/turn — the one composer. Interpret + reason + propose. Persists nothing
