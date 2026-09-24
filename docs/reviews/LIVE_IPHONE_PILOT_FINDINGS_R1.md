@@ -388,3 +388,70 @@ Required implementation:
 - keep only one obvious attachment entry point on the page.
 
 Classification: **RATIFIED PILOT UX CHANGE — simplify to Composer-only attachment entry.**
+### 31. Focus recorded-events graph is not useful at one moment
+
+Live iPhone reproduction shows `Recorded events` with a single blue point, a large amount of empty space, and explanatory copy that correctly says this is one moment rather than change over time.
+
+The epistemic refusal is correct; the visualization is not.
+
+Required fix:
+- do not render a trend/chart surface when there is only one meaningful recorded moment;
+- render a compact event/timeline/readout instead;
+- only introduce a line/trend chart when there are enough ordered observations for change over time to be meaningful;
+- chart semantics must come from the canonical event series, never decorative interpolation;
+- reduce vertical space so the Focus conversation remains primary.
+
+Classification: **PILOT UX FIX — replace one-point pseudo-chart with compact event state.**
+
+### 32. A user turn/question can disappear from the visible Focus conversation
+
+Founder reports asking a prior question in the Focus conversation and later finding that it had disappeared from the visible thread.
+
+Required investigation:
+- prove one send creates one durable human turn before any provider/model response is attempted;
+- provider failure, deterministic fallback, object re-render, navigation, and retry must never remove the human turn;
+- reopening the Focus must reconstruct the same ordered conversation;
+- if multiple object-bound conversations exist, the UI must not silently switch to another thread and make a recent turn appear lost;
+- add browser proof for send -> provider failure/degradation -> reload/reopen -> human turn still present.
+
+Classification: **PILOT BLOCKER UNTIL REPRODUCED/CLOSED — possible durable conversation loss or thread-switching bug.**
+
+### 33. Focus sharing must support named individuals and ad-hoc selected audiences, not only org-allocated groups
+
+Founder requirement:
+- a Focus may be shared with one specific person;
+- it may also be shared with several specific people who do not constitute an allocated org-tree group;
+- this must coexist with sharing to authoritative org groups / parent groups.
+
+Current product already exposes `People I choose`; preserve that canonical audience mechanism rather than inventing a second truth store.
+
+Required product model:
+- `Only me` = private;
+- `People I choose` = explicit selected-person audience, one or many current authorised contacts;
+- `Org group(s)` = one or more authoritative groups/nodes the user is permitted to address;
+- an ad-hoc selected-person audience is readership/collaboration only; it does not become a new empirical subject or org-tree node;
+- Forum availability follows actual current readership (2+ authorised readers), not whether the audience came from a formal org group;
+- removing a selected person revokes that person's object and Forum access on the next read;
+- relationship/contact status alone never grants readership.
+
+Composer enhancement:
+- when IntelliQ asks whether to share, the choice UI may offer both named people and eligible org groups;
+- named people can be multi-selected to form the existing selected-person audience;
+- eligible groups should be derived from live authoritative membership/parent relationships;
+- confirmation must show exactly who/groups will gain access before the canonical audience write.
+
+Classification: **RATIFIED PRODUCT REQUIREMENT — use existing selected audience + org audience machinery, no new ad-hoc-group ontology.**
+
+### 34. Focus suggestion answer can collapse/truncate in the rendered card
+
+Live screenshot after `Can you give me suggestions on how to win and concede less?` shows an IntelliQ answer card rendered only as `There's nothing rec...` while the source control remains visible.
+
+This may be a response-generation issue, clipping/height issue, or interrupted provider/fallback render.
+
+Required investigation:
+- distinguish server response truncation from client rendering/clipping;
+- never render a visibly incomplete sentence as a completed assistant turn;
+- if provider/network interrupts a response, show a bounded retry/recovery state rather than committing a fragment as the final answer;
+- source disclosure must remain attached to the complete answer it supports.
+
+Classification: **PILOT UX/RELIABILITY BUG — incomplete assistant turn visible as final output.**
