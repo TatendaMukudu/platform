@@ -193,3 +193,58 @@ Preferred direction:
 - keep the reason (no governed concept/query basis) in inspectable provenance/debug detail, not foreground UI.
 
 Classification: **UX WORDING ISSUE.**
+
+### 19. Forum Ask IntelliQ calls a malformed live endpoint
+
+Live iPhone reproduction on a Focus Forum:
+- Forum opens correctly.
+- Posting to the room works.
+- Tapping "Ask IntelliQ about this" returns:
+  "Unknown API endpoint: POST /group//forum/foc_rkvv6fnb/ask"
+
+The path contains a missing group/node segment: /group//forum/...
+
+This is not provider quality; it is a client/server routing/binding defect on the live production path.
+
+Required fix:
+- Forum payload must carry the canonical node/group id for the object/room.
+- The Ask control must build the route from the same forum-access object that opened the room, never from guessed or optional UI state.
+- For Focus Forums, ensure the route uses the correct node id and object id/kind combination expected by the canonical server owner.
+- If the room is not group-backed, the UI must not draw an Ask control that points at a group-only endpoint.
+- Add a real browser test that opens a Focus Forum from the Focus page, taps Ask IntelliQ, and proves a private answer renders without adding a room message.
+- Mutation proof should blank the node id and require the gate to fail.
+
+Classification: **LIVE PILOT BLOCKER — Forum Ask IntelliQ unreachable due malformed endpoint.**
+
+### 20. Forum anonymity UI contradicts itself
+
+Live Forum copy says:
+"Everyone here is anonymous, including to coaches."
+
+But each visible message is prefixed with "YOU".
+
+This may be intended to identify the current user's own messages locally, but the screen currently reads as:
+- room promises anonymity;
+- message UI visibly attributes identity.
+
+Required product decision/implementation:
+- if "YOU" is client-only self-recognition and never visible to other readers, make that explicit in implementation/tests and ensure other readers see an anonymous label;
+- if messages are truly anonymous to everyone including coaches, do not expose author identity server-side to room readers;
+- preserve moderation/audit requirements separately from room presentation if needed;
+- browser proof should compare the same Forum message from author and another reader.
+
+Classification: **NEEDS PROOF / UX-POLICY CONSISTENCY ISSUE.**
+
+### 21. Forum Ask error leaks raw route text to the user
+
+The live UI displays:
+"Unknown API endpoint: POST /group//forum/foc_rkvv6fnb/ask"
+
+Even when a backend route fails, a normal user should not see internal route/method details.
+
+Required fix:
+- log exact route details for diagnostics;
+- render a concise user-facing failure such as "IntelliQ couldn't answer this just now. Nothing was posted.";
+- preserve the private/no-room-write guarantee on failure.
+
+Classification: **PILOT UX / ERROR-HANDLING BUG.**
