@@ -248,3 +248,31 @@ Required fix:
 - preserve the private/no-room-write guarantee on failure.
 
 Classification: **PILOT UX / ERROR-HANDLING BUG.**
+### 28. Network resilience threshold is too eager
+
+Live iPhone observation:
+- device still had Wi‑Fi and cellular connectivity, but weaker Wi‑Fi / brief network degradation caused IntelliQ to drop into deterministic fallback and show the 'normal response isn't available' banner.
+- this is honest but too eager for ordinary mobile conditions.
+
+Required reliability direction:
+- tolerate transient latency and brief network loss before declaring provider unavailable;
+- distinguish client connectivity, Render/network latency, provider timeout, and provider hard failure;
+- use bounded retry/backoff for idempotent model reads;
+- preserve the pending turn while reconnecting;
+- avoid duplicate human turns on retry;
+- only fall back to deterministic response after a short, explicit timeout budget rather than the first weak-network symptom;
+- if fallback is used, allow silent recovery on the next turn and avoid repeatedly surfacing the full degradation banner;
+- cache/reuse already-authorized context locally/server-side enough that a weak connection does not force a total conversational reset;
+- never queue canonical writes that could execute twice after reconnect; writes still require idempotency keys / canonical confirmation.
+
+Classification: **PILOT RELIABILITY ISSUE — degradation policy is honest but too sensitive for real mobile networks.**
+
+### 29. Cross-account Forum anonymity presentation confirmed live
+
+Founder posted from one account and opened the same Forum from a second player account.
+Result:
+- the second account could read the post;
+- the original author's identity was not shown;
+- the author-only `YOU` marker is therefore local presentation rather than identity leakage to other readers.
+
+Classification: **PASS — live cross-account anonymity presentation confirmed.**
