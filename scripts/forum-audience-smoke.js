@@ -481,8 +481,19 @@ const server = app.listen(0, async () => {
         const byId = Object.fromEntries((list.j.objects || []).map(o => [o.id, o.forumAvailable]));
         return byId.tf_crowd === true && (!('tf_lonely' in byId) || byId.tf_lonely === false);
       })());
+    /* SCOPED TO THE CARD, WHICH IS WHAT IT ALWAYS MEANT. The second half of this searched the
+       WHOLE of js/app.js for the word "Forum" in a span — so it also caught the object page's
+       doorway, where Priority R&D P2 now requires exactly that word ("use the product term Forum
+       consistently"). Both are right and they are different places: a list row wants a glyph,
+       because a word on every card is noise; the door into the room wants its name, because an
+       unlabelled glyph is a door nobody can read. A file-wide search cannot tell them apart. */
+    const CARD = (() => {
+      const src = R('js/app.js');
+      const i = src.indexOf('class="iq-inq-forum"');
+      return i === -1 ? '' : src.slice(Math.max(0, i - 1200), i + 800);
+    })();
     ok('FA-K3 the card renders the ICON and not the word "Forum"',
-      /iq-inq-forum[^>]*>\s*<svg/.test(R('js/app.js')) && !/>Forum<\/span>/.test(R('js/app.js')));
+      /iq-inq-forum[^>]*>\s*<svg/.test(CARD) && !/>Forum</.test(CARD));
     ok('FA-K3b …with its meaning carried accessibly, since a glyph on its own says nothing to a screen reader',
       /class="iq-inq-forum" role="img" aria-label="Others can discuss this"/.test(R('js/app.js')));
     ok('FA-K4 …and NO surface computes availability for itself any more, the client included',

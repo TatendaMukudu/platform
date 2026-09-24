@@ -64,10 +64,21 @@ ok('US3 a request that does not come back is counted as a failure rather than fo
    no longer written there because it is no longer written anywhere twice: `_read` is the only way
    this app reads, and it refuses to return data for a non-ok response at all. Pinning it at the
    owner is what makes it true for every surface rather than for this one function. */
+/* SLICED, NOT MEASURED IN CHARACTERS. These pinned `reason: 'http'` within 2200 characters of
+   `async _read(url` and `reason: 'malformed'` within 2600 — so the assertions were counting
+   COMMENT LENGTH inside the function they were checking. Adding an explanatory comment to `_read`
+   pushed both matches past their windows and turned the suite red while the law they exist for
+   was untouched. A distance window is not a scope; the function body is. */
+const _READ = (() => {
+  const i = app.indexOf('async _read(url');
+  if (i === -1) return '';
+  const j = app.indexOf('\n  },', i);
+  return j === -1 ? app.slice(i) : app.slice(i, j);
+})();
 ok('US3b …and a non-ok response is a failure too, not an empty body',
-  /async _read\(url[\s\S]{0,2200}if \(!res\.ok\) \{[\s\S]{0,200}reason: 'http'/.test(app));
+  /if \(!res\.ok\) \{/.test(_READ) && /reason: 'http'/.test(_READ));
 ok('US3c …and a 200 that is not a record is not an empty record either',
-  /async _read\(url[\s\S]{0,2600}reason: 'malformed'/.test(app));
+  /reason: 'malformed'/.test(_READ));
 ok('US3d …every read in the app is BOUNDED, which is what stopped Home hanging on "Looking at your record…"',
   /async _read\(url, \{ timeoutMs = \d+/.test(app)
   && /const att = await this\._read\('\/api\/me\/attention', \{ timeoutMs/.test(app));

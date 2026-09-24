@@ -3078,8 +3078,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-conv:hover{border-color:var(--text-muted)}
 .iqt-conv.is-current{border-color:var(--text-secondary);color:var(--text-primary);font-weight:600}
 .iqt-conv-n{font-size:var(--fs-xs);color:var(--text-muted)}
-.iqt-forum{font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--text-secondary);
-  border:1px solid var(--border);border-radius:999px;padding:.15rem .55rem;white-space:nowrap}
+/* A SECOND `.iqt-forum` RULE STOOD HERE, styling it as a small uppercase chip, and nothing in the
+   product renders that chip — the only two elements with this class are the doors below. It was
+   not inert: `text-transform:uppercase` and the letter-spacing leaked into the live control, so
+   the doorway shouted "FORUM 6 CAN READ THIS" and read as a section heading rather than as a
+   place to go, which is precisely what the old header note warned a label would do. One class,
+   one owner. */
 
 .iqt-opening{margin-bottom:1.8rem}
 /* The lede: the one sentence a person came for. */
@@ -3163,12 +3167,21 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-back{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;padding:0;
   border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md)}
 .iqt-back:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-/* An icon control, not a word: 44px so it is reachable with a thumb, and visibly pressed. */
-.iqt-forum{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;
-  min-width:44px;min-height:44px;padding:0;border:0;background:none;cursor:pointer;
-  color:var(--text-secondary);border-radius:10px}
+/* THE DOORS OFF AN OBJECT, ON A ROW OF THEIR OWN. They used to sit in the header beside the
+   title as two unlabelled glyphs; here there is room for their words, and nothing to compete
+   with. Wrapping rather than scrolling, because two labelled controls will not always fit one
+   390px line and a sideways scroll to reach the Forum is worse than a second line. */
+.iqt-doors{display:flex;flex-wrap:wrap;gap:.5rem;margin:.1rem 0 .7rem}
+/* Still 44px, now with a word in it. `min-width` so the label can make it wider. */
+.iqt-forum{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;
+  min-width:44px;min-height:44px;padding:.35rem .85rem;border:1px solid var(--border);
+  background:var(--bg-surface);cursor:pointer;
+  color:var(--text-secondary);border-radius:999px}
 .iqt-forum:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-.iqt-forum:hover,.iqt-forum[aria-pressed="true"]{color:var(--text-primary);background:var(--surface-2)}
+.iqt-forum:hover{color:var(--text-primary);border-color:var(--text-muted)}
+.iqt-door-t{font-size:var(--fs);font-weight:600;white-space:nowrap}
+/* How many people are in the room, beside its name. The room exists because of who is in it. */
+.iqt-door-n{font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap}
 .iqf-you{font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)}
 .iq-msg-gone{opacity:.45;font-style:italic}
 

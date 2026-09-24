@@ -767,6 +767,22 @@ function navigate(dest){
   try { if (typeof MemberApp !== 'undefined' && MemberApp._renderShellComposer) MemberApp._renderShellComposer(page); } catch (_) {}
 }
 
+/* ── WHAT THE BAR SAYS IS WHAT YOU ARE LOOKING AT ──────────────────────────────────────────
+   `navigate()` sets the title from the PAGE, which is right until a page renders something else
+   into itself. Four surfaces do: an object thread, a Forum, a group, and the bucket list they
+   share a container with — so opening a Forum from an inquiry left the bar reading "Inquiries"
+   over a screen headed "Forum", and "which screen am I on" had two answers.
+
+   ONE OWNER, called by whoever just drew something. Passing nothing restores the page's own
+   name, so a surface that closes does not have to remember what was there before. */
+function setScreenTitle(name) {
+  const el = document.querySelector('.topbar-title');
+  if (!el) return;
+  const page = (document.querySelector('.page.active') || {}).id || '';
+  el.textContent = String(name || '').trim()
+    || PAGE_TITLES[page.replace(/^page-/, '')] || 'Platform';
+}
+
 const PAGE_TITLES = {
   // My Space — every user
   home:         'Home',
@@ -804,7 +820,10 @@ const PAGE_TITLES = {
   scenarios:    'Manage Assessments',
   // Management
   organisation: 'Organisation',
-  people:       'Members',
+  /* ONE NAME. The nav item said "Org tree", the bar said "Members", the heading said "Members"
+     and the only tab said "Org Tree" — four names for one place, and the person got there by
+     tapping the one word that then appeared nowhere on the screen they landed on. */
+  people:       'Org tree',
   safeguarding: 'Safeguarding',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
@@ -3697,6 +3716,12 @@ function _applyOnboardAuthority() {
     const el = document.getElementById(id);
     if (el) el.hidden = !may;
   });
+  /* AND THE STRIP GOES WITH THE SECOND TAB. Onboard is the only sibling the Tree has, so for
+     anybody who cannot onboard the strip holds exactly one tab — a control with nothing to switch
+     to, which reads as though there is more here that they cannot reach. The page is the tree;
+     when it is the only thing on the page it does not need a tab saying so. */
+  const strip = document.getElementById('people-tabs');
+  if (strip) strip.hidden = !may;
   return may;
 }
 
@@ -8289,8 +8314,24 @@ const MemberApp = {
       // malformed would tell somebody the server sent nonsense when the server sent nothing yet.
       if (bodyAborted) return { ok: false, reason: 'timeout', message: 'That took too long to come back.' };
       if (!res.ok) {
+        /* THE SERVER'S `error` IS A CODE, NOT A SENTENCE, and it was being shown to people as
+           prose. `_readFailedHTML` renders `${message} Nothing has been lost.`, so a 404 carrying
+           `{error:'not found'}` reached the screen as:
+
+             not found Nothing has been lost.
+
+           Measured at 390px. Lower case, no punctuation, and the first thing a person reads is a
+           fragment of an API. Every other branch in this helper writes a human sentence; this one
+           laundered a machine string into the UI because it happened to be a string.
+
+           The code is KEPT on `errorCode` — it is useful to whoever is debugging and useless to
+           whoever is reading — and what is shown is written here, by status. */
         return { ok: false, reason: 'http', status: res.status,
-          message: (data && data.error) || 'IntelliQ could not load this just now.' };
+          errorCode: (data && data.error) || null,
+          message: res.status === 404 ? 'That is not here any more.'
+            : res.status === 409 ? 'Something changed while you were looking at this.'
+            : res.status >= 500 ? 'IntelliQ had a problem at its end.'
+            : 'IntelliQ could not load this just now.' };
       }
       // A 200 that is not JSON, or JSON that is not an object, is not a record. Saying "malformed"
       // is honest; treating it as an empty record is the defect this whole helper exists to remove.
@@ -11559,6 +11600,9 @@ const MemberApp = {
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     const copy = this._bucketCopy[kind] || this._bucketCopy.inquiry;
+    /* AND BACK TO THE LIST PUTS THE LIST'S NAME BACK, so returning from one object does not
+       leave the bar still announcing it. */
+    try { setScreenTitle(copy.title); } catch (_) {}
 
     // The page shell's heading is static markup, so it is corrected here on every render.
     const shell = document.querySelector('#page-inquiry .page-header');
@@ -12645,6 +12689,10 @@ const MemberApp = {
         + `<div class="iqt-reading" id="iqt-reading"></div>`
         + `<div class="iqt-related" id="iqt-related"></div>${verdicts}`;
 
+      /* THE BAR NAMES THE KIND, not the object. The heading below already carries the object's
+         own title, and repeating it in the bar is the product saying the same thing twice; what
+         the bar can add is which of the four things this is. */
+      try { setScreenTitle({ inquiry: 'Inquiry', focus: 'Focus', high: 'High', low: 'Low' }[kind] || ''); } catch (_) {}
       box.innerHTML = `
         <div class="iq-object-thread">
           <div class="iqt-bar">
@@ -12668,12 +12716,40 @@ const MemberApp = {
               ${sum.full && sum.leadIsWhole === false
                 ? `<p class="iqt-said">${esc(sum.full)}</p>` : ''}
             </div>
-            ${/* THE FORUM IS AN ICON, not the word "Forum". A text label in a header bar competes
-                  with the object's own title for the one line a phone gives you, and it reads as a
-                  section rather than as the place this object's people are talking. This is the
-                  shared-tray glyph from the same inline-SVG system every other control here uses --
-                  no emoji, per the repository convention -- with the label carried accessibly
-                  rather than visually and a 44px target.
+          </div>
+          <div class="iqt-doors">
+            ${/* THE TWO DOORS MOVED OUT OF THE HEADER, AND GAINED THEIR WORDS.
+
+                  The note that used to sit here argued that a text label in a header bar competes
+                  with the object's own title for the one line a phone gives you, and that is
+                  RIGHT -- it is why the label is not back in the header. What it then concluded
+                  was that the label should be carried accessibly and not visually, which helps a
+                  screen reader and nobody else: a sighted coach got two unlabelled glyphs, a tray
+                  and a pair of people, side by side, and had to guess. Driven at 390px, "what are
+                  those two icons" was the least answerable question on the screen.
+
+                  Priority R&D P2 also requires the product term Forum to be used consistently and
+                  the access point to be clear, and an unnamed glyph is not a clear access point.
+
+                  So neither the old note nor a label in the header: the doors come OUT of the
+                  header onto a row of their own, directly under the title, where there is room for
+                  words and nothing to compete with. The competition the old note identified is
+                  gone because the header is gone, not because the words are.
+
+                  Still the same inline-SVG system -- no emoji, per the repository convention --
+                  the same server-owned availability, and the same 44px target.
+
+                  AND IT NOW OPENS THE ROOM. It used to stage `discuss_with_group` into the
+                  composer, so a door labelled Forum did not go to the Forum: it wrote a sentence
+                  into the text box and waited for the person to send it, be offered a proposal,
+                  and confirm -- three steps to reach a room they were already allowed to read.
+                  Opening a room you can read is a READ. The governed confirmation exists for
+                  SAYING something into it, which is `share_to_forum` and is untouched, and for
+                  CREATING a shared Focus where no room exists yet -- which is the other half of
+                  `discuss_with_group` and is still there, still governed, and unreachable from
+                  this control because this control is only drawn when a room already exists.
+                  `forumKind` and `nodeId` come from the same server payload that decided the door
+                  should be drawn at all, so the room it opens is the room the server counted.
 
                   `aria-pressed="false"` WAS A LIE ABOUT WHAT THIS CONTROL IS. aria-pressed makes a
                   button a TOGGLE, and a screen reader announces it as one: "Open discussion,
@@ -12688,8 +12764,10 @@ const MemberApp = {
                   CURRENTLY read it. `forumReadable` and `forumWhy` say how many and why not. */''}
             ${data.forumAvailable ? `<button type="button" class="iqt-forum" aria-label="Open forum${
               data.forumReadable ? ` — ${esc(String(data.forumReadable))} people can read this` : ''
-            }" title="Open forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">
+            }" title="Open forum" onclick="MemberApp.openForum('${esc(String(data.nodeId || ''))}','${esc(objectId)}','${esc(data.forumKind || 'group')}','${esc(kind)}')">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+              <span class="iqt-door-t">Forum</span>${data.forumReadable
+                ? `<span class="iqt-door-n">${esc(String(data.forumReadable))} can read this</span>` : ''}
             </button>` : ''}
             ${/* WHO CAN SEE THIS. A person's own object was private with no way to say otherwise
                   for three of the four kinds, so the one thing the product most wants somebody to
@@ -12704,6 +12782,7 @@ const MemberApp = {
               <button type="button" class="iqt-forum" aria-label="Choose who can see this"
                 title="Who can see this" onclick="MemberApp.openAudience('${esc(kind)}','${esc(objectId)}')">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="iqt-door-t">Who can see this</span>
               </button>`}
 
           </div>
@@ -14068,6 +14147,8 @@ const MemberApp = {
        IntelliQ — two boxes on this screen would be the single most costly ambiguity in the
        product, because the difference between them is who reads what you type. */
     this._renderShellComposer();
+    /* THE BAR FOLLOWS THE ROOM. Opening a Forum from an inquiry left it reading "Inquiries". */
+    try { setScreenTitle('Forum'); } catch (_) {}
   },
 
   /* ── ASK INTELLIQ FROM INSIDE THE ROOM, PRIVATELY ─────────────────────────────────────────
