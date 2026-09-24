@@ -455,3 +455,67 @@ Required investigation:
 - source disclosure must remain attached to the complete answer it supports.
 
 Classification: **PILOT UX/RELIABILITY BUG — incomplete assistant turn visible as final output.**
+### 35. Keep `Who can see this` as the pilot sharing control
+
+Founder decision:
+- keep the existing `Who can see this` control on Highs, Lows, Inquiries and Focuses for the pilot;
+- this remains the simplest reliable way to share objects while the conversational sharing UX is still being worked out;
+- do not remove or hide this control in favor of an unfinished Composer-only sharing flow.
+
+Required behavior:
+- `Who can see this` must use the same canonical audience owner across all four object kinds;
+- it must support private, selected people, and eligible org-group audiences where already supported;
+- changing audience must update Forum availability/readership immediately and revoke access when narrowed;
+- no duplicate editor instances on repeated taps.
+
+Classification: **RATIFIED PILOT UX DECISION — preserve direct audience control on all object pages.**
+
+### 36. Inquiry/object detail pages still leak legacy profile taxonomy
+
+Live iPhone screenshots show Inquiry detail and related object surfaces still rendering profile-era labels such as:
+- `What they say they bring`
+- `What it looks like when they are not at their best`
+- `Where they are trying to get to`
+- `What else they wanted known`
+- `Where they want to get better`
+
+These labels are not object-specific intelligence. They read like a generic profile questionnaire and make an Inquiry feel like a profile dump rather than one question being worked through.
+
+Required fix:
+- remove these legacy taxonomy cards from High/Low/Inquiry/Focus detail unless the card is directly relevant to the current object's evidence/question;
+- object pages should follow one simple grammar: object title/status -> concise current read -> what supports/contradicts it -> what is still unknown -> private conversation -> Forum/audience where available;
+- profile/background context may be used by IntelliQ internally and surfaced only when it materially explains the current object.
+
+Classification: **PILOT UX BLOCKER — object detail is polluted by irrelevant legacy profile cards.**
+
+### 37. `I don't have a read on this yet` conflicts with a populated working hypothesis on the same card
+
+Live Inquiry example:
+- header says `Where they are trying to get to`;
+- card immediately says `I don't have a read on this yet.`;
+- same card then says `Someone suggested: the stated need to work harder is driven by fear of losing current momentum...`;
+- then `Nothing supports this yet` and a `STILL WORKING OUT` question.
+
+This is internally contradictory. The system does have a candidate read/hypothesis; what it lacks is support/confirmation.
+
+Required fix:
+- separate states explicitly:
+  - no read yet = genuinely nothing proposed/inferred;
+  - working hypothesis = a candidate explanation exists but is unsupported/unconfirmed;
+  - supported read = evidence has crossed the relevant threshold;
+- never display `I don't have a read on this yet` above a non-empty hypothesis;
+- if a hypothesis exists, say something like `One possibility we're still testing:` followed by the hypothesis and the unresolved question.
+
+Classification: **SEMANTIC + UX BUG — epistemic state labels contradict the content.**
+
+### 38. `Still working out` is useful, but should be scoped to the actual Inquiry
+
+`STILL WORKING OUT` is directionally good because it exposes uncertainty, but current rendering often follows generic profile sections instead of the current Inquiry itself.
+
+Required direction:
+- keep the concept of `Still working out`;
+- move it into the Inquiry's own concise summary block;
+- show at most the highest-information unresolved question(s) for that Inquiry;
+- avoid repeating generic profile unknowns that are not needed to resolve the current object.
+
+Classification: **KEEP THE CONCEPT, SIMPLIFY THE SURFACE.**
