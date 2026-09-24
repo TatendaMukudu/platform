@@ -12900,8 +12900,22 @@ function _assistantAnswer(code, userId, question, opts = {}) {
          store, which is the specific dishonesty this branch exists to prevent. It does NOT guess
          at the answer from the description, because a description that did not mention the home
          record is not evidence about the home record. */
+      /* AND ONLY WHEN THE NOTE DOES NOT COVER IT, which is the half this branch was missing.
+
+         The reasoning above is right and the condition was not: it fired for EVERY question about
+         an image, before retrieval was ever attempted. So "did you read the image, what does it
+         say?" — which the description answers completely — was met with an offer to look again,
+         and a person reading that hears "it has not read my picture". That is the live iPhone
+         report (findings R1 #1) in its own words: the file was named on screen and IntelliQ
+         appeared not to have seen it.
+
+         A description IS searchable text, held as material like any other. The distinction this
+         branch exists to draw — the note covers it, or the note does not — can only be drawn by
+         asking whether it covers it. `material.findIn` is that question, and the branch below has
+         always been able to answer from an image's own words; it was simply never reached. */
       else if (opts.materialRow && String(opts.materialRow.kind) === 'image'
-               && opts.materialRow.sourceMedia && opts.materialRow.sourceMedia.retained) {
+               && opts.materialRow.sourceMedia && opts.materialRow.sourceMedia.retained
+               && !material.findIn(opts.materialRow, q, { max: 2 })) {
         const _name = opts.materialRow.filename || opts.materialRow.title || 'that picture';
         answer = ai.canUnderstand('image')
           ? `I can look at ${_name} again for that — ask me to and I will read it properly rather `
@@ -20247,7 +20261,15 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
     /* THE DESCRIPTION SAYS WHAT IT IS. A reader coming to this material later -- or a model being
        handed it as context -- must not mistake an account of a picture for an account of the
        world, so the material's own first line says where it came from. */
-    text = 'What this image appears to show (read from the picture, not observed by anyone):\n\n' + described;
+    /* ONE PARAGRAPH, NOT TWO, AND THE BLANK LINE IS THE WHOLE REASON. `ai/material.js` segments on
+       blank lines, so `preamble\n\ndescription` became two parts — and the preamble, which is
+       provenance ABOUT the material rather than a section OF it, became a searchable section of
+       its own. Asked "what does the image say?", retrieval matched the words "image" and "show" in
+       the preamble and returned the preamble alone: a sentence announcing a reading, with the
+       reading missing. Bound to the description it introduces, it does the job it was written for
+       — any reader of this part knows it is an account of a picture — without standing in for the
+       content it is meant to label. */
+    text = 'What this image appears to show (read from the picture, not observed by anyone): ' + described;
     kind = 'image';
     readFrom = { mimetype, bytes: Math.round(data.length * 0.75) };
     /* AND THE PICTURE ITSELF IS KEPT. Founder decision, September 2026: a coach who photographs a
