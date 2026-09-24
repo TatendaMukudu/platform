@@ -14826,7 +14826,16 @@ const MemberApp = {
   _sourcesHTML(sources) {
     if (!Array.isArray(sources) || !sources.length) return '';
     const esc = s => this._escape(String(s == null ? '' : s));
-    const word = { record: 'From your records', belief: 'Working picture', work: 'Your work', web: 'From the web' };
+    /* FOUR KINDS OF THING A SENTENCE CAN REST ON, and they are not interchangeable — findings R1
+       #41. What the record holds, what IntelliQ is working out from it, the person's own assigned
+       work, a document they attached, and something read on the web are five different claims
+       about where an answer came from, and a reader deciding whether to trust it is deciding
+       between them. `material` was missing entirely: a document handed to the model was cited by
+       nothing, so "2 sources" listed the record and omitted the deck the person had just
+       uploaded. An unknown kind still falls through to the honest "Source" rather than being
+       dressed as one of these. */
+    const word = { record: 'From your records', belief: 'Working picture', work: 'Your work',
+      material: 'Something you attached', web: 'From the web' };
     return `<div class="iq-srcs" hidden>
       ${sources.map(s => `<div class="iq-src">
         <div class="iq-src-top"><span class="iq-src-kind">${esc(word[s.kind] || 'Source')}</span><span class="iq-src-label">${esc(s.label)}</span></div>

@@ -2067,3 +2067,50 @@ an audience.
 `object-audience-http-smoke` 57. `scope-parity-smoke` counts scope references deliberately and went
 76 → 77; the new one is `_inNode` on the contacts route, asked of a person about their own
 membership, and it narrows — recorded with its reason as that gate requires.
+
+### "3 sources" means three things you can look at — finding #41
+
+The founder asked for the whole source story traced: what `sources` means on each surface, internal
+record against user-provided material against external knowledge, counts that open onto something
+inspectable, and no implication of outside reading where none happened.
+
+**Two defects, and the second had been hiding the first for months.**
+
+`_composeTurn` resolved the attached document from `about` — which is `_turnAbout(opts.about)`,
+the `{ headline, body }` prose the prompt reads — and `_materialContext` asks `_aboutRef` for a
+`kind:id`. A headline is not one, so **that lookup returned null on every turn**: a deck attached to
+a Focus was never handed to the composer while somebody talked on that Focus's thread. Only material
+attached to the conversation itself ever arrived, through a fallback, which is why nothing looked
+broken.
+
+**And even when it arrived, it was cited by nothing.** The source list was built from evidence,
+beliefs and assigned work, so an answer drawn from a deck somebody had just uploaded came back
+saying "2 sources" and listed two things from the record — the one thing the reader most obviously
+wanted to check was the one thing missing. Material is a third kind: user-provided, here, read, and
+none of that makes it an observation anybody recorded. It now carries the **governed
+classification** ("something to read from" against "an account of what happened") rather than the
+older `provenance` field, which answers a different question.
+
+**And on both paths.** Citing it on the composed path alone would have put the fix in front of
+exactly the readers who are not the pilot: with models off — the pilot's own configuration — every
+answer comes through the deterministic branch, which built its own source list and omitted material
+too. Section F drives that with the model switched off.
+
+**The refusal copy.** `No outside reading here — no concept to search on…` was on the founder's
+screen. "Concept" is this codebase's word for a canonical topic key; on a phone it is a fragment of
+an API. The fact is unchanged and worth saying — this object is made of what people said about their
+own situation, and there is no general subject in it to read about — and L-WS1 still builds a query
+from a topic and never from anybody's sentence.
+
+**`MR9b` is worth recording as its own lesson.** It was added to `material-reach-http-smoke`
+*because a mutation bit nothing*: the surrounding assertions called `buildContext` with a context the
+suite had fetched itself, so cutting the wire in `_composeTurn` left them all green. The assertion
+that was added to fix that matched the literal `material: _materialContext(code, userId, about)` —
+**the broken wiring**. It proved the call existed. It could not see that the call resolved, which is
+the whole question, and it was green the entire time the feature was dead. It is now asserted at the
+ref that names an object *and* driven through the real route, where a null lookup cannot hide.
+
+`source-provenance-http-smoke` (25). **Five mutations, each red then restored:** material uncited
+again (7 red); the lookup bound back to the headline (the same 7, which is how the defect looked);
+the client losing its word for the kind; the refusal speaking in code words; and a link allowed on
+any kind of source.

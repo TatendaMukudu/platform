@@ -126,13 +126,35 @@ const server = app.listen(0, async () => {
       /say which/i.test(built) && /\[s2\]/.test(built));
     ok('MR9 …and told not to add tactics or numbers that are not in the coach\'s words',
       /Do not add tactics, names, drills or numbers that are not in them/.test(built));
-    /* MR9b — ADDED BECAUSE A MUTATION BIT NOTHING. MR7-MR9 call buildContext with a context this
-       suite fetched itself, which proves the module works and proves nothing about whether the
-       SERVER ever hands it over. Cutting the wire in _composeTurn left every one of them green.
-       This asserts the wiring: the turn's own context builder is called with the material. */
+    /* MR9b — ADDED BECAUSE A MUTATION BIT NOTHING, AND THEN IT PINNED THE DEFECT ITSELF.
+       MR7-MR9 call buildContext with a context this suite fetched itself, which proves the module
+       works and proves nothing about whether the SERVER ever hands it over. Cutting the wire in
+       `_composeTurn` left every one of them green, so this was added to assert the wiring.
+
+       WHAT IT ASSERTED WAS THE BROKEN WIRE. It matched the literal
+       `material: _materialContext(code, userId, about)` — and `about` in `_composeTurn` is
+       `_turnAbout(opts.about)`, which is `{ headline, body }`, the prose the prompt reads.
+       `_materialContext` asks `_aboutRef` for a `kind:id`; a headline is not one, so that call
+       returned null on EVERY turn and a deck attached to a focus never reached the composer while
+       somebody talked on that focus's thread. The assertion proved the call EXISTED. It could not
+       see that the call RESOLVED, which is the whole question, and it was green for months.
+       (Live iPhone findings R1 #41 is where the missing citation was finally noticed.)
+
+       So it is asserted twice now, and the second one is the real one: the wire is named at the
+       ref that actually identifies an object, AND the turn is driven through the route with a
+       document attached, where a null lookup cannot hide. */
     const srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
-    ok('MR9b the SERVER passes the material into the composer on a turn about this object — the module working is not the same as the wire being connected',
-      /material: _materialContext\(code, userId, about\)/.test(srv));
+    ok('MR9b the SERVER passes the material into the composer, bound by the ref that names an object',
+      /material: _material\b/.test(srv)
+      && /const _material = _materialContext\(code, userId, aboutRef\)/.test(srv));
+    /* AND DRIVEN, so a string can never stand in for a resolution again. The reply itself is the
+       deterministic one with models off; what is being asserted is that the SERVER resolved the
+       document for this turn, which it reports by citing it. */
+    const _turn = await post('/api/assistant/turn', T.p1,
+      { text: 'What does the deck say about the touchline?', about: { kind: 'focus', id: 'tf1' } });
+    ok('MR9c …and a turn about this focus actually resolves it, which a matched string cannot show',
+      _turn.status === 200
+      && (((_turn.j || {}).response || {}).sources || []).some(x => x && x.kind === 'material'));
 
     /* ── MR10-MR12: players say where they are, and it is DECLARED. ── */
     const guessed = await post(`/api/materials/${MID}/engaged`, T.p1, { sectionId: 's1', state: 'sort of' });

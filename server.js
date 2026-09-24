@@ -11588,6 +11588,29 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // that is not on this list — the same protection that stops it inventing a teammate.
     const professionals = _professionals(code);
 
+    /* ── WHAT WAS ATTACHED, HOISTED SO IT CAN BE CITED ────────────────────────────────────
+       LIVE iPHONE, findings R1 #41: "distinguish internal record/evidence, user-provided
+       material, and external/web knowledge", and "source counts must open to inspectable source
+       detail".
+
+       This was resolved inline at the `buildContext` call and nowhere else, so a document the
+       person attached was handed to the model and cited by NOTHING. An answer drawn from a
+       scouting deck came back saying "2 sources" and listed two things from the record — the one
+       thing the reader most obviously wanted to check, the document they had just uploaded, was
+       the one thing the source list did not mention.
+
+       Resolved through the reader's own view of the object either way, so this cites only
+       material they were already cleared to open. */
+    /* AND IT IS BOUND BY THE OBJECT REF, WHICH IS THE ONE THAT NAMES AN OBJECT. This read
+       `_materialContext(code, userId, about)`, and `about` here is `_turnAbout(opts.about)` —
+       `{ headline, body }`, the prose the prompt reads. `_materialContext` asks `_aboutRef` for a
+       `kind:id`, gets nothing from a headline, and returns null. EVERY TIME. So a document
+       attached to a Focus was never handed to the composer while talking on that Focus's thread;
+       only material attached to the conversation itself ever arrived, through the fallback below,
+       which is why nothing looked broken. `aboutRef` is the server-resolved identity and is
+       already passed in for exactly this kind of lookup. */
+    const _material = _materialContext(code, userId, aboutRef)
+      || _conversationMaterialContext(code, userId, conversation);
     const assignedWork = _allWork.filter(w => _titleUsable(w.title));
     const _quarantined = _allWork.length - assignedWork.length;
     if (_quarantined) console.log(`[composer] held back ${_quarantined} assigned item(s) with unusable titles`);
@@ -11626,7 +11649,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          so a person is only ever handed material from something they were already cleared to
          open. The alternative — looking the material up by id from the client's `about` — would
          make the client's claim about what it is reading into the access decision. */
-      material: _materialContext(code, userId, about) || _conversationMaterialContext(code, userId, conversation),
+      material: _material,
       /* HOW THIS CONNECTS TO THE REST OF THEIR RECORD.
 
          "Why did we create this focus?" and "did it help?" are answerable only if the model can
@@ -11732,6 +11755,28 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
       ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
       ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
+      /* ── AND THE DOCUMENT THEY ATTACHED, AS ITS OWN KIND OF SOURCE ──────────────────────
+         Findings R1 #41. Material was handed to the model and cited by nothing, so the one thing
+         a reader most obviously wants to check after uploading a deck was the one thing missing
+         from the list under the answer.
+
+         IT IS A THIRD KIND, not a record and not the web. A document somebody attached is
+         USER-PROVIDED: it is theirs, it is here, and it has been read — and none of that makes it
+         an observation anybody recorded about the world. `provenance` is the material module's own
+         answer, not a guess made here, and the detail says whether the whole thing was read,
+         because an answer drawn from three slides of twenty is not an answer about the deck. */
+      ...(_material ? [{ kind: 'material',
+        label: _material.title || _material.filename || 'A document you attached',
+        detail: [
+          /* WHICH KIND OF THING IT IS, in the governed classification's own terms rather than a
+             guess. "Something to read from" says nothing about anybody here and changes nothing
+             IntelliQ believes; the other two are deliberate, confirmed claims. A reader deciding
+             whether to trust a sentence is deciding exactly that. */
+          _material.classification === 'external_context'
+            ? 'You attached this to read from. It says nothing about anybody here.'
+            : 'You attached this as an account of what happened.',
+          _material.partial ? 'Part of it was read for this answer.' : 'It was read in full.',
+        ].join(' ') }] : []),
     ], written);
     /* WHAT THIS ANSWER CANNOT SHOW. One account is a starting point, not a finding, and the
        listener is the one who most needs telling — see L-MF5. Stated on the manifest so every
@@ -16797,10 +16842,29 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
   /* THE SOURCES, ONCE. They are the citation channel AND the figure the spoken disclosure states,
      so building them twice is building two answers to "what does this rest on". */
+  /* AND THE DETERMINISTIC PATH CITES THE DOCUMENT TOO — findings R1 #41, and the model-only-layer
+     rule this branch exists for. Adding material to the composed list alone would have put the
+     citation in front of exactly the readers who are not the pilot: with models off, which is the
+     pilot's own configuration, every answer comes through here. A person who attaches a deck and
+     asks about it is owed the same disclosure whichever engine wrote the sentence.
+
+     Resolved through the same reader's-own-view lookup, so this cites only what they could open
+     anyway, and says the same two things: whose it is, and whether it was read whole. */
+  const _respMaterial = composedReply ? null
+    : (_materialContext(code, userId, actionContext.objectRef)
+       || _conversationMaterialContext(code, userId, _conv));
   const _respSources = composedReply ? (composedReply.sources || []) : _sourceList([
     ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
     ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
     ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
+    ...(_respMaterial ? [{ kind: 'material',
+      label: _respMaterial.title || _respMaterial.filename || 'A document you attached',
+      detail: [
+        _respMaterial.classification === 'external_context'
+          ? 'You attached this to read from. It says nothing about anybody here.'
+          : 'You attached this as an account of what happened.',
+        _respMaterial.partial ? 'Part of it was read for this answer.' : 'It was read in full.',
+      ].join(' ') }] : []),
   ], responseText);
   const response = {
     responseText, mode, lens: lens || null,

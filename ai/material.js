@@ -288,6 +288,14 @@ function contextFor(material = {}, { sectionIds = null, cap = CONTEXT_CAP } = {}
     // What the caller asked to leave out, distinct from what the cap cut off. A caller that
     // narrowed deliberately can say so; one that simply ran out of room cannot claim it did.
     narrowed: !!want,
+    /* WHAT KIND OF THING THIS IS, carried so a caller can SAY so rather than guess — findings R1
+       #41 asks that internal record, user-provided material and external knowledge be told apart
+       wherever sources are shown. `provenance` above is the older field and answers a different
+       question ("was the file itself from outside"); the CLASS is the governed answer to "is this
+       a claim about people here, or something to read from", and it is the one a person needs
+       under an answer. Read from the record, never decided here — `classifyRequest` owns it. */
+    classification: CLASSES.includes(String(material.classification))
+      ? String(material.classification) : DEFAULT_CLASS,
     text: lines.join('\n\n'),
   };
 }
