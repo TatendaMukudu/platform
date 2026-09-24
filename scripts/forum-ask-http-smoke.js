@@ -155,8 +155,15 @@ const server = app.listen(0, async () => {
     const forumView = ui.slice(ui.indexOf('async openForum('), ui.indexOf('async forumAsk('));
     ok('FA-E1 the Forum offers Ask IntelliQ, as a control in the room itself',
       /<button[^>]*onclick="MemberApp\.forumAsk\(\)"/.test(forumView) && /iqf-ask/.test(forumView));
-    ok('FA-E2 …calling the room-scoped ask route',
-      /\/forum\/\$\{encodeURIComponent\(ctx\.objectId\)\}\/ask/.test(ui));
+    /* THE ROUTE COMES FROM THE OWNER, NOT FROM A SPELLING. This pinned the literal hard-coded
+       path `/api/group/${…}/forum/${…}/ask` — which is precisely the construction that produced
+       the live iPhone failure, because a Focus room has no node and the group segment came out
+       empty. An assertion that pins the defect cannot catch the defect. What matters is that the
+       ask addresses the same room the reader opened, and `_forumURL` is the one thing that knows
+       how to do that for both kinds. */
+    const askFn = ui.slice(ui.indexOf('async forumAsk('), ui.indexOf('async forumAsk(') + 1800);
+    ok('FA-E2 …calling the same room the reader opened, through the one owner of that address',
+      /_forumURL\(/.test(askFn) && /\/ask/.test(askFn) && !/\/api\/group\/\$\{/.test(askFn));
     /* THE ONE-COMPOSER LAW. The Forum view's own comment records why there is a single text box:
        two would be the costliest ambiguity in the product, because the difference between them is
        who reads what you type. A second box labelled "ask IntelliQ" would put a private question

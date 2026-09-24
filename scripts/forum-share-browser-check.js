@@ -56,6 +56,15 @@ _loadAllStores({
     inq_q: INQ('inq_q', 'football.build_up', 'Building from the back',
       ['does starting deeper actually help, or does it just move the problem?']),
   } } },
+  /* A FOCUS SHARED WITH CHOSEN PEOPLE — created from a conversation, no originating Inquiry, a
+     room because two or more people can read it. That is the exact shape the live iPhone Ask
+     failure appeared on, and it has no node, which is what broke the group-shaped ask route. */
+  userAiProfiles: { [`${C}:p1`]: { focuses: [{
+    id: 'foc_ui', text: 'Focus more on wins and conceding less', status: 'active',
+    visibility: 'selected', participants: ['p1', 'p2'],
+    createdAt: new Date(NOW - 3 * DAY).toISOString(),
+    target: 'fewer goals conceded in the last twenty minutes',
+  }] } },
   teamFocuses: { [C]: {
     sq:  [{ focusId: 'tf_press', nodeId: 'sq', text: 'Press from the first touch', status: 'active',
       createdAt: NOW - 6 * DAY, by: 'coach', origin: { from: 'leader', by: 'coach', at: NOW - 6 * DAY, inquiryId: null } }],
@@ -297,6 +306,45 @@ Object.assign(ai, {
     /* AND THE OTHER PERSON. The one who would have been spoken to, had this leaked. */
     ok('FB-19 …so the other member reads the room and finds none of that answer',
       !JSON.stringify((await room()).j.messages).includes(answerText.slice(-60)));
+
+    /* ── ASK INTELLIQ IN A FOCUS FORUM, WHICH IS WHERE IT BROKE LIVE ────────────────────────
+       Findings R1 #19: on a real iPhone the founder opened a Focus Forum, tapped "Ask IntelliQ
+       about this", and was shown
+
+         Unknown API endpoint: POST /group//forum/foc_rkvv6fnb/ask
+
+       — a group route with an empty node segment, because a Focus room has no node and the ask
+       built its own path. The room itself had always worked for both kinds; only the ask was
+       group-shaped. This walks the same tap on the same kind of room. */
+    const focusRoom = await page.evaluate(async () => {
+      const t = JSON.parse(localStorage.getItem('iq_auth')).token;
+      const r = await fetch('/api/forum/focus/foc_ui', { headers: { Authorization: 'Bearer ' + t } });
+      return { status: r.status, j: await r.json().catch(() => null) };
+    });
+    ok('FB-20 the Focus has a room its members can open', focusRoom.status === 200);
+    await page.evaluate(() => MemberApp.openForum('', 'foc_ui', 'focus', 'focus'));
+    await page.waitForTimeout(1400);
+    const askBtn2 = page.locator('button.iqf-ask');
+    ok('FB-21 …and the room offers Ask IntelliQ', await askBtn2.count() === 1 && await askBtn2.isVisible());
+    const [askRes] = await Promise.all([
+      page.waitForResponse(r => /\/ask$/.test(r.url()) && r.request().method() === 'POST'),
+      askBtn2.click(),
+    ]);
+    /* THE EXACT LIVE SIGNATURE. An empty segment is what `/group//forum/` is, and it is the one
+       thing this assertion exists to catch. */
+    ok('FB-22 …addressed at the room that was opened, with no empty segment in the path',
+      !/\/\//.test(askRes.url().replace(/^https?:\/\//, '')) && askRes.status() === 200);
+    await page.waitForTimeout(500);
+    const answer2 = (await page.locator('#iqf-answer').innerText()).trim();
+    ok('FB-23 …and a private answer renders, under a heading naming who can see it',
+      answer2.length > 40 && /only you can see this/i.test(answer2));
+    ok('FB-24 …without adding anything to the room',
+      await page.evaluate(async () => {
+        const t = JSON.parse(localStorage.getItem('iq_auth')).token;
+        const r = await fetch('/api/forum/focus/foc_ui', { headers: { Authorization: 'Bearer ' + t } });
+        const j = await r.json();
+        return (j.messages || []).length === 0;
+      }));
 
     ok('FB-12 these rendered journeys raised no uncaught client error', errors.length === 0);
   } catch (e) { fail++; console.error('  FAIL browser fixture threw:', e && e.stack); }

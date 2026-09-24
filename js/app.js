@@ -14072,10 +14072,27 @@ const MemberApp = {
      The two have different membership rules and so different routes, but a person opening a
      discussion should never have to know which kind they are in — so the difference lives in
      one line here and nowhere else in the client. */
-  _forumURL(ctx) {
-    return ctx.room === 'focus'
-      ? `/api/forum/focus/${encodeURIComponent(ctx.objectId)}`
-      : `/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.objectId)}`;
+  /* ONE OWNER FOR "WHERE IS THIS ROOM", AND BOTH ADDRESSES WRITTEN OUT.
+
+     The room kind is checked ONCE, here, which is what makes the live iPhone failure structurally
+     impossible rather than merely fixed: `forumAsk` used to build its own path with the group
+     route hard-coded, so a Focus room — which has no node — produced `/api/group//forum/foc_xxx/ask`
+     and the founder was shown "Unknown API endpoint". Two places that must agree about how to
+     address a room is one place too many.
+
+     THE PATHS ARE SPELLED OUT RATHER THAN CONCATENATED, deliberately. `reachability-smoke` reads
+     the front end for the literal tail after the prefix, because a route nobody can grep is a
+     route nobody can find — and `${this._forumURL(ctx)}/ask` hides `/ask` behind a backtick where
+     neither the gate nor a person looking for it can see it. */
+  _forumURL(ctx, action = '') {
+    const id = encodeURIComponent(ctx.objectId);
+    if (ctx.room === 'focus') {
+      return action === 'ask' ? `/api/forum/focus/${id}/ask` : `/api/forum/focus/${id}`;
+    }
+    const node = encodeURIComponent(ctx.nodeId);
+    return action === 'ask'
+      ? `/api/group/${node}/forum/${id}/ask`
+      : `/api/group/${node}/forum/${id}`;
   },
 
   async openForum(nodeId, objectId, room = 'group', backKind = 'inquiry') {
@@ -14162,10 +14179,23 @@ const MemberApp = {
     if (!ctx || !box) return;
     box.innerHTML = `<div class="iqf-answer-w">Reading what this room can see…</div>`;
     try {
-      const r = await fetch(`/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.objectId)}/ask`,
+      /* THE ROUTE COMES FROM THE OWNER THAT OPENED THE ROOM, never from guessed UI state. This
+         built its own path with the group route hard-coded, so a Focus room — which has no node —
+         produced `/api/group//forum/foc_xxx/ask`, and the founder saw "Unknown API endpoint" on a
+         live iPhone. `_forumURL` beside it has addressed both room kinds since focus rooms
+         existed; the ask is simply the same address with `/ask` on the end. */
+      const r = await fetch(this._forumURL(ctx, 'ask'),
         { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({}) });
       const d = await r.json().catch(() => null);
-      if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || 'That could not be answered right now.');
+      /* AND A FAILURE DOES NOT HAND THE PERSON THE ROUTE. The live screen read "Unknown API
+         endpoint: POST /group//forum/foc_rkvv6fnb/ask" — a method and a path, to somebody who
+         wanted an answer about their focus. The detail goes to the console for whoever is
+         debugging; what is shown says what happened and repeats the one guarantee that still
+         holds, which is that nothing was posted. */
+      if (!r.ok || !d || !d.ok) {
+        try { console.warn('[forum-ask] failed', r.status, (d && d.error) || ''); } catch (_) {}
+        throw new Error('IntelliQ could not answer this just now. Nothing was posted.');
+      }
       const esc = s => this._escape(String(s == null ? '' : s));
       /* THE BANNER IS NOT DECORATION. It is the difference between this and the room. */
       box.innerHTML = `

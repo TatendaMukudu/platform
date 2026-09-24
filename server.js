@@ -19285,6 +19285,72 @@ app.post('/api/forum/:kind/:objectId', requireAuth, (req, res) => {
   res.json({ ok: true, messageId: msg.messageId, epistemicEffect: 'none' });
 });
 
+/* POST /api/forum/:kind/:objectId/ask — ASK INTELLIQ IN A ROOM THAT IS NOT A NODE.
+
+   LIVE iPHONE BLOCKER (findings R1 #19). The founder tapped "Ask IntelliQ about this" on a Focus
+   Forum and got:
+
+     Unknown API endpoint: POST /group//forum/foc_rkvv6fnb/ask
+
+   Two defects in one tap. The client built its own path with the group route hard-coded, so a room
+   with no node produced an empty segment; and there was no ask route for a room without a node, so
+   even a well-formed path had nothing to answer it. The room itself has worked for both kinds
+   since focus rooms existed — only the ask was group-shaped.
+
+   THE SAME RULING, BECAUSE IT IS ABOUT ROOMS AND NOT ABOUT NODES: the room's own gate decides who
+   may ask, the answer is bounded to what the room can already see, and nothing is posted.
+
+   AND THE BOUNDING IS HARDER HERE, WHICH IS WORTH SAYING PLAINLY. A Focus sits inside each
+   member's own authorised set, so the obvious implementation — hand the object to
+   `_objectSelfRead` — is the wrong one: that reader also reports what ELSE this person has tried
+   on the same question, which is theirs, and differs between two people standing in one room. The
+   difference is exactly what would leak if either answer ever reached the room. So the answer is
+   composed from the Focus's OWN record and nothing else, and `FAF-D1` asserts two members receive
+   the same one. */
+app.post('/api/forum/:kind/:objectId/ask', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind);
+  const objectId = String(req.params.objectId);
+  /* THE ROOM'S OWN OWNER, re-resolved rather than remembered — the same call the read and the
+     post make, so a person who may not open the room may not ask about it either. */
+  const room = _forumRoom(code, userId, kind, objectId);
+  if (!room.ok) return res.status(room.status).json({ error: room.error });
+  if (!forum.mayRead(_roomAccess(room, userId))) return res.status(403).json({ error: 'not part of this' });
+
+  const obj = (_objectBucket(code, userId, 'self') || [])
+    .find(o => o && o.kind === kind && String(o.id) === String(objectId));
+  if (!obj) return res.status(404).json({ error: 'not found' });
+  const raw = obj.raw || {};
+
+  const parts = [];
+  const limitations = [];
+  const title = String(raw.text || (obj.present && obj.present.summary && obj.present.summary.title) || '').replace(/\.$/, '');
+  parts.push(`This is what "${title}" says it is working on.`);
+  /* WHAT WOULD TELL THEM IT IS WORKING, which is the half of an A -> B commitment that makes it
+     checkable rather than a wish. Absent is a real state and is said as one. */
+  if (raw.target) parts.push(`What would tell you it is working: ${String(raw.target).replace(/\.$/, '')}.`);
+  else parts.push('Nothing has been written down that would tell you whether it is working.');
+  const out = raw.outcome && raw.outcome.result ? raw.outcome.result : null;
+  if (out) {
+    parts.push(`What was recorded after it: ${String(present.outcomeText(out) || out).toLowerCase()}.`);
+    limitations.push('what was recorded after an attempt is not proof that attempt caused it');
+  } else {
+    parts.push('Nothing has been recorded yet about how it went.');
+  }
+  parts.push(`${room.members.length} ${room.members.length === 1 ? 'person is' : 'people are'} in this room.`);
+  limitations.push('this is what the room can already see on this focus, not a wider read of anybody');
+
+  res.json({ ok: true,
+    answer: parts.join(' '),
+    limitations,
+    /* THE SAME EXPLICIT BOUNDED DEGRADATION as the group room: with no model this is the object's
+       current governed read and does not vary with how the question was phrased. */
+    answers: 'current_object_read',
+    posted: false,
+    note: 'Only you can see this. To put something to the room, say it in the Forum or share it deliberately.',
+  });
+});
+
 /* PATCH /api/forum/:kind/:objectId/:messageId — edit or withdraw MY OWN speech. */
 app.patch('/api/forum/:kind/:objectId/:messageId', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
