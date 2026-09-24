@@ -942,6 +942,30 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
   .iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
 }
 
+/* ── ONE CONTROL ON THE RIGHT AT A TIME ───────────────────────────────────────────────────────
+   LIVE iPHONE BLOCKER, findings R1 #12: the composer placeholder was cut off on Highs, Lows, the
+   Library and a Focuses surface. Measured at 390px, the copy was not the cause — the row is 342px
+   and the text field got 176px, because attach, mic and send are each a 44px tap target and 44px
+   is the floor a thumb needs. About twenty characters fit, so every invitation longer than
+   "What's on your mind?" was clipped mid-word.
+
+   The rule is simply true: an empty composer has nothing to send. With no text there is a
+   microphone; the moment there is text, a send button in its place. One control either way,
+   ~52px back to the text field, and nothing becomes unreachable — send is present whenever there
+   is something to send, and Enter has always worked either way. `MemberApp._wsGrow` is the one
+   owner of "the composer's content changed" and sets the class. */
+.iq-composer:not(.has-text) .iq-send{display:none}
+.iq-composer.has-text .iq-mic{display:none}
+/* AND THE BAR DOES NOT JUMP WHEN THEY SWAP. The text field's own minimum is below both controls,
+   so the row's height was set by whichever one was showing: the microphone's 44px at rest, the
+   send button's 40px while typing. Four pixels lost on the first keystroke and handed back on
+   send — small, and exactly the kind of movement that makes a composer feel unsteady under a
+   thumb. The two controls now occupy the same 44px box, which is the tap target this file already
+   requires of everything else in the bar, so they are interchangeable in the layout as well as in
+   meaning. (A 4px margin round the 36px circle was tried first and overshot: `min-height:40px`
+   under `@media (hover:none)` had already grown the button, so the box came out at 48.) */
+.iq-composer .iq-send{width:44px;height:44px;min-height:44px}
+
 /* THE ATTACH CONTROL. A file input styled display:none inside a wrapping label does not open
    the picker on iOS Safari — the label has nothing focusable to forward the tap to. So the
    input stays in the layout at zero opacity and the label points at it by id, which is the
@@ -985,10 +1009,35 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    the last 44px of every page sat underneath it. A constant cannot be right here in any case,
    because the bar grows as somebody types and when the voice status line fills. */
 :root{--iq-shell-composer-h:160px}
-#iq-shell-composer .iq-composer-wrap{
+#iq-shell-composer .iq-composer-wrap,
+/* ── AND THE SAME MECHANISM FOR THE COMPOSERS INSIDE A PAGE ───────────────────────────────────
+   LIVE iPHONE BLOCKER, findings R1 #22. The object thread's composer and the Forum room's — one
+   markup, `.iq-object-thread` — carried `position:sticky;bottom:0` and it was inert. Sticky
+   resolves against the nearest ANCESTOR SCROLL CONTAINER, and `main.page-content` is one
+   (`overflow:auto`) while its height grows with its content and the document scrolls on `body`.
+   A scrollport with no scroll range never engages a sticky element. Measured at 390x844 on a
+   real Focus with two dozen turns, the composer sat at `top: 7203` — not buried, absent.
+
+   The shell bar met this exact model and was already solved by being fixed with the page
+   reserving its measured height; the note above says why restructuring the scroll model was the
+   wrong trade for a bar, and that has not changed. So these use the mechanism that works. The
+   reservation below is shared because exactly one bar is on screen at a time: an object thread
+   and a Forum room each stand the shell one down as they render, and MemberApp measures whichever
+   one is there into the same variable. */
+.iq-object-thread > .iq-composer-wrap{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
   padding:0.5rem 1.5rem calc(.35rem + env(safe-area-inset-bottom));
 }
+/* AND THE BAR'S OWN GUTTERS GIVE WAY BEFORE THE WRITING DOES. On a phone the composer is the
+   widest thing on screen and 1.5rem either side is 48px it does not need — the content above
+   keeps its gutter, this one narrows. Worth sixteen pixels to the text field, which on a 390px
+   screen is most of a word. Placed after the two rules above deliberately: it has the same
+   specificity as they do, so order is what decides it. */
+@media (max-width:440px){
+  #iq-shell-composer .iq-composer-wrap,
+  .iq-object-thread > .iq-composer-wrap{padding-left:1rem;padding-right:1rem}
+}
+
 /* The room. Applied to the scroll box rather than to each page, so a page cannot forget it. */
 .page-content{padding-bottom:calc(1.5rem + var(--iq-shell-composer-h))}
 

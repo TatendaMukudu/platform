@@ -1068,13 +1068,21 @@ _rebuildEmailIndex();
        Asserted as exact strings because these are the founder's own words for each room, and an
        approximate match would let them drift back into one generic line. */
     console.log('\n  PC-U THE INVITATION FITS THE ROOM, AND THE DRAFT SURVIVES THE WALK');
+    /* THESE FOUR WERE TRIMMED ON 2026-09-24, and the exactness is still the point. Findings R1
+       #12: four of them were cut off mid-word on a real iPhone, because attach, mic and send are
+       three 44px tap targets and the text field was left 176px of a 342px bar. The layout gave
+       way first — an empty composer no longer shows a send button — and the copy came the rest of
+       the way. `composer-fit-browser-check` measures the drawn width of each of these against the
+       field's own content box at 390px and 430px, so a future kind word cannot quietly clip them
+       again. What this assertion protects is unchanged: each room asks in its own words, pinned
+       exactly, so they cannot drift back into one generic line. */
     const WANT = {
       home:    'What’s on your mind?',
-      high:    'Tell me what you’ve noticed…',
-      low:     'Tell me what you’ve noticed…',
-      inquiry: 'What are you wondering about?',
-      focus:   'What do you want to work on?',
-      notes:   'Ask about what you’ve kept…',
+      high:    'What have you noticed?',
+      low:     'What have you noticed?',
+      inquiry: 'What are you wondering?',
+      focus:   'What are you working on?',
+      notes:   'Ask about what you kept…',
     };
     const seenPh = {};
     for (const r of Object.keys(WANT)) {

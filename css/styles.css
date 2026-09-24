@@ -3043,7 +3043,11 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    that on a phone loses the reader between one line and the next; the leading is generous for
    the same reason. Only ONE thing on the screen is large — what IntelliQ actually thinks —
    because if everything is emphasised nothing is. Colour carries no meaning anywhere here. */
-.iq-object-thread{max-width:62ch;margin:0 auto;padding-bottom:6rem}
+/* The 6rem tail below this is gone. It was room for a composer that sat in the flow at the very
+   bottom of a seven-thousand-pixel page; the composer is now fixed to the viewport (findings R1
+   #22) and `.page-content` reserves its MEASURED height, so a second fixed reservation here would
+   just be blank screen under the last turn — about 280px of it on a phone. */
+.iq-object-thread{max-width:62ch;margin:0 auto;padding-bottom:1rem}
 .iqt-head{display:flex;align-items:center;gap:.6rem;margin-bottom:1.4rem;flex-wrap:wrap}
 .iqt-head-mid{display:flex;align-items:baseline;gap:.55rem;flex:1;min-width:0;flex-wrap:wrap}
 .iqt-title{font-size:var(--fs-3xl);font-weight:600;line-height:1.3;margin:0;overflow-wrap:anywhere}

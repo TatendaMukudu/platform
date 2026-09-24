@@ -1827,3 +1827,67 @@ somebody else's theory. The contradiction was the defect; the wording was alread
   non-trend series; printing `value` for every unit; making the line key unconditional; emptying the
   readout figure; removing the onboarding guard; ignoring `openedBy`; `every` → `some` in the
   predicate; and reverting both halves of the #37 fix at once.
+
+### The box you type in — findings #22 and #12
+
+Two reports, one surface, and both were measured before anything was changed.
+
+**#22 — "the Focus conversation composer is effectively off-screen after long responses".** Driven
+at 390x844 against a real Focus with two dozen turns, the composer measured `top: 7203` in an 844px
+viewport on a 7431px page. Not buried. **Absent** — a person would scroll seven thousand pixels to
+reach the box the screen exists for.
+
+The cause was not a missing rule. It carried `position: sticky; bottom: 0`, and sticky resolves
+against the nearest **ancestor scroll container** — `main.page-content`, which has `overflow:auto`
+while its height grows with its content and the document scrolls on `body`. A scrollport with no
+scroll range never engages a sticky element, so the rule was inert on the object thread and in the
+Forum room alike, which share that markup.
+
+The shell bar met this same scroll model and was already solved, by being `position: fixed` with the
+page reserving its measured height underneath. The note beside that fix says why it did not
+restructure the scroll model — *"giving `.main-wrap` a fixed height would change how every page in
+the app scrolls, which is not a change to make for a bar"* — and that reasoning has not changed. So
+the in-page composers now use the mechanism that works rather than a second attempt at the one that
+does not, and `MemberApp._watchComposerHeight` measures whichever bar is on screen into the same
+variable, because exactly one is: the object thread and the Forum room each stand the shell one down
+as they render. The thread's own 6rem tail went with it — it was room for a composer that used to sit
+in the flow, and keeping it beside a real reservation would have been 280px of blank screen.
+
+**#12 — the placeholder cut off on Highs, Lows, the Library and a Focuses surface.** Measured, the
+copy was not the cause. The composer row is 342px at 390px and the text field got **176px** of it,
+because attach, mic and send are each a 44px tap target and 44px is the floor a thumb needs. About
+twenty characters fit, so every invitation longer than "What's on your mind?" was clipped mid-word.
+
+The founder's note offered shorter copy as a way out. Twenty characters is not enough for a human
+invitation, and cutting these to fit would have traded a visible defect for a cryptic product — the
+opposite of what the same brief asks for. **So the layout gave way first, on a rule that is simply
+true: an empty composer has nothing to send.** With no text there is a microphone and no send
+button; the moment there is text they swap. One control on the right either way, 44px back to the
+field, and nothing becomes unreachable — send is there whenever there is something to send, and
+Enter has always worked regardless. The bar's own gutters narrow below 440px for another 16px. That
+left four invitations over by 4 to 21 pixels, and the copy came the rest of the way; the trims also
+made all six of them questions, which two of them already were.
+
+**`composer-fit-browser-check` (33) is the new gate**, and it exists for a reason beyond these two
+fixes: a placeholder is the easiest thing in a product to lengthen by one kind word, and the damage
+is invisible to whoever writes it, because they are not on a phone. It measures the **drawn width**
+of each real string against the field's own content box at 390px and 430px — not a character count,
+which would be a guess about typography made in a test file. It also asserts *why* it fits: a field
+that fits everything because the copy was cut to six words is a different product, so the share of
+the row the writing gets is asserted too, and removing the mic/send swap turns that red at 54%.
+
+Two measurement traps are recorded in the file itself, because both produced a red gate over correct
+product. `html` carries `scroll-behavior: smooth`, so `window.scrollTo` **animates** and a position
+read straight afterwards is still zero. And `scrollIntoView({block:'end'})` aligns an element's
+bottom with the *viewport's* bottom, which is underneath a fixed bar by definition — it could never
+pass whatever the page reserved.
+
+One thing the founder did not report and the measuring found: the bar lost four pixels on the first
+keystroke and got them back on send, because the field's own minimum is below both controls and the
+row's height came from whichever one was showing. They occupy the same 44px box now.
+
+**Mutations, each required red then restored:** the thread composer back to `sticky` (C2, C3, C5);
+the long placeholders back (A1, by 21px); the mic/send swap removed (A1 on four pages, A2 at 54%,
+B1, B3, B5); the page's reservation removed (C6, C6b). `pilot-coach-browser-check` 135 — `PC-U1`
+and `PC-U5` pin the six invitations as exact strings so they cannot drift back into one generic
+line, and they were updated to the trimmed wording rather than loosened.

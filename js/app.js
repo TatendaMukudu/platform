@@ -12866,6 +12866,9 @@ const MemberApp = {
       // This page has just grown its OWN composer, asking about this object and sending to this
       // thread. The shell one stands down — it renders after navigation, which is before this.
       this._renderShellComposer();
+      // …and the room below the page is measured from the bar that is actually on it. Findings
+      // R1 #22: this composer is fixed to the bottom now, so the last turn has to clear it.
+      this._watchComposerHeight('.iq-object-thread .iq-composer-wrap');
     } catch (e) {
       /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
          answered for itself. Saying so, and still offering both a retry and a way back, is what
@@ -14227,6 +14230,7 @@ const MemberApp = {
        IntelliQ — two boxes on this screen would be the single most costly ambiguity in the
        product, because the difference between them is who reads what you type. */
     this._renderShellComposer();
+    this._watchComposerHeight('.iq-object-thread .iq-composer-wrap');
     /* THE BAR FOLLOWS THE ROOM. Opening a Forum from an inquiry left it reading "Inquiries". */
     try { setScreenTitle('Forum'); } catch (_) {}
   },
@@ -14351,13 +14355,26 @@ const MemberApp = {
      NOT "What do you want to know?" ANYWHERE. Founder: that turns IntelliQ into a search box.
      It was the prompt shown after an attachment, which is the exact moment the product should
      look least like a search engine \u2014 attaching is another way of speaking. */
+  /* \u2500\u2500 AND THEY ARE THIS SHORT BECAUSE A PHONE MEASURED THEM \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+     LIVE iPHONE BLOCKER, findings R1 #12: four of these were cut off mid-word on a real device.
+     The layout gave way first \u2014 an empty composer no longer shows a send button, and the bar's
+     gutters narrow below 440px, which together returned about sixty pixels to the text field.
+     These four were still over by 4 to 21 pixels at 390px, so the copy came the rest of the way.
+
+     Measured, not guessed: `scripts/composer-fit-browser-check.js` renders every one of them at
+     390px and 430px and compares the drawn text width against the field's own content box. It is
+     a gate rather than a note, because copy is the easiest thing in a product to lengthen by one
+     kind word and the defect it causes is invisible to whoever writes it.
+
+     The trims also made them consistent: all four are now questions, which is what the other two
+     already were. */
   _PLACEHOLDER: {
     home:    'What\u2019s on your mind?',
-    high:    'Tell me what you\u2019ve noticed\u2026',
-    low:     'Tell me what you\u2019ve noticed\u2026',
-    inquiry: 'What are you wondering about?',
-    focus:   'What do you want to work on?',
-    notes:   'Ask about what you\u2019ve kept\u2026',
+    high:    'What have you noticed?',
+    low:     'What have you noticed?',
+    inquiry: 'What are you wondering?',
+    focus:   'What are you working on?',
+    notes:   'Ask about what you kept\u2026',
     forum:   'Add to the conversation',
   },
 
@@ -14515,8 +14532,34 @@ const MemberApp = {
      One observer for the life of the bar, not one per render. If ResizeObserver is missing the
      CSS fallback stands, which is why that fallback is a height the bar does not exceed at rest
      rather than a tidy-looking number. */
-  _watchShellComposerHeight() {
-    const wrap = document.querySelector('#iq-shell-composer .iq-composer-wrap');
+  /* ── AND IT IS NOT ONLY THE SHELL BAR THAT NEEDS THIS ─────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #22: "the Focus conversation composer is effectively
+     off-screen after long responses". Driven at 390x844 against a real Focus with two dozen
+     turns, the thread's composer measured `top: 7203` in an 844px viewport, with the page 7431px
+     tall. Not buried — absent. A person would have to scroll seven thousand pixels to reach the
+     box that is the whole point of the screen.
+
+     WHY, AND IT IS NOT A MISSING RULE. The composer already carried `position: sticky; bottom:0`.
+     Sticky resolves against the nearest ANCESTOR SCROLL CONTAINER, and `main.page-content` has
+     `overflow:auto` — so it is that container — while its height grows with its content and the
+     document scrolls on `body` instead. A scrollport with no scroll range never engages a sticky
+     element, so the rule was inert everywhere it was used: on the object thread and in the Forum
+     room, which share this markup.
+
+     The shell bar met the same scroll model and was already solved, by being `position: fixed`
+     with the page reserving its measured height underneath. The note beside that fix says why it
+     did not restructure the scroll model to make sticky work: "giving `.main-wrap` a fixed height
+     would change how every page in the app scrolls, which is not a change to make for a bar".
+     That reasoning has not changed, so the in-page composers use the mechanism that works rather
+     than a second attempt at the one that does not.
+
+     ONE VARIABLE, because exactly one composer bar is on screen at a time — the object thread and
+     the Forum room each stand the shell one down as they render. So the reservation under
+     `.page-content` is always the height of the bar that is actually there. */
+  _watchShellComposerHeight() { this._watchComposerHeight('#iq-shell-composer .iq-composer-wrap'); },
+
+  _watchComposerHeight(selector) {
+    const wrap = document.querySelector(selector);
     if (!wrap) return;
     const set = h => document.documentElement.style.setProperty(
       '--iq-shell-composer-h', Math.round(h) + 'px');
@@ -14985,8 +15028,35 @@ const MemberApp = {
      there the ordinary wsSend() path — the same turn, the same governance. Voice reaches
      nothing typing does not. */
 
-  /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
-  _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },
+  /* Auto-grow the composer up to a calm maximum; keeps the hero compact.
+
+     ── AND ONE CONTROL ON THE RIGHT AT A TIME ───────────────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #12: the composer placeholder was cut off on Highs, Lows,
+     the Library and a Focuses surface. Measured at 390px, the cause is not the copy: the row is
+     342px wide and the text field gets 176px of it, because attach, mic and send are three 44px
+     tap targets and 44px is the floor a thumb needs. Barely twenty characters fit, so every
+     invitation longer than "What's on your mind?" was clipped mid-word.
+
+     The founder's note offered shorter copy as a way out. Twenty characters is not enough for a
+     human invitation, and cutting these to fit would have traded a visible defect for a cryptic
+     product — the opposite of the simplicity the same brief asks for.
+
+     SO THE LAYOUT GIVES WAY INSTEAD, on a rule that is simply true: AN EMPTY COMPOSER HAS
+     NOTHING TO SEND. With no text there is a microphone and no send button; the moment there is
+     text they swap. One control on the right either way, ~52px back to the text field, and no
+     capability moves — the send button is there whenever there is something to send, and Enter
+     has always worked regardless.
+
+     This function is the one owner of "the composer's content changed" — every clear, prefill,
+     transcript and keystroke comes through it — so the class is set here rather than at each of
+     the eight call sites. */
+  _wsGrow(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+    const row = el.closest ? el.closest('.iq-composer') : null;
+    if (row) row.classList.toggle('has-text', String(el.value || '').trim().length > 0);
+  },
 
   /* Empty-state chips prefill the ONE composer with a gentle starter and focus it — no new
      capability, just a faster way into the same assistant turn. */

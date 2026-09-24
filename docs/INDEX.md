@@ -608,7 +608,16 @@ it is **not** a parking space.
 `onboard-invite-smoke` (extended), `pilot-crackdown-smoke` (extended). Browser-only, outside
 `npm test` because they need a binary: `live-recovery-repro`, `onboard-browser-check`,
 `stack-browser-check`, `priority-surface-browser-check`, `library-browser-check`,
-`group-loop-browser-check`, **`pilot-coach-browser-check`**.
+`group-loop-browser-check`, **`pilot-coach-browser-check`**, `chart-shape-browser-check`,
+`theme-browser-check`, `naming-browser-check`, `composer-fit-browser-check`.
+
+`composer-fit-browser-check` is the September 24 live-iPhone pair: the object-thread composer that
+was seven thousand pixels down the page (`position:sticky` is inert when the nearest ancestor
+scroll container never scrolls), and the placeholder cut off mid-word on four surfaces because
+three 44px tap targets left the text field 176px of a 342px bar. It measures the DRAWN width of
+each invitation against the field's own content box at 390px and 430px, because copy is the
+easiest thing in a product to lengthen by one kind word and the damage is invisible to whoever
+writes it.
 
 `pilot-coach-browser-check` is the September 26 Alma walkthrough, driven at 390px with models
 off. It exists because of one rule: *the previous outcome bug survived because tests called the
