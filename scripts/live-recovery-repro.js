@@ -381,8 +381,20 @@ app.get('/__harness/stalled-body', (req, res) => {
         providerKey: true, providerReachable: true, providerFaultAt: null,
         writes: 'on — the model writes the reply and the deterministic core grounds it' });
       const p1 = await readPanel(page);
-      ok('LR-C0 the panel renders its four capability rows (an empty panel satisfies every negative assertion below for free)',
-        p1.rows.length === 4 && modelRow(p1) !== NO_ROW);
+      /* LR-C0 — THE ROWS ARE NAMED, NOT COUNTED. This asserted `rows.length === 4` and went stale
+         the day "files" was deliberately split into "Documents read for you" and "Photos read for
+         you", because those two fail for different reasons and one row left a person unable to
+         tell which half was missing. A bare count turns every honest addition to this panel into a
+         red gate, and says nothing about whether the row this phase is ABOUT was rendered.
+
+         What the assertion is for is unchanged and is what it now checks: the panel is populated,
+         and specifically the model row is present — because every negative assertion below ("no
+         reason is printed", "never rendered as a missing key") is satisfied for free by an empty
+         string, so a broken selector would report the whole phase green against nothing at all,
+         which is exactly what the first version of this did. */
+      ok('LR-C0 the panel renders its capability rows, including the one this phase is about'
+        + ` (${p1.rows.length} rows)`,
+        p1.rows.length >= 4 && modelRow(p1) !== NO_ROW);
       ok('LR-C1 composer enabled and writable renders ON for "written by the model"',
         /^ON /.test(modelRow(p1)) && /Conversation written by the model/.test(modelRow(p1)));
       ok('LR-C1b …with no reason printed beneath it, because there is nothing to act on',
@@ -395,7 +407,7 @@ app.get('/__harness/stalled-body', (req, res) => {
         writes: 'off — no language-model key is configured; every reply is written by the deterministic templates' });
       const p2 = await readPanel(page);
       ok('LR-C2 the host switch being ON does not make the model row say ON — the defect the review found',
-        p2.rows.length === 4 && /^OFF /.test(modelRow(p2)));
+        modelRow(p2) !== NO_ROW && /^OFF /.test(modelRow(p2)));
       ok('LR-C2b …while the host switch keeps its OWN row, which is still honestly ON',
         /^ON /.test(p2.rows.find(r => /composer surface/.test(r)) || NO_ROW));
 
@@ -605,9 +617,21 @@ app.get('/__harness/stalled-body', (req, res) => {
       const unknownOrigin = ['a', 'b', 'c'].map((s, n) => SIG({ source: s, turnId: 't' + n }));
       const independent = [SIG({ source: 'a', originRef: 'o1', turnId: 't1' }),
         SIG({ source: 'b', originRef: 'o2', turnId: 't2' })];
+      /* THE HYPOTHESIS CARRIES ITS OWN STANDING, and it has to, or this phase measures nothing.
+         A later law — "a badge is a statement about a CLAIM" — stopped `present.inquiryCard`
+         admitting a hypothesis as the card's claim, and stopped it wearing a band, unless the
+         kernel had given THAT hypothesis standing of its own. The fixture here predates it and
+         passed only a hypothesis, so both cards came back with `standing: null`, no badge was
+         rendered, and D1 through D5 went red against a product that is correct.
+
+         Adding the standing is not loosening the test. What this phase is for is the sentence
+         BESIDE the band: two opposite evidence shapes that land on the same band must not read the
+         same, which is exactly what an earlier band-keyed lookup got wrong. That question only
+         exists on a card that has a band at all. */
       const cardFor = signals => present.inquiryCard({
         topic: { canonicalConcept: 'football.press_shape', label: 'Press shape' },
         hypothesis: 'The press keeps forcing us backwards',
+        hypothesisStanding: { band: 'supported', supportedBy: signals.length },
         confidence: diagnose.deriveConfidence(signals),
       });
       const a = cardFor(unknownOrigin), b = cardFor(independent);
