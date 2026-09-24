@@ -20826,7 +20826,17 @@ app.get('/api/materials/:id', requireAuth, (req, res) => {
       /* WHO ATTACHED IT, as an id as well as a name — because deleting the original is theirs
          alone and a surface cannot offer that control honestly without knowing whose it is.
          The name alone is not an identity; two people can share one. */
-      by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt, attachTo: m.attachTo },
+      by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt, attachTo: m.attachTo,
+      /* WHAT THIS MATERIAL IS FILED AS, carried on the material itself.
+
+         The offer to say what a document IS used to be rendered only in the seconds after an
+         upload, from the page-level picker the founder has now retired (findings R1 #30). That
+         made a governed act reachable from one moment rather than from the thing it is about —
+         and a person decides what a document is after READING it, not while it lands. Exposing
+         the current filing here is what lets the material's own screen offer the change. */
+      classification: m.classification || 'external_context',
+      classificationLabel: (material.CLASS_TEXT[m.classification || 'external_context'] || {}).label || '',
+      classificationMeans: (material.CLASS_TEXT[m.classification || 'external_context'] || {}).means || '' },
     sections: (m.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading, text: s.text,
       // WHERE YOU SAID YOU WERE, so somebody can change their mind rather than declare twice.
       you: stateOf(s.id) })),

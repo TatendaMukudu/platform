@@ -250,13 +250,22 @@ const server = app.listen(0, async () => {
     console.log('\n  G — AND THE SURFACE ASKS RATHER THAN ASSUMES');
     const APP_RAW = R('js/app.js');
     const APP = APP_RAW.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-    ok('MC-G1 the attach flow shows how much was actually read',
-      /r\.extracted/.test(APP) && /Read \$\{ex\.characters/.test(APP_RAW));
-    ok('MC-G1b …and says when a file was longer than IntelliQ will hold',
-      /longer than IntelliQ will hold/.test(APP_RAW));
+    /* MC-G1 AND MC-G1b ARE GONE WITH THE PICKER THEY DESCRIBED, and nothing the founder wants
+       went with them. They pinned an extraction receipt — "Read N characters", "longer than
+       IntelliQ will hold" — that lived only in the page-level Attach material control, retired by
+       founder decision (findings R1 #30). The Composer receipt deliberately does NOT carry it:
+       the founder had already struck "Read 10 parts from IMG_1918.png" from a real phone, on the
+       grounds that how a file was segmented is the parser talking and a person who attaches a
+       screenshot wants to know it arrived. The picker was the last place that receipt survived. */
     ok('MC-G2 classification is OFFERED after the file is safely in, never as a condition of attaching it',
-      /_offerClassification\(/.test(APP)
-      && /this\._renderMaterial\(kind, objectId\);\s*\n\s*if \(r\.materialId\) this\._offerClassification/.test(APP));
+      /_offerClassification\(/.test(APP));
+    /* AND IT IS OFFERED FROM THE MATERIAL ITSELF, which is where it belongs and where it is now
+       reachable. Saying what a document IS — background reading, or evidence about this
+       organisation — is a judgement somebody makes after READING it, not in the second it lands;
+       and on the material it can be changed whenever they change their mind, rather than once,
+       from a moment that has passed. */
+    ok('MC-G2b …from the material\'s own screen, not from one moment after an upload',
+      /this\._offerClassification\(materialId, m\.attachTo\.kind, m\.attachTo\.id, _cls\)/.test(APP));
     ok('MC-G3 organisation evidence asks for the source before it will even send',
       /Where did this come from\?/.test(APP_RAW));
     ok('MC-G3b …and states the three requirements on the card',

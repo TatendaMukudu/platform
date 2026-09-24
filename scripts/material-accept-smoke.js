@@ -88,11 +88,17 @@ ok('M4 the CHAT path still offers PDFs and images — it sends them to the model
 
 /* The door. A correct list on the handler proves nothing if the input still asks for the other
    one — which is exactly the shape of the original defect. */
-const matInput = (appJs.match(/<input type="file" id="iqt-mat-file"[^>]*>/) || [''])[0];
-ok('M5 the Material file input asks for the MATERIAL list',
-  /materialAcceptAttr\(\)/.test(matInput));
-ok('M5b …and no longer borrows the chat list, which is how it came to advertise what it refuses',
-  !/ACCEPT_ATTR/.test(matInput));
+/* M5, M5b AND M7c4 DESCRIBED THE MATERIAL-ONLY PICKER, which is gone: the founder retired the
+   page-level Attach material control (findings R1 #30) because the Composer's paperclip already
+   attaches to whatever object is open, and did it better — that picker refused images and PDFs
+   while the Composer reads a picture through the vision gateway. The list it asked for cannot be
+   wrong when there is no list and no picker. What those assertions were really protecting is the
+   rule underneath, and that rule now has exactly one door to guard, so it is guarded there. */
+const composerFileInput = (appJs.match(/<input type="file" class="iq-attach-input"[^>]*>/) || [''])[0];
+ok('M5 the one remaining file input asks the handler for its list rather than carrying one',
+  /composerAcceptAttr\(\)/.test(composerFileInput));
+ok('M5b …and no picker anywhere still borrows a list it does not own',
+  !/ACCEPT_ATTR/.test(composerFileInput));
 
 /* THE GUARD THAT WAS ALWAYS FALSE. `AttachmentHandler` is a top-level `const` in a classic
    script, and a top-level const does not become a property of `window` — so a
@@ -103,7 +109,7 @@ ok('M5b …and no longer borrows the chat list, which is how it came to advertis
    cannot come back, and pinned across the whole file because the other call sites already use
    the right idiom and must keep using it. */
 ok('M6 the picker\'s guard is `typeof AttachmentHandler`, not `window.AttachmentHandler` — the handler is a top-level const, so the window form is always undefined and the accept attribute renders empty',
-  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.materialAcceptAttr\(\)/.test(matInput));
+  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.composerAcceptAttr\(\)/.test(composerFileInput));
 ok('M6b …and no guard anywhere in the client reaches for the handler through window',
   !/window\.AttachmentHandler\s*&&/.test(appJs));
 
@@ -154,16 +160,17 @@ ok('M7c2 …and the composer additionally offers the image types the SERVER can 
 ok('M7c3 …and never the wildcard, which would offer an iPhone HEIC nothing here can read',
   (() => { const attr = A && A.composerAcceptAttr ? A.composerAcceptAttr() : '';
     return !attr.includes('image/*') && !/heic|heif/i.test(attr); })());
-ok('M7c4 …while the Material-only picker still asks for the Material list alone',
-  (() => { const mat = (appJs.match(/<input type="file" id="iqt-mat-file"[^>]*>/) || [''])[0];
-    return /materialAcceptAttr\(\)/.test(mat) && !/composerAcceptAttr/.test(mat); })());
+ok('M7c4 …and the Material-only picker is gone, so it can no longer disagree with anything',
+  !/id="iqt-mat-file"/.test(appJs) && !/MemberApp\.attachMaterial\(/.test(appJs));
 ok('M7d …through the same `typeof` guard, since the window form renders an EMPTY accept that offers every file on the phone',
   /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.(materialAcceptAttr|composerAcceptAttr)\(\)/.test(composerInput));
 ok('M7e NO hand-written accept list survives on a path that sends text to the server',
   (() => {
     const inputs = appJs.match(/<input type="file"[^>]*>/g) || [];
-    const textPath = inputs.filter(t => /wsAttach|iqt-mat-file/.test(t));
-    return textPath.length >= 2
+    const textPath = inputs.filter(t => /wsAttach/.test(t));
+    /* ONE PATH NOW, NOT TWO. The count was `>= 2` when the Material picker was the second one;
+       requiring two after it was retired would be asserting that a retired control still exists. */
+    return textPath.length >= 1
       && textPath.every(t => /(materialAcceptAttr|composerAcceptAttr)\(\)/.test(t));
   })());
 

@@ -472,9 +472,21 @@ const server = app.listen(0, async () => {
 
     /* ── MR24: THE CALL SITES. A route with no caller is not a feature. ── */
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
-    ok('MR24 the attach control exists and posts the extracted text — the parser has been in the browser all along and sent it nowhere',
-      /MemberApp\.attachMaterial\(/.test(src) && /fetch\('\/api\/materials'/.test(src) &&
-      /AttachmentHandler\.process\(file\)/.test(src));
+    /* MR24 PINNED THE PAGE-LEVEL ATTACH CONTROL, which the founder retired (findings R1 #30): the
+       Composer's paperclip already attached to whatever object was open, and did it better —
+       that picker refused images and PDFs while the Composer reads a picture through the vision
+       gateway and binds the description to the same object.
+
+       THE LAW IS UNCHANGED AND STILL ASSERTED: a route with no caller is not a feature, and
+       attaching to an object is reachable. It is reachable through ONE door now, so that is the
+       door checked — `about` rides with the upload and the material comes back under `attachTo`,
+       which is what makes the Composer path a genuine replacement rather than a smaller one. */
+    ok('MR24 attaching to the object you are looking at is reachable, through the Composer',
+      /AttachmentHandler\.process\(file\)/.test(src)
+      && /fetch\('\/api\/assistant\/attachments'/.test(src)
+      && /about: thread\.about|about,/.test(src));
+    ok('MR24a …and the retired page-level picker is not still sitting beside it',
+      !/MemberApp\.attachMaterial\(/.test(src));
     ok('MR24b …a player can open a part and say where they are with it',
       /MemberApp\.markSection\('/.test(src) && /materials\/\$\{encodeURIComponent\(ctx\.materialId\)\}\/engaged/.test(src));
     ok('MR24c …the report and the recreate control are both reachable',

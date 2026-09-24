@@ -12302,6 +12302,20 @@ const MemberApp = {
     const box = document.getElementById('iqt-related') || document.getElementById('iq-object-turns');
     if (!box) return;
     const id = 'iq-aud-sheet';
+    /* ONE EDITOR, HOWEVER MANY TIMES THEY TAP. LIVE iPHONE BLOCKER (findings R1 #8): the founder's
+       screenshot showed this rendered three times in one scroll — three "WHO CAN SEE THIS"
+       headings, three sets of visibility choices, three Save/Cancel pairs.
+
+       `insertAdjacentHTML` appends, and the id below is fixed, so every tap added another editor
+       carrying the SAME id. That is worse than untidy: `getElementById` returns the first match,
+       so Save read the oldest editor while the person was choosing in the newest one, and the
+       sheet they were looking at was not the sheet that would be saved.
+
+       Removing any existing one before inserting makes repeated taps idempotent and leaves the
+       editor showing the object just tapped. The Focus panel next door already works this way and
+       says why: never two panels. */
+    const _open = document.getElementById(id);
+    if (_open) _open.remove();
     box.insertAdjacentHTML('beforebegin', `
       <div class="iq-focusprop" id="${id}" role="group" aria-label="Who can see this">
         <div class="iq-focus-label">Who can see this</div>
@@ -13670,15 +13684,20 @@ const MemberApp = {
         { headers: this._authHeaders() }).then(r => r.json());
     } catch (_) { return; }
     const list = (j && j.materials) || [];
-    const attach = `<button type="button" class="iqt-mat-add" onclick="MemberApp.attachMaterial('${esc(kind)}','${esc(objectId)}')">Attach material</button>
-      ${/* `typeof AttachmentHandler`, NOT `window.AttachmentHandler`. The handler is a top-level
-            `const` in a classic script, and a top-level const does not become a property of
-            window — so this guard was always false and the accept attribute always rendered
-            EMPTY. An empty accept offers every file on the phone, which is the opposite of what
-            the guard was for, and it was invisible to every source-level test because the source
-            said the right thing. Found by opening the page. The rest of this file already uses
-            `typeof AttachmentHandler === 'undefined'` for exactly this reason. */''}
-      <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}">`;
+    /* THE STANDALONE "ATTACH MATERIAL" CONTROL IS GONE — founder decision, findings R1 #30.
+
+       The note that stood here argued that hiding a real capability makes it a capability nobody
+       has, which is the failure this file keeps finding. That is right in general and wrong here,
+       because the capability did not go anywhere: the Composer's paperclip attaches to whatever
+       object is open — `about` rides with the upload and the material comes back under
+       `attachedTo` — so this was a SECOND door into the same room rather than the only one.
+
+       And it was the worse door. This picker refused images and PDFs ("no text came out of that
+       one") while the Composer path reads a picture through the vision gateway and binds the
+       description to the same object. A page-level control that silently supports less than the
+       one beside it is how somebody concludes the product cannot do what it can.
+
+       The list of what IS attached stays: finding it again is a different need from adding to it. */
     if (!list.length) {
       /* THE DOOR STAYS, THE APOLOGY GOES. "Attach material" is a real capability and hiding it
          would make it a capability nobody has — that is the failure this file keeps finding. But
@@ -13686,7 +13705,7 @@ const MemberApp = {
          object whether or not anybody wanted one, and it was the third of three stacked apologies
          on the Inquiry screen. The control says what it does; it does not need an essay beside
          it, and a coach who taps it can read one then. */
-      box.innerHTML = attach;
+      box.innerHTML = '';
       return;
     }
     box.innerHTML = `
@@ -13698,76 +13717,13 @@ const MemberApp = {
             <span class="iqt-mat-sub">${esc(m.parts)} ${m.parts === 1 ? 'part' : 'parts'} — ${esc(m.by)}</span>
           </button>
         </div>`).join('')}
-      <div class="iqt-mat-state" id="iqt-mat-state"></div>${attach}`;
+      <div class="iqt-mat-state" id="iqt-mat-state"></div>`;
   },
 
-  attachMaterial(kind, objectId) {
-    const input = document.getElementById('iqt-mat-file');
-    const state = document.getElementById('iqt-mat-state');
-    if (!input) return;
-    input.onchange = async () => {
-      const file = input.files && input.files[0];
-      input.value = '';
-      if (!file) return;
-      const say = t => { if (state) state.textContent = t; else showToast(t, 'info'); };
-      if (typeof AttachmentHandler === 'undefined') return say('The uploader is not available right now.');
-      say('Reading it…');
-      try {
-        /* A WORD, EXCEL OR POWERPOINT FILE GOES UP WHOLE and is read by `lib/office.js`. The
-           same decision as the composer's paperclip, through the same server helper, so this
-           picker cannot come to support a different set of formats than that one does. */
-        const officeKind = AttachmentHandler.serverReadKind
-          ? AttachmentHandler.serverReadKind(file) : null;
-        let body;
-        if (officeKind) {
-          body = { attachTo: { kind, id: objectId }, title: file.name, filename: file.name,
-            file: { data: await AttachmentHandler.fileToBase64(file), kind: officeKind, name: file.name } };
-        } else {
-          const parsed = await AttachmentHandler.process(file);
-          // An image or a PDF arrives as bytes with no text. IntelliQ cannot work from words it
-          // does not have, and saying so is better than attaching something it will then answer
-          // about from nothing.
-          const text = parsed.content || '';
-          if (!text.trim()) return say('No text came out of that one, so there would be nothing for IntelliQ to read. A deck, a document, a spreadsheet or a text file works.');
-          body = { attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text };
-        }
-        const r = await fetch('/api/materials', {
-          method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        }).then(x => x.json());
-        if (!r.ok) return say(r.error || 'That could not be attached.');
-        /* WHAT CAME OUT, AND WHAT IT IS. The founder's "read it and work from it" is only
-           trustworthy if a person can see how much was actually read: a forty-slide deck that
-           yielded four sections means something went wrong with the file, and silence about that
-           is how somebody comes to believe IntelliQ has read a document it has four paragraphs of.
+  /* `attachMaterial` IS GONE WITH THE CONTROL THAT CALLED IT. It posted to /api/materials with an
+     explicit `attachTo`; the Composer's paperclip reaches the same place through
+     /api/assistant/attachments with `about`, and reads pictures this one refused. One door. */
 
-           Every attachment lands as SOMETHING TO READ FROM. Making it evidence about the
-           organisation is a separate, deliberate act with its own requirements, offered here
-           rather than assumed — see _classifyMaterial. */
-        const ex = r.extracted || {};
-        const read = ex.characters
-          ? `Read ${ex.characters.toLocaleString()} characters into ${ex.sections} ${ex.sections === 1 ? 'part' : 'parts'}.`
-          : '';
-        const capped = ex.truncated ? ' That file was longer than IntelliQ will hold, so the end of it is not here.'
-          : ex.sectionsCapped ? ' It had more parts than IntelliQ will hold, so the last ones are not here.' : '';
-        say(`${r.note || 'Attached.'} ${read}${capped}`.trim());
-        this._renderMaterial(kind, objectId);
-        if (r.materialId) this._offerClassification(r.materialId, kind, objectId, r);
-      } catch (e) { say(e && e.message ? e.message : 'That file could not be read.'); }
-    };
-    input.click();
-  },
-
-  /* ── WHAT KIND OF THING DID YOU JUST ATTACH? ─────────────────────────────────────────────
-     Offered AFTER the file is safely in, never as a condition of attaching it — a person who has
-     just uploaded a deck should not have to answer an ontology question before it is saved.
-
-     The three are not a dropdown of synonyms. They differ in what they can DO: something to read
-     from changes nothing IntelliQ believes; your own account is yours and needs nobody's
-     permission; evidence about the organisation can change what the product believes about
-     people, and therefore cannot be asserted. The server decides, downgrades what was not earned,
-     and says which of permission, provenance or confirmation was missing — this surface only
-     asks and reports. */
   _offerClassification(materialId, kind, objectId, result) {
     const box = document.getElementById('iqt-mat-state');
     if (!box) return;
@@ -13838,6 +13794,8 @@ const MemberApp = {
     if (!j || !j.ok) return;
     const m = j.material;
     this._matCtx = { materialId, kind: m.attachTo.kind, objectId: m.attachTo.id };
+    const _cls = { classification: m.classification, classificationLabel: m.classificationLabel,
+      classificationMeans: m.classificationMeans };
     box.innerHTML = `
       <div class="iq-object-thread">
         <div class="iqt-bar">
@@ -13848,6 +13806,18 @@ const MemberApp = {
         </div>
         <div class="iqt-head"><div class="iqt-head-mid"><h1 class="iqt-title">${esc(m.title)}</h1></div></div>
         <div class="iqt-mat-by">Attached by ${esc(m.by)}</div>
+        ${/* WHAT THIS IS FILED AS, AND THE OFFER TO SAY OTHERWISE — on the material itself.
+
+              This offer used to live only in the seconds after an upload, rendered by the
+              page-level picker the founder retired (findings R1 #30). Removing that control would
+              have taken a governed act with it, which is not what was asked for and would have
+              been the worse half of the trade.
+
+              It belongs here anyway. Saying what a document IS — background reading, or evidence
+              about this organisation — is a judgement somebody makes after READING it, not in the
+              second it lands; and reachable from the material means reachable whenever they
+              change their mind, rather than once, from a moment that has passed. */''}
+        <div class="iqt-mat-state" id="iqt-mat-state"></div>
         <div class="iqt-mat-note">${esc(j.note)}</div>
         ${this._sourceStrip(materialId, m, j.sourceMedia)}
         ${(j.sections || []).map(s => `
@@ -13863,6 +13833,9 @@ const MemberApp = {
           </div>`).join('')}
         <div class="iqt-mat-report" id="iqt-mat-report"></div>
       </div>`;
+    /* AND THE OFFER IS DRAWN, now that its container exists.  writes into
+       #iqt-mat-state, which this screen now carries. */
+    this._offerClassification(materialId, m.attachTo.kind, m.attachTo.id, _cls);
     this._renderMaterialReport(materialId);
   },
 

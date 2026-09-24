@@ -190,15 +190,24 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
   await go('focus');
   await page.evaluate(id => MemberApp.openObjectThread('focus', id), String(myFocusId)).catch(() => {});
   await page.waitForTimeout(1600);
-  const acc = await page.$eval('#iqt-mat-file', el => el.getAttribute('accept')).catch(() => null);
+  /* THE PICKER THAT REMAINS. The page-level Material control this used to read was retired by
+     founder decision (findings R1 #30): the Composer's paperclip already attaches to whatever
+     object is open, and reads pictures the old picker refused. The invariant below is about a
+     picker offering exactly what it can read, and it is the Composer's picker that must now
+     satisfy it — asserting a retired element would be asserting that a removal did not happen. */
+  const acc = await page.$eval('input.iq-attach-input', el => el.getAttribute('accept')).catch(() => null);
   /* THE ACCEPT ATTRIBUTE AS THE BROWSER SEES IT. Read off the live element rather than off the
      template, because the two disagreed: the guard was `window.AttachmentHandler`, the handler is
      a top-level const, and a top-level const is not a property of window — so the attribute
      rendered empty and the picker offered every file on the phone. Every source-level assertion
      was green throughout, because the source said the right thing. */
-  ok('B7 the Material picker exists on the object thread and advertises a NON-EMPTY accept list — an empty one offers everything', !!acc);
-  ok('B7b …and it does not offer a PDF or an image, which it would have to refuse after the file was chosen',
-    !!acc && !/\.pdf/i.test(acc) && !/image/i.test(acc));
+  ok('B7 the picker exists on the object thread and advertises a NON-EMPTY accept list — an empty one offers everything', !!acc);
+  /* AND THE COMPOSER'S PICKER MAY OFFER A PICTURE, because it can actually read one: the bytes go
+     to the vision gateway and the description binds to the same object. The old assertion said
+     the opposite because the old picker refused images — which is the reason it was the worse
+     door, not a rule the product has. */
+  ok('B7b …and what it offers, it can read — a picture included, since the Composer reads those',
+    !!acc && /image/i.test(acc));
   /* ── B7c — THE LAW, NOT THE LIST, AND WHY THAT CHANGED ────────────────────────────────────
      This used to assert the literal set `.pptx .docx .xlsx .csv`, and it passed every time. It
      was reading a hard-coded attribute, not a capability. Word, PowerPoint and spreadsheets are
@@ -218,8 +227,18 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
     known: Object.keys(AttachmentHandler.MATERIAL_EXTENSIONS),
     jszip: typeof JSZip !== 'undefined', xlsx: typeof XLSX !== 'undefined',
   })).catch(() => null);
-  ok('B7c the picker offers EXACTLY the formats whose reader is present in this browser',
-    !!readerState && acc === readerState.exts.join(','));
+  /* THE SAME INVARIANT, AGAINST THE LIST THIS PICKER ACTUALLY OWNS. It compared the attribute to
+     the MATERIAL list, which belonged to the retired page-level control; the Composer's picker
+     carries the composer list, which is wider because that path can read more — a picture goes to
+     the vision gateway rather than being refused.
+
+     STILL NOT A TAUTOLOGY, and this is the defect it exists for: the attribute is read off the
+     LIVE ELEMENT and compared with what the handler says it should be. That is exactly how the
+     `window.AttachmentHandler` guard was caught — the source said the right thing while the
+     rendered attribute was empty and the picker offered every file on the phone. */
+  const composerList = await page.evaluate(() => AttachmentHandler.composerAcceptAttr()).catch(() => null);
+  ok('B7c the picker offers EXACTLY what its handler says it can read, as the browser renders it',
+    !!composerList && acc === composerList);
   /* ── AND WHAT "READABLE" MEANS CHANGED UNDERNEATH THIS ────────────────────────────────────
      This used to assert that .docx/.pptx are withheld unless JSZip loaded and .xlsx unless SheetJS
      did. That was right when the BROWSER parsed them. The founder's September decision moved

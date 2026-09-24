@@ -258,6 +258,36 @@ _rebuildEmailIndex();
     ok('NM-F3 …and a way to start a fresh one without losing them, as a real tap target',
       recents.newChat && recents.newChatBox.h >= 44 && recents.newChatBox.right <= 390);
 
+    console.log('\n  G — ONE AUDIENCE EDITOR, AND ONE ATTACHMENT DOOR (findings R1 #8 and #30)');
+    await go(() => MemberApp.openObjectThread('focus', 'f_press'));
+    /* #8: the founder's screenshot showed this rendered THREE TIMES in one scroll — three
+       headings, three sets of choices, three Save/Cancel pairs. `insertAdjacentHTML` appends and
+       the id is fixed, so every tap added another editor carrying the SAME id — and
+       `getElementById` returns the first match, so Save read the oldest editor while the person
+       was choosing in the newest one. */
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => MemberApp.openAudience('focus', 'f_press'));
+      await page.waitForTimeout(250);
+    }
+    const sheets = await page.evaluate(() => ({
+      byId: document.querySelectorAll('#iq-aud-sheet').length,
+      headings: [...document.querySelectorAll('.iq-focus-label')]
+        .filter(e => /who can see this/i.test(e.textContent || '')).length,
+    }));
+    ok('NM-G1 three taps leave exactly one audience editor', sheets.byId === 1);
+    ok('NM-G2 …and exactly one "Who can see this" heading with it', sheets.headings === 1);
+    /* #30: one obvious attachment entry point. The page-level control is retired; the Composer's
+       paperclip attaches to whatever object is open. */
+    const attachDoors = await page.evaluate(() => ({
+      standalone: document.querySelectorAll('.iqt-mat-add').length,
+      composer: [...document.querySelectorAll('input[type=file]')]
+        .filter(i => i.offsetParent !== null || i.closest('.iq-composer, .iq-field')).length,
+    }));
+    ok('NM-G3 the standalone Attach material control is gone from the object page',
+      attachDoors.standalone === 0);
+    ok('NM-G4 …while the Composer still offers one way to attach',
+      attachDoors.composer >= 1);
+
     ok('NM-D1 none of that raised an uncaught client error', errors.length === 0);
     if (errors.length) errors.slice(0, 4).forEach(e => console.error('        ' + e));
     await ctx.close();
