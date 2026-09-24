@@ -194,8 +194,19 @@ _rebuildEmailIndex();
     const home = await textOf(coach.page, null);
     ok('PC-A1 what is happening: the squad and the thing the squad noticed are both named',
       /First Team/.test(home) && /Communication after results/i.test(home));
-    ok('PC-A2 what IntelliQ understands: it says what it has a read on, and here says it has none',
-      /don't have a read on this yet/i.test(home));
+    /* PC-A2 — THE SAME LAW, AFTER FINDINGS R1 #37 SPLIT THE STATE IT WAS MEASURING.
+       This asserted that Home says "I don't have a read on this yet". On this fixture that
+       sentence appeared DIRECTLY ABOVE "Someone suggested: ..." and "Nothing supports this yet"
+       — the founder photographed exactly that on an Inquiry — so the screen denied having a
+       candidate in the line above the candidate.
+
+       There are three states, not two: nothing proposed, a candidate nobody supports, and an
+       admitted read. What IntelliQ owes a reader here is that it has not concluded anything, and
+       the suggestion line says that precisely. So the assertion is now that the screen carries
+       the candidate WITHOUT the sentence denying it — both halves, because the absence alone
+       would pass on a blank screen, and the genuine no-read state keeps its own proof at PC-N2. */
+    ok('PC-A2 what IntelliQ understands: with a suggestion on the record it claims no read and does not deny the suggestion',
+      /Someone suggested/i.test(home) && !/don't have a read on this yet/i.test(home));
     ok('PC-A3 what it does NOT understand: the open unknown is on the first screen, labelled as unknown',
       /STILL UNKNOWN|still unknown/i.test(home) && /nothing recorded supports it yet/i.test(home));
     ok('PC-A4 what someone thinks might explain it, marked as a suggestion rather than a finding',
@@ -250,6 +261,13 @@ _rebuildEmailIndex();
       /independent source|separate accounts|several people/i.test(thread));
     ok('PC-C3 what might explain it — offered as a suggestion, with what it rests on beside it',
       /Someone suggested it is because/i.test(thread) && /nothing on the record supports that yet/i.test(thread));
+    /* AND THE QUESTION'S OWN SCREEN DOES NOT DENY IT EITHER, findings R1 #37. The lede fell back
+       to the voice layer's no-read sentence whenever there was no ADMITTED read, which is true in
+       two different states — nothing proposed, and something proposed that nobody supports. The
+       second is this fixture, and the screen printed "I don't have a read on this yet" directly
+       above the suggestion it did have. The line below it already states the state exactly. */
+    ok('PC-C3b …and the screen does not deny having the suggestion in the line above it',
+      !/don't have a read on this yet/i.test(thread));
     ok('PC-C4 what would show we have this wrong',
       /What would change my mind/i.test(thread));
     ok('PC-C5 what we still do not know',
@@ -265,8 +283,22 @@ _rebuildEmailIndex();
       !/No outside reading here/i.test(thread));
     ok('PC-C10 no instruction manual for attachments — the control is there, the essay is not',
       !/Attach a deck, a document or a spreadsheet/i.test(thread));
-    ok('PC-C11 the attach control itself is still there, because hiding it makes it a capability nobody has',
-      /Attach material/i.test(thread));
+    /* PC-C11 — THE LAW IS UNCHANGED AND THE DOOR MOVED, findings R1 #30. This asserted the words
+       "Attach material", the page-level picker that used to sit under this screen's material
+       list. The founder had that control removed, and the reasoning was that it was the WORSE of
+       two doors to the same capability: it refused images and PDFs ("no text came out of that
+       one") while the composer's paperclip beside it reads a picture through the vision gateway
+       and binds the description to the same object.
+
+       So what must still be true is what this assertion was always for — a capability with no
+       door is a capability nobody has — and it is asserted at the door that exists. Read as a
+       rendered, non-hidden control rather than as text, because this one is an icon. */
+    const attachDoor = await coach.page.$$eval('.iq-attach',
+      els => els.filter(el => !el.hidden && el.getClientRects().length > 0).length).catch(() => 0);
+    ok('PC-C11 attaching is still reachable from this screen, because a capability with no door is a capability nobody has',
+      attachDoor >= 1);
+    ok('PC-C11b …and the door that was removed is genuinely gone rather than merely renamed',
+      !/Attach material/i.test(thread));
 
     /* ══ D — THE COACH DECIDES, AND THE CONTROL EMITS WHAT THE SERVER RECORDS ════════════════ */
     console.log('\n  D — THE RENDERED CONTROL, THE EMITTED VALUE, THE STORE, AND THE SCREEN AFTER');

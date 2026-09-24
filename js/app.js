@@ -12447,7 +12447,12 @@ const MemberApp = {
     const title = String(sum.title || x.headline || 'Working it out').replace(/\s*\.\s*$/, '');
     const rawClaim = String(sum.thinking || x.claim || '');
     const same = rawClaim.replace(/\s*\.\s*$/, '').trim().toLowerCase() === title.trim().toLowerCase();
-    const claim = same ? '' : rawClaim;
+    /* AND THE SAME CONTRADICTION THE THREAD HAD, findings R1 #37. With no admitted read the
+       fallback above is the voice layer's "I don't have a read on this yet", and the card then
+       prints "Someone suggested: ..." directly underneath it. Three states exist upstream — no
+       read, a candidate nobody supports, an admitted read — and this line flattened the first two
+       into the first. Where a candidate exists it says the state itself, so the denial goes. */
+    const claim = (same || (!sum.thinking && sum.possibleExplanation)) ? '' : rawClaim;
     const open = () => `MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')`;
     /* WHETHER THIS ONE HAS A ROOM IS THE SERVER'S ANSWER, from the same owner the object's own
        screen asks. It used to be decided here — `item.shared === true || participants.length > 1`
@@ -12633,9 +12638,33 @@ const MemberApp = {
           : 'Not enough evidence yet to suggest anything worth trying.')}
           <span class="iqt-ready-w">${esc(ready.because || '')}</span></p>` : '';
 
+      /* ── THREE EPISTEMIC STATES, AND THE SURFACE COLLAPSED TWO OF THEM ─────────────────────
+         LIVE iPHONE, findings R1 #37. One card, in this order:
+
+             Where they are trying to get to
+             I don't have a read on this yet.
+             Someone suggested: the stated need to work harder is driven by fear of losing
+             current momentum...
+             Nothing supports this yet
+
+         The first sentence and the third contradict each other, and the reader has no way to
+         tell which one the product means.
+
+         THE STATE MACHINE WAS ALREADY RIGHT. ai/present.js keeps three states apart deliberately:
+         `thinking` is an admitted read (the kernel gave that hypothesis standing of its own),
+         `possibleExplanation` is a candidate nobody has supported, and both empty is genuinely
+         nothing. What was wrong was HERE — the lede falls back to the voice layer's no-read
+         sentence whenever `thinking` is empty, which is true in the middle state as well as the
+         last one. So the surface printed "nothing proposed" over a proposal.
+
+         The correction is subtraction, not new copy. With a candidate present, the candidate line
+         two rows down already states the state exactly — a suggestion, and nothing supporting it
+         — so the sentence denying it is simply removed. Nothing is hidden: the same words the
+         founder saw are still on the screen, minus the one that was false. */
+      const noReadLede = !sum.thinking && !!(maybe && maybe.statement);
       const opening = `
         <div class="iqt-opening">
-          <p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>
+          ${noReadLede ? '' : `<p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>`}
           ${x.provenance ? `<p class="iqt-p iqt-prov">${esc(x.provenance)}</p>` : ''}
           ${maybeLine}
           ${rivalLine}
@@ -13582,15 +13611,30 @@ const MemberApp = {
     const W = 320, H = 132, PADL = 30, PADR = 10, PADT = 12, PADB = 24;
     const parts = [`<div class="iqt-chart-head">${esc(c.title)}</div>`];
 
+    /* WHICH SERIES WOULD BE PLOTTED, AND WHETHER ANY OF THEM IS A MOVEMENT. Computed here rather
+       than at the point of drawing because it decides more than the picture: copy that explains
+       how to read a line is wrong on a screen with no line on it. */
+    const plotSeries = c.kind === 'firming'
+      ? (c.series || []).filter(s => s.key === 'origins')
+      : (c.series || []);
+    const anyTrend = plotSeries.some(s => s.shape === 'trend');
+
     if (c.kind === 'firming') {
       const originSeries = (c.series || []).find(s => s.key === 'origins');
       const points = (originSeries && originSeries.points) || [];
       const current = points.length ? points[points.length - 1].value : 0;
       const threshold = c.threshold && c.threshold.value;
       parts.push(`<div class="iqt-chart-summary"><strong>${esc(current)} separate supporting ${current === 1 ? 'account' : 'accounts'}</strong>${Number.isFinite(threshold) ? ` · ${esc(threshold)} needed before IntelliQ can support a call` : ''}</div>`);
-      parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
-        From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
-      </div></details>`);
+      /* AND THE KEY ONLY WHEN THERE IS SOMETHING TO KEY. Every sentence in it is about the line:
+         reading left to right, the line not moving on a repeat, the horizontal marker. With one
+         moment on the record none of that is on the screen, so it was instructions for a picture
+         the reader could not see — the same defect as the axis, in prose. What it protects is
+         already said by the limitations underneath, which are not optional. */
+      if (anyTrend) {
+        parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
+          From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
+        </div></details>`);
+      }
     }
 
     if (c.kind === 'spread') {
@@ -13616,9 +13660,7 @@ const MemberApp = {
       const x0 = Math.min(...xs), x1 = Math.max(...xs);
       const px = v => PADL + (x1 === x0 ? (W - PADL - PADR) / 2 : ((v - x0) / (x1 - x0)) * (W - PADL - PADR));
       const svg = [];
-      const visibleSeries = c.kind === 'firming'
-        ? (c.series || []).filter(s => s.key === 'origins')
-        : (c.series || []);
+      const visibleSeries = plotSeries;
       for (const s of visibleSeries) {
         const pts = s.points || [];
         if (!pts.length) continue;
@@ -13654,13 +13696,61 @@ const MemberApp = {
          it, so a "Time" axis running from that date to the same date is a label for a dimension
          the picture does not have — and printing the same date at both ends is how a reader
          concludes the product is broken rather than that the record is young. */
-      const anyTrend = visibleSeries.some(s => s.shape === 'trend');
-      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}${anyTrend ? '' : ' — one moment on the record, shown as points rather than a line'}">${svg.join('')}</svg>`);
       const first = all.length ? new Date(x0).toLocaleDateString() : '';
       const last = all.length ? new Date(x1).toLocaleDateString() : '';
-      parts.push(anyTrend
-        ? `<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`
-        : `<div class="iqt-chart-axis iqt-chart-axis-state"><span>${esc(first)}</span><span>one moment on the record</span></div>`);
+      const yLabel = c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events';
+      const distinctTimes = new Set(xs).size;
+      if (!anyTrend) {
+        /* ── NO TREND, NO CHART SURFACE ────────────────────────────────────────────────────
+           FOUNDER DECISION, findings R1 #31 and #40. The live Focus page showed "Recorded
+           events" above a single blue dot, a large amount of empty space, and copy correctly
+           explaining that this is one moment rather than change over time.
+
+           The epistemic refusal was already right — the line is withheld unless the server
+           declares a trend, and that guard stays. The PICTURE was wrong. An axis, a plot area
+           and a dot are the furniture of a time series; drawing them around one observation
+           makes a reader look for a shape that is not there, and costs a screenful of height on
+           the surface where the conversation is supposed to be primary.
+
+           SO IT IS A READOUT, NOT A PLOT. Same rule for High, Low, Inquiry and Focus, because
+           this is the one renderer all four go through — #40 asked for exactly that rather than
+           a Focus-only fix. A line returns when the server says there is a trend to draw, and
+           not before: two ordered observations are still not a shape.
+
+           WHAT A ROW SAYS DEPENDS ON THE UNIT, and getting that wrong is how this fix would have
+           shipped its own defect. A `date` series plots WHEN and nothing else — its `value` IS
+           the timestamp — so printing that value as the readout figure would have put a raw epoch
+           number on the Focus screen, which is the exact surface finding #31 came from. A date
+           series is therefore a list of what happened; a `count` series is a current figure; a
+           `band` series reads out the kernel's own word for where the evidence stands. */
+        const rows = [];
+        for (const sr of visibleSeries) {
+          const pts = sr.points || [];
+          if (!pts.length) continue;
+          /* A date series lists its events, because each one is a separate thing that happened.
+             A count or a band has one current answer, and the earlier points are how it got
+             there — a history worth a line only once there is a line to draw. */
+          const shown = sr.unit === 'date' ? pts : [pts[pts.length - 1]];
+          for (const p of shown) {
+            const when = Number.isFinite(p.at) ? new Date(p.at).toLocaleDateString() : '';
+            const lead = sr.unit === 'count' ? String(p.value)
+              : (sr.unit === 'band' ? String(p.label || '') : '');
+            const label = sr.unit === 'date' ? (p.label || sr.name || yLabel) : (sr.name || yLabel);
+            rows.push(`<div class="iqt-readout-row">
+              ${lead ? `<span class="iqt-readout-v">${esc(lead)}</span>` : ''}
+              <span class="iqt-readout-l">${esc(label)}</span>
+              ${when ? `<span class="iqt-readout-w">${esc(when)}</span>` : ''}
+            </div>`);
+          }
+        }
+        parts.push(`<div class="iqt-readout">${rows.join('')}<div class="iqt-readout-n">${
+          distinctTimes <= 1 ? 'One moment on the record — not a change over time.'
+            : 'Single observations, not a change over time.'
+        }</div></div>`);
+      } else {
+        parts.push(`<div class="iqt-chart-y">${yLabel}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+        parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
+      }
     }
     // L-CH5 — a picture with no stated limits is read as complete.
     parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);

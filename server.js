@@ -18335,6 +18335,17 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   res.json({ ok: true, ...state, viewer: { leads: _leadsNode(code, nodeId, userId) } });
 });
 
+/* AN INQUIRY WHOSE WHOLE RECORD IS THE ONBOARDING FORM. Keyed on the turn the onboarding route
+   stamps every one of its proposals with (`onboarding_<userId>`, set where ONBOARDING_ACCOUNTS is
+   applied) rather than on the `self_account.*` concepts, because what matters is not the topic —
+   it is that one sitting is the only thing on the record. A withdrawn signal is not evidence and
+   is not counted; an inquiry with nothing live on it at all is left to the caller's own rule, so
+   this can only ever hide something the form alone produced. See the reader in `_objectBucket`. */
+function _onboardingOnly(inq, userId) {
+  const live = ((inq && inq.signals) || []).filter(s => s && s.status !== 'withdrawn');
+  return live.length > 0 && live.every(s => String(s.turnId || '') === `onboarding_${userId}`);
+}
+
 /* GET /api/objects — the one four-bucket read, parameterised by grain rather than role.
    It projects existing objects only; it detects and persists nothing. */
 function _objectBucket(code, userId, scope = 'self') {
@@ -18434,6 +18445,43 @@ function _objectBucket(code, userId, scope = 'self') {
          the confirmation a lie: the route said "Inquiry opened" and the person's screens showed
          nothing, on every scope. `openedBy` is set only by the governed confirmation path. */
       if (!i || (!(i.signals || []).length && !i.openedBy)) continue;
+      /* ── AND THE ONBOARDING FORM IS NOT FIVE OPEN QUESTIONS ────────────────────────────────
+         LIVE iPHONE, findings R1 #36. The founder's Inquiry list read as a profile questionnaire:
+
+             What they say they bring
+             What it looks like when they are not at their best
+             Where they are trying to get to
+             Where they want to get better
+             What else they wanted known
+
+         Those are not stray legacy cards. They are REAL inquiries, one per onboarding answer,
+         created by `POST /api/auth/complete-profile` — which is right, and is the reason the
+         kernel does not spend a month rebuilding what somebody typed on day one. Reproduced by
+         driving that route: five objects, each with exactly one signal, `turnId
+         onboarding_<userId>`, `originRef self:<userId>`, never deliberately opened.
+
+         WHAT IS ACTUALLY WRONG. An Inquiry is one question being worked through, and one of these
+         cannot be. Five answers given in one sitting are ONE ORIGIN by this product's own rule,
+         and a standing needs two independent ones — so every one of them is permanently below the
+         line, ranked in among the questions that are not. The person is shown five form fields
+         wearing the clothes of live questions, in the third person, about themselves.
+
+         WHAT IS NOT WRONG, and is therefore not touched. The evidence stays exactly where it is.
+         `inquiryStates` is unchanged, the kernel still reads it, `_composeTurn` reads the same
+         store directly rather than through this bucket, and the onboarding route still answers
+         `evidenced: 5` truthfully — what the client says afterwards is that their words are "on
+         your record as starting points", which remains true. This is the object INDEX: what a
+         person is shown as a live question, which is a different question from what the record
+         holds. Findings #36 asked for exactly that split — "profile/background context may be
+         used by IntelliQ internally and surfaced only when it materially explains the current
+         object".
+
+         AND IT COMES BACK BY ITSELF. The moment anything that is not that one form touches the
+         same concept — a second person's account, a later observation, or the person deliberately
+         opening it — the predicate stops holding and the inquiry is listed. That is the same
+         two-origin threshold the rest of the product uses, and it means nothing here is a
+         permanent exclusion list. */
+      if (!i.openedBy && _onboardingOnly(i, userId)) continue;
       const lead = (i.hypotheses || []).find(h => h && h.id === i.leadingHypothesisId);
       add('inquiry', { ...i, hypothesis: lead && lead.statement,
         stillUnknown: (i.missingSignals || []).map(m => m && (m.question || m)).filter(Boolean) });

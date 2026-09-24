@@ -1695,3 +1695,135 @@ been worse than not measuring at all.**
 Live Render, live Neon (network, pooler, cold start), real provider quality, real invite delivery,
 and an actual iPhone/Safari. **Everything else in this branch has been driven on a real browser at
 phone width or against a real database.**
+
+## 14. Claude — live iPhone findings closure — 2026-09-24
+
+Source of truth for this round: `docs/reviews/LIVE_IPHONE_PILOT_FINDINGS_R1.md`, worked in priority
+order — blockers and live contradictions first, cosmetics last. Nothing merged or deployed.
+
+| SHA | Findings | Change |
+|---|---|---|
+| `9155f8c` | #10 | Ask IntelliQ works in a Forum that is not a group, and a failure no longer shows the route |
+| `6851b5b` | #1 | An image the person attached is an image IntelliQ has read |
+| `200a41c` | #2, #3 | What you just told me is something I have, and it is still not evidence |
+| `2d5fe9c` | #16, #6 | The assistant and the Highs/Lows pages read one owner |
+| `1b48ba4` | #32, #13 | One send is one durable human turn, recorded before anything is asked of a model |
+| `9470aee` | #8, #30 | One audience editor, one attachment door, the classification offer on the material |
+| *this commit* | #31, #40, #36, #37 | One moment is a readout, and the record stops reading as a questionnaire |
+
+### The shape almost every one of these had
+
+A capability that exists in source, passes a hermetic test, and produces nothing — or something
+false — on a real device. A Forum Ask route that was group-shaped on a room with no node. An image
+description stored correctly and then never read back. A refusal about the evidence store offered as
+the answer to a question about the conversation. A model filling a silence where canonical standing
+should have been. A human turn whose durability depended on nothing throwing between it and the
+provider. An audience editor that appended duplicates carrying colliding ids, so Save read the
+oldest sheet while the person chose in the newest.
+
+The recurring cause is narrower than "untested": **a law implemented only in a model prompt is not
+implemented.** With models off — the pilot's own configuration — it reaches nobody. Every fix this
+round is carried on the deterministic path first, with the prompt asserted to agree rather than to
+substitute.
+
+### Charts — findings #31 and #40, and the part the founder did not ask for
+
+The live Focus page showed "Recorded events" above one blue dot, most of a screenful of empty plot,
+and copy correctly explaining that this is one moment rather than change over time.
+
+**The epistemic refusal was already right.** `ai/chart.js` derives the shape from the points and the
+gate refuses a declaration that disagrees with them, so no line was drawn. **The picture was wrong.**
+An axis, a plot area and a dot are the furniture of a time series; drawing them around one
+observation makes a reader look for a shape that is not there, and costs a screenful on the surface
+where the conversation is supposed to be primary.
+
+So a non-trend chart is now a compact readout — in the shared renderer, which is what #40 asked for
+rather than a Focus-only fix, so it holds for High, Low, Inquiry and Focus alike.
+
+**Two things I found while doing it that the finding did not name.**
+
+*A timeline's value IS its timestamp.* A focus draws a timeline, whose unit is `date`. A readout that
+printed "the value" for every unit would have put a raw epoch millisecond in front of a coach — on
+the exact screen the finding is a photograph of. The figure is read only from a `count`; a date
+series lists what happened and when; a band series reads out the kernel's own word. The browser gate
+now opens a real Focus with one event at 390px and 430px and asserts there is no run of five or more
+digits anywhere in the readout.
+
+*"How to read this" was four sentences about a line.* Reading it left to right, the line not moving
+on a repeat, the horizontal marker on it. Over a readout it is instructions for something the reader
+cannot see — the axis defect again, in prose. It is now offered only when a line was drawn. What it
+protected is carried by the limitations, which are not optional and print either way.
+
+`chart-shape-browser-check` also carried a false green of its own: two `page.evaluate` blocks built
+an auth header from `Auth._token()`, which does not exist — the token is `Auth.token` — so they sent
+unauthenticated requests and the assertions behind them were satisfied by the failure. Both now use
+the production `MemberApp._authHeaders()`.
+
+### The record stopped reading as a questionnaire — findings #36 and #37
+
+**#36.** The founder's Inquiry list opened on five profile-form labels, in the third person, about
+themselves. Reproduced by driving `POST /api/auth/complete-profile`: these are not stray legacy
+cards, they are **real inquiries**, one per onboarding answer, each with exactly one signal carrying
+`turnId onboarding_<userId>` and `originRef self:<userId>`.
+
+Creating them is right — it is the reason the kernel does not spend a month rebuilding what somebody
+typed on day one. **What is wrong is where they are shown, and the product's own rules say why.** An
+Inquiry is one question being worked through. Five answers given in one sitting are ONE ORIGIN by
+this product's own repetition rule, and a standing needs two independent origins — so every one of
+them is permanently below the line by construction, ranked in among questions that are not.
+
+The split is at the object INDEX only. `inquiryStates` is untouched, the kernel still reads it,
+`_composeTurn` reads that store directly rather than through this bucket, and the route still answers
+`evidenced: 5` truthfully. Finding #36's own third bullet asked for exactly this: *profile/background
+context may be used by IntelliQ internally and surfaced only when it materially explains the current
+object.*
+
+**It is not an exclusion list, and that is the half that matters.** The predicate is "the only thing
+on this is that one form". A second origin speaking, or the person deliberately opening it, ends it —
+and `onboarding-surface-http-smoke` sections D and E prove both, because a reader that hid these
+forever is how a product quietly stops showing somebody their own record.
+
+**#37.** The same screens printed "I don't have a read on this yet" directly above "Someone
+suggested: …" and "Nothing supports this yet". The state machine upstream was already right —
+`ai/present.js` keeps three states apart: an admitted read, a candidate nobody supports, and nothing.
+Two of them were collapsed **at the surface**, because both the list card and the thread lede fell
+back to the voice layer's no-read sentence whenever there was no *admitted* read.
+
+The correction is subtraction, not new copy. Where a candidate exists, the line two rows down already
+states the state exactly, so the sentence denying it is removed. Nothing is hidden: the same words the
+founder saw are still on the screen, minus the one that was false. The genuine no-read state keeps
+its own proof — `PC-N1`/`PC-N2` still require it to be reachable, so this cannot pass by the sentence
+disappearing everywhere.
+
+### Where I did not do what the finding said
+
+**#36 said "remove these legacy taxonomy cards".** Taken literally that deletes real record objects
+and the kernel's starting point with them. The correction is at the reader, not the writer: the
+evidence stays, the index stops treating one form as five open questions, and it returns by itself.
+
+**#37 suggested the copy "One possibility we're still testing:".** The existing line says "Someone
+suggested:", which carries the provenance the product law cares about — a person proposed this, and
+human speech is not evidence. Rewriting it to "we're still testing" would make IntelliQ the owner of
+somebody else's theory. The contradiction was the defect; the wording was already more accurate.
+
+### Stale tests found and corrected rather than deleted
+
+- `PC-C11` asserted the words "Attach material" — the page-level picker finding #30 removed. The law
+  it carried (a capability with no door is a capability nobody has) is asserted at the door that
+  exists: the composer's paperclip, read as a rendered non-hidden control. `PC-C11b` now asserts the
+  removed door is genuinely gone rather than renamed.
+- `PC-A2` asserted that Home says "I don't have a read on this yet" — on a fixture where that
+  sentence sat directly above the suggestion. It now asserts the corrected law in both halves.
+- `CS-*-1..8` pinned the SVG for the one-moment case. Every law they carried is kept and re-asserted
+  against the readout; `CS-*-4` moved from reading dot geometry to reading the condition at its owner,
+  because the fixture is only meaningful while the two accounts really do share one timestamp.
+
+### Proof
+
+- **Truth Layer: green.**
+- `chart-governance-smoke` 57, `chart-shape-browser-check` 50 (390px and 430px, real Chromium),
+  `pilot-coach-browser-check` 134, `onboarding-surface-http-smoke` 14.
+- **Eight mutations this section**, each required red then restored: forcing the plot back for a
+  non-trend series; printing `value` for every unit; making the line key unconditional; emptying the
+  readout figure; removing the onboarding guard; ignoring `openedBy`; `every` → `some` in the
+  predicate; and reverting both halves of the #37 fix at once.

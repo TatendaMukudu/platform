@@ -65,6 +65,15 @@ _loadAllStores({
   orgUsers: { [C]: { me: { id: 'me', name: 'A Player', email: 'm@x.io', role: 'member', orgCode: C,
     status: 'active', assignedNodeIds: ['n1'], profileComplete: true } } },
   orgNodes: { [C]: { n1: { nodeId: 'n1', name: 'First Team', memberIds: ['me'], leaderIds: [] } } },
+  /* THE SURFACE THE FOUNDER WAS ACTUALLY LOOKING AT. Findings R1 #31 is a FOCUS screenshot, and a
+     focus draws a TIMELINE, not a firming chart — a different builder, a different unit, and a
+     `value` that is the timestamp itself. A gate that only ever opened inquiries proved the rule
+     on the one series shape where getting it wrong is harmless. One event, so the record has a
+     single moment in it and nothing has to be arranged to make that true. */
+  userAiProfiles: { [`${C}:me`]: { focuses: [{
+    id: 'foc_one', text: 'Get the first ten minutes right', status: 'active',
+    visibility: 'only_me', createdAt: new Date(NOW - 2 * DAY).toISOString(),
+  }] } },
   inquiryStates: { [C]: { 'member:me': {
     same: INQ('same', 'Two accounts, one moment', [
       SIG('ev_s1', 'o_s1', NOW - 2 * DAY), SIG('ev_s2', 'o_s2', NOW - 2 * DAY)]),
@@ -85,8 +94,10 @@ _rebuildEmailIndex();
   const HARNESS_ONLY = [/^Chart is not defined$/];
   const pageErrors = [];
 
-  /* Read the chart as it is actually drawn: the path geometry, the dots, the axis, the caveats. */
-  const readChart = (page, id) => page.evaluate(async ([kind, objectId]) => {
+  /* Read the chart as it is actually drawn: the path geometry, the dots, the axis, the caveats —
+     AND the readout, which is what a record with no trend in it now renders as instead of a plot.
+     Both are read every time, because the whole question this file asks is which one appeared. */
+  const readChart = (page, id, kind = 'inquiry') => page.evaluate(async ([kind, objectId]) => {
     await MemberApp.openObjectThread(kind, objectId);
     await new Promise(r => setTimeout(r, 1400));
     const box = document.getElementById('iqt-chart');
@@ -95,13 +106,40 @@ _rebuildEmailIndex();
     const paths = [...box.querySelectorAll('path.iqt-line')].map(p => p.getAttribute('d') || '');
     const dots = [...box.querySelectorAll('circle.iqt-dot')].map(c => ({
       cx: Number(c.getAttribute('cx')), cy: Number(c.getAttribute('cy')), r: Number(c.getAttribute('r')) }));
+    const ro = box.querySelector('.iqt-readout');
     return {
       missing: false, hasSvg: !!svg, paths, dots,
       aria: svg ? (svg.getAttribute('aria-label') || '') : '',
       text: box.innerText || '',
       rect: svg ? (() => { const b = svg.getBoundingClientRect(); return { w: b.width, h: b.height }; })() : null,
+      readout: ro ? {
+        rows: [...ro.querySelectorAll('.iqt-readout-row')].map(r => (r.innerText || '').replace(/\s+/g, ' ').trim()),
+        note: (ro.querySelector('.iqt-readout-n') || {}).innerText || '',
+        h: ro.getBoundingClientRect().height,
+      } : null,
+      /* The whole element's rendered height, readout or plot. The founder's complaint was not only
+         that the picture was wrong, it was that it cost a screenful on the surface where the
+         conversation is supposed to be primary. */
+      boxH: box.getBoundingClientRect().height,
     };
-  }, [ 'inquiry', id ]);
+  }, [ kind, id ]);
+
+  /* WHAT THE SERVER SAID THE SHAPE WAS, read from the same route the screen reads. The vertical
+     line was a RENDERER defect, but the condition that produced it — several accounts sharing one
+     timestamp — is a fact about the record, and the fixture is only meaningful while it holds. */
+  const readSpec = (page, id) => page.evaluate(async (objectId) => {
+    /* THE PRODUCTION HEADER BUILDER, not a hand-rolled one. An earlier evaluate in this file
+       reached for `Auth._token()`, which does not exist — the token is `Auth.token` — so it sent
+       an unauthenticated request and the assertion behind it was satisfied by the failure. */
+    const r = await fetch(`/api/objects/inquiry/${objectId}/chart`, {
+      headers: MemberApp._authHeaders(),
+    }).then(x => x.json()).catch(() => null);
+    const series = ((r && r.chart && r.chart.series) || []).map(s => ({
+      key: s.key, unit: s.unit, shape: s.shape,
+      ats: (s.points || []).map(p => p.at), values: (s.points || []).map(p => p.value),
+    }));
+    return { ok: !!(r && r.ok), series };
+  }, id);
 
   try {
     for (const width of WIDTHS) {
@@ -122,25 +160,47 @@ _rebuildEmailIndex();
       const notice = await page.$('button:has-text("I understand")');
       if (notice) { await notice.click().catch(() => {}); await page.waitForTimeout(400); }
 
-      /* ── THE FOUNDER'S CASE ──────────────────────────────────────────────────────────────── */
+      /* ── THE FOUNDER'S CASE ────────────────────────────────────────────────────────────────
+         WHAT THESE ASSERTIONS USED TO SAY, AND WHY THEY CHANGED. They pinned the SVG: a plot
+         surface with two unconnected dots sharing one x, drawn larger so they would not read as
+         dust. That was the right fix for the vertical line and the wrong answer to the screen.
+         Findings R1 #31 and #40: the founder met "Recorded events" over a single dot and most of
+         a screenful of empty plot, with correct copy underneath explaining it was one moment. The
+         epistemic refusal was already right; the picture was the problem. An axis and a plot area
+         promise a dimension the record does not have.
+
+         So the LAWS these assertions carried are kept exactly — no line, the record is not
+         hidden, no time range from a date to itself, and a screen reader is told what a sighted
+         reader is told — and they are now asserted against the readout that replaced the plot. */
       const same = await readChart(page, 'same');
-      ok(`CS-${width}-1 the one-moment chart draws at all`, same.missing === false && same.hasSvg === true);
+      const sameSpec = await readSpec(page, 'same');
+      ok(`CS-${width}-1 a record with one moment in it is a readout, not a plot`,
+        same.missing === false && same.hasSvg === false
+        && !!same.readout && same.readout.rows.length >= 1);
       ok(`CS-${width}-2 …and draws NO LINE — this is the vertical line, gone`, same.paths.length === 0);
-      ok(`CS-${width}-3 …while still showing the accounts as points, so the record is not hidden`,
-        same.dots.length >= 2);
-      /* THE PROOF THE DEFECT WAS REAL, not the proof it is fixed: every dot still shares one x,
-         because they genuinely happened at one moment. That is exactly the geometry that produced
-         a vertical path, so this asserts the CONDITION still holds and the LINE still does not. */
-      ok(`CS-${width}-4 …the points do share one x, which is precisely why a line between them was a lie`,
-        same.dots.length >= 2 && new Set(same.dots.map(d => d.cx)).size === 1);
-      ok(`CS-${width}-5 …the dots are drawn larger, so an unconnected point does not read as dust`,
-        same.dots.every(d => d.r >= 4));
+      ok(`CS-${width}-3 …while still stating what the record holds, so it is not hidden to be tidy`,
+        !!same.readout && same.readout.rows.some(r => /^2\b/.test(r) && /supporting accounts/i.test(r)));
+      /* THE PROOF THE DEFECT WAS REAL, not the proof it is fixed. This used to read the dots'
+         geometry; there are no dots now, so it reads the CONDITION at its owner instead — the two
+         accounts genuinely share one timestamp, which is why the server shapes this `state` and
+         why a line between them would have been a lie. A fixture that quietly stopped doing that
+         would make every assertion above vacuous. */
+      ok(`CS-${width}-4 …and the two accounts really do share one timestamp, which is why there is no line`,
+        sameSpec.ok === true && (() => {
+          const o = sameSpec.series.find(s => s.key === 'origins');
+          return !!o && o.shape === 'state' && o.ats.length >= 2 && new Set(o.ats).size === 1;
+        })());
       ok(`CS-${width}-6 …the chart says in words that this is one moment rather than a movement`,
         /recorded at the same moment/i.test(same.text));
-      ok(`CS-${width}-7 …the axis does not claim a time range running from a date to itself`,
+      ok(`CS-${width}-7 …and claims no time range running from a date to itself`,
         /one moment on the record/i.test(same.text) && !/^Time$/m.test(same.text));
-      ok(`CS-${width}-8 …and a screen reader is told the same thing as a sighted reader`,
-        /one moment on the record/i.test(same.aria));
+      /* A SCREEN READER IS TOLD THE SAME THING — and now it is told it by the ordinary means,
+         because the readout is text. The old assertion read an `aria-label` standing in for a
+         graphic; a graphic that no longer exists needs no label, and a label reappearing here
+         would mean a plot had come back. */
+      ok(`CS-${width}-8 …and a screen reader reads the same words, not a label describing a picture`,
+        same.aria === '' && !!same.readout
+        && /one moment on the record/i.test(same.readout.note));
 
       /* ── SAME DAY, TWO MOMENTS. Deliberately a trend. ─────────────────────────────────────── */
       const day = await readChart(page, 'day');
@@ -149,6 +209,14 @@ _rebuildEmailIndex();
         day.dots.length >= 2 && new Set(day.dots.map(d => d.cx)).size >= 2);
       ok(`CS-${width}-11 …and carries no one-moment caveat, because it is not one moment`,
         !/recorded at the same moment/i.test(day.text));
+      /* THE SIZE OF THE THING, WHICH IS HALF THE FINDING — and measured against the plot it
+         replaced rather than a pixel number somebody would later tune until it passed. Same
+         screen, same width, same chart kind, same renderer: the only difference is that one
+         record has a movement in it and the other does not. A readout that cost what the plot
+         cost would have fixed the epistemics and left the founder's complaint standing. */
+      ok(`CS-${width}-5 …and one moment costs far less height than the plot it replaced`,
+        same.boxH > 0 && day.boxH > 0 && same.boxH < day.boxH - 100
+        && !!same.readout && same.readout.h < 80);
 
       /* ── DISTINCT DAYS ───────────────────────────────────────────────────────────────────── */
       const days = await readChart(page, 'days');
@@ -159,6 +227,24 @@ _rebuildEmailIndex();
         const xs = [...d.matchAll(/[ML]([\d.]+),/g)].map(m => Number(m[1]));
         return new Set(xs).size >= 2;
       })());
+
+      /* ── THE FOCUS SCREEN THE FINDING CAME FROM ──────────────────────────────────────────
+         A focus draws a TIMELINE, whose unit is `date` and whose `value` IS the timestamp. So
+         this is the one place where a readout that printed "the value" would put a raw epoch
+         millisecond in front of a coach, and it is the exact screen findings R1 #31 is a
+         photograph of. One event on the record, and the honest readout of one event is the event
+         — what happened and when — never a figure. */
+      const foc = await readChart(page, 'foc_one', 'focus');
+      ok(`CS-${width}-18 a focus with one event on it is a readout, not a plot`,
+        foc.missing === false && foc.hasSvg === false && !!foc.readout);
+      ok(`CS-${width}-19 …which names what happened and when, rather than a number`,
+        !!foc.readout && foc.readout.rows.length === 1 && /^Set\b/.test(foc.readout.rows[0]));
+      /* THE EPOCH, ASSERTED AGAINST DIRECTLY. A date rendered by `toLocaleDateString` has no run
+         of five or more digits in it in any locale; a timestamp is thirteen. */
+      ok(`CS-${width}-20 …and never prints the timestamp itself as though it were a figure`,
+        !!foc.readout && !/\d{5,}/.test(foc.readout.rows.join(' ')));
+      ok(`CS-${width}-21 …and says it is one moment rather than a movement`,
+        !!foc.readout && /one moment on the record/i.test(foc.readout.note));
 
       /* ── NOTHING IS SCORED, AT ANY WIDTH ─────────────────────────────────────────────────── */
       ok(`CS-${width}-14 no chart puts a score, a rating or a percentage in front of a person`,
@@ -243,8 +329,7 @@ _rebuildEmailIndex();
        to swallow both. Asserted on the rendered refusal line rather than on the payload, because
        a note the server sends and the screen drops is the same failure to a coach. */
     const refusal = await p2.evaluate(async () => {
-      const r = await fetch('/api/objects/inquiry/days/chart',
-        { headers: { Authorization: 'Bearer ' + (window.Auth && Auth._token ? Auth._token() : '') } })
+      const r = await fetch('/api/objects/inquiry/days/chart', { headers: MemberApp._authHeaders() })
         .then(x => x.json()).catch(() => null);
       const box = document.getElementById('iqt-chart');
       return { refused: !!(r && r.refused), note: String((r && r.note) || ''),

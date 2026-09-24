@@ -315,8 +315,37 @@ console.log('\n  CG20 — AND THE RENDERER DRAWS WHAT IT WAS TOLD');
     /isTrend\s*\)\s*\{[\s\S]{0,400}iqt-line/.test(fn));
   ok('CG20d …so no line can be emitted for a state series',
     !/svg\.push\(`<path class="iqt-line[\s\S]{0,40}`\);\s*\n\s*svg\.push\(pts\.map/.test(fn));
-  ok('CG20e …and a one-moment chart is not given a "Time" axis running from a date to itself',
-    /anyTrend/.test(fn) && /one moment on the record/.test(fn));
+  /* CG20e/f/g — FINDINGS R1 #31 AND #40, WHICH MOVED THIS LAW ON.
+     The shape rule already withheld the LINE. What the founder then met on a real Focus screen was
+     the rest of the furniture: a "Recorded events" axis label, a plot area and a lone dot, with
+     copy underneath correctly explaining that this was one moment. The refusal was right and the
+     picture was wrong — an axis and a plot area are a promise of a dimension the record does not
+     have, and a reader looks for a shape that is not there.
+
+     So a non-trend chart is now a READOUT: no svg, no Time axis, no dot. Asserted as the absence
+     of the plot INSIDE the non-trend branch rather than anywhere in the function, because the
+     trend branch legitimately holds all three. */
+  const nonTrend = fn.slice(fn.indexOf('if (!anyTrend)'), fn.indexOf('} else {', fn.indexOf('if (!anyTrend)')));
+  ok('CG20e the renderer branches on the server\'s shape before it draws anything at all',
+    /const anyTrend = plotSeries\.some\(s => s\.shape === 'trend'\)/.test(fn)
+    && nonTrend.length > 400 && /iqt-readout/.test(nonTrend));
+  ok('CG20f …and the one-moment branch draws no plot surface, no axis and no dot',
+    !/iqt-svg|iqt-chart-axis|iqt-chart-y|iqt-dot/.test(nonTrend));
+  ok('CG20g …and never prints a "Time" range running from a date to itself',
+    !/<span>Time<\/span>/.test(nonTrend) && /<span>Time<\/span>/.test(fn));
+  /* AND THE ROW DOES NOT PRINT A TIMESTAMP AS A FIGURE. A timeline series plots WHEN and nothing
+     else — its `value` IS the epoch millisecond — so a readout that showed `value` for every unit
+     would have put a raw number where a Focus's "Set" belongs, on the very screen this came
+     from. The guard is that the figure is read only for a count. */
+  ok('CG20h …and reads a figure only from a count, never from a date series whose value is a timestamp',
+    /sr\.unit === 'count' \? String\(p\.value\)/.test(nonTrend));
+  /* AND THE PROSE GOES WITH THE PICTURE. "How to read this" is four sentences about a line:
+     reading it left to right, it not moving on a repeat, the horizontal marker on it. Left
+     standing over a readout it is instructions for something the reader cannot see — the axis
+     defect again, in words. What it protects is carried by the limitations, which are not
+     optional and are printed either way. */
+  ok('CG20i …and the key explaining how to read a line is only offered when a line was drawn',
+    /if \(anyTrend\) \{\s*\n\s*parts\.push\(`<details class="iqt-chart-key"/.test(fn));
 }
 
 console.log(`\nchart-governance-smoke: ${pass} passed, ${fail} failed`);

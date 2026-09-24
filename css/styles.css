@@ -3801,3 +3801,14 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   font-size:var(--fs);font-weight:600;cursor:pointer}
 .iq-theme-opt:hover{border-color:var(--text-muted)}
 .iq-theme-opt.is-on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+
+/* ── A RECORDED MOMENT IS A READOUT, NOT A PLOT ──────────────────────────────────────────────
+   Findings R1 #31/#40: one observation drawn inside a chart's furniture makes a reader look for a
+   shape that is not there, and costs a screenful of height on the surface where the conversation
+   is supposed to be primary. Compact by design. */
+.iqt-readout{display:flex;flex-direction:column;gap:.35rem;margin:.2rem 0 .5rem}
+.iqt-readout-row{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+.iqt-readout-v{font-size:var(--fs-xl);font-weight:700;color:var(--text-primary);line-height:1.1}
+.iqt-readout-l{font-size:var(--fs);color:var(--text-secondary)}
+.iqt-readout-w{font-size:var(--fs-xs);color:var(--text-muted)}
+.iqt-readout-n{font-size:var(--fs-xs);color:var(--text-muted);line-height:1.45}
