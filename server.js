@@ -6412,9 +6412,14 @@ function _audienceNote(code, visibility, participantIds) {
    Self-scoped. This is the lifecycle's final step (…Execute → Observe → Learn). */
 app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const { focusId, outcome } = req.body || {};
+  const { focusId, outcome, note } = req.body || {};
   if (!focusId) return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
-  const result = _recordPersonalFocusOutcome(code, userId, focusId, outcome);
+  /* AND WHAT THEY TRIED, IF THEY SAID SO — findings R1 #14. The composer path carries the
+     person's own sentence into the outcome record's `note`, and a direct control that could not
+     would be the two transports disagreeing about what a closed Focus holds. `focus-ownership-
+     parity-smoke` is the gate that says so, and it caught exactly this the moment the composer
+     path gained the field. Optional either way: a note nobody wrote stays empty. */
+  const result = _recordPersonalFocusOutcome(code, userId, focusId, outcome, String(note || ''));
   if (!result.ok) return res.status(result.status).json({ error: result.error });
   res.json({ ok: true });
 });
@@ -9377,8 +9382,11 @@ function _personalFocusAddress(code, userId, input = {}) {
    helped / no / mixed about their own commitment, while a group records better / no_change /
    worse / unclear about a change it tried. Those are different questions and collapsing them
    would lose the distinction to make two enums match. */
-function _focusOutcomeRecord(result, byUserId, now = Date.now()) {
-  return { result: String(result || ''), note: '', recordedBy: byUserId || null, at: now };
+function _focusOutcomeRecord(result, byUserId, now = Date.now(), note = '') {
+  /* `note` WAS HARD-WIRED TO EMPTY and the field has existed since this was written — findings R1
+     #14. A group focus has always recorded what was tried; a personal one recorded the verdict
+     with nothing for it to be a verdict ABOUT. It is the person's own sentence or nothing. */
+  return { result: String(result || ''), note: String(note || '').slice(0, 400), recordedBy: byUserId || null, at: now };
 }
 
 /* THE ONE READER OF A FOCUS OUTCOME, whichever shape it is on disk in. A bare string is what
@@ -9647,7 +9655,7 @@ function _focusRelationsOf(focus) {
       ...(r.supersededAt ? { supersededAt: r.supersededAt, supersededBy: r.supersededBy } : {}) }));
 }
 
-function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
+function _recordPersonalFocusOutcome(code, userId, focusId, outcome, note = '') {
   if (!['helped', 'no', 'mixed'].includes(outcome)) return { ok: false, status: 400, error: 'outcome must be helped, no or mixed' };
   const mem = _getMemory(code, userId);
   const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
@@ -9665,7 +9673,7 @@ function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
      closed before this change are already on disk as strings and rewriting somebody's stored
      record to fix a reader is a worse trade than reading honestly. */
   focus.status = 'done';
-  focus.outcome = _focusOutcomeRecord(outcome, userId);
+  focus.outcome = _focusOutcomeRecord(outcome, userId, Date.now(), note);
   focus.resolvedAt = new Date().toISOString();
   _completeFocusAction(code, focus, outcome, userId);
   if (focus.type && outcome !== 'mixed') {
@@ -16077,6 +16085,13 @@ function _composerActionEffect(candidate, context) {
     text: a.text || null, textSource: sources.text || null,
     account: a.because || null,
     target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
+    /* WHAT WILL ACTUALLY BE WRITTEN, ON THE CARD THEY READ BEFORE PRESSING CONFIRM — findings R1
+       #14. The outcome word alone is a verdict on nothing; `note` is the person's own sentence
+       about what they tried, and it is going into the canonical record, so it belongs on the card
+       rather than arriving there unseen. `outcomeSource` follows `textSource` and `relationSource`
+       above: it says whether the word was written in their sentence or chosen from the ones this
+       focus's own owner accepts, so the card can be exact about which. */
+    note: a.note || null, outcomeSource: sources.outcome || null,
     /* A SHARE'S AUDIENCE IS THE OBJECT'S ROOM, resolved by the server, never an argument the model
        supplied. The model does not choose who sees something; the object does, and the person
        reads it here before confirming. */
@@ -22445,9 +22460,15 @@ async function _confirmProposal(req, res) {
          `teamState` writer, same audit line. A group focus is identified the way every other
          reader identifies one: it carries the node it belongs to. */
       const _nodeOfFocus = live && (live.whoseNodeId || (live.raw && live.raw.nodeId)) || null;
+      /* AND WHAT THEY TRIED TRAVELS WITH IT. Findings R1 #14: the outcome record has carried a
+         `note` since it was written and the personal path hard-wired it to the empty string, so
+         "it didn't help" was a verdict on nothing. The note is the person's own sentence, taken
+         from their turn by the grounding layer and confirmed by them here; it is never a model's
+         summary and is never assembled on this side. */
+      const note = String(p.note || '').slice(0, 400);
       const result = _nodeOfFocus
-        ? _recordGroupFocusOutcome(code, userId, _nodeOfFocus, ref.id, { result: outcome })
-        : _recordPersonalFocusOutcome(code, userId, ref.id, outcome);
+        ? _recordGroupFocusOutcome(code, userId, _nodeOfFocus, ref.id, { result: outcome, note })
+        : _recordPersonalFocusOutcome(code, userId, ref.id, outcome, note);
       if (!result.ok) {
         const { ok, status, ...rest } = result;
         return res.status(status || 400).json(rest.error ? rest : { error: 'outcome refused' });

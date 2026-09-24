@@ -1979,3 +1979,44 @@ by a server that caches every repeat. **Four mutations, each red then restored:*
 including the second assistant message); an unbounded cache (D1); a retry that mints a fresh id (E2,
 which would be the duplicate arrived at by the mechanism meant to prevent it); and the full
 paragraph on every degraded turn (F1).
+
+### How a Focus went is a thing a person can record — finding #14
+
+The founder reported trying an extra defender and still conceding. The assistant clarified scope;
+the Focus afterwards still showed no outcome.
+
+**The capability existed the whole time.** `record_focus_outcome` has a canonical writer, an
+allowlisted vocabulary and an audit line. Its **only door was a model proposing it** — so with
+models off, which is the pilot's own configuration, closing the loop on a commitment was a
+capability nobody had, and with models on it depended on a model choosing to offer it. The vertical
+slice law again, on the one act the whole A→B loop exists for.
+
+**Two things had to be true at once, which is why the door is a picker and not a text box.** The
+outcome word is a closed vocabulary with two grains the canonical writer keeps separate — helped /
+no / mixed for a personal focus, better / no_change / worse / unclear for a group one — so free text
+can never become an outcome. And the word must be the person's own, because a model may never decide
+for somebody how their own commitment went. Tapping a word the product itself offers is a
+declaration at least as deliberate as typing it, and more exact; `requested` is honoured only for a
+word **in the vocabulary for this focus's grain**, so a pressed control cannot smuggle past the
+canonical owner, and the model-proposed path passes no such flag at all.
+
+**And the other half of #14: what was tried.** The outcome record has carried a `note` field since it
+was written, hard-wired to the empty string on the personal path — so "it did not help" was a verdict
+on nothing. The note is the person's own sentence, unchanged, never a summary, and it appears on the
+card they read before confirming.
+
+`focus-ownership-parity-smoke` then went red, correctly: the composer path stored a note and the
+direct control had no way to send one, which is the two transports disagreeing about what a closed
+Focus holds. The direct route takes a note now, and the gate sends the same sentence down both — a
+parity gate compares the law, not the inputs.
+
+`focus-outcome-capture-http-smoke` (22). The fixture's sentence deliberately contains none of the
+outcome words, because one that said "it didn't help" would prove the literal-word path that already
+worked and miss the failure. Section E is the law this change could most easily have broken: on the
+model-proposed path the word must still be literally in what the person wrote, and a model reasoning
+from a sentence about conceding to "this did not help" is still dropped and still asks.
+
+**Five mutations, each red then restored:** a chosen word no longer honoured (5 red); a pressed
+control accepting any word rather than the vocabulary (D1 and D3, the two grains collapsing); the
+note dropped at grounding (3 red); the canonical writer no longer storing it (C1, C2); and the
+control removed from the Focus screen (F1).

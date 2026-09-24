@@ -104,7 +104,12 @@ const sideEffects = (code, focus) => ({
     S._getMemory('focus-composer', 'owner').lastUpdated = '2001-01-01T00:00:00.000Z';
     const directBeforeOutcome = S._getMemory('focus-direct', 'owner').lastUpdated;
     const composerBeforeOutcome = S._getMemory('focus-composer', 'owner').lastUpdated;
-    const directOutcome = await post('focus-direct', '/api/me/focus/outcome', { focusId: df.id, outcome: 'helped' });
+    /* THE SAME WORDS DOWN BOTH TRANSPORTS. Findings R1 #14 gave the outcome record its `note` —
+       what was actually tried, in the person's own sentence, which the composer path takes from
+       their turn. Parity here is a claim about the LAW, not about the inputs: sending a note on
+       one side and none on the other would compare two different acts and call the difference a
+       divergence. So the direct control sends the sentence the composer turn carries. */
+    const directOutcome = await post('focus-direct', '/api/me/focus/outcome', { focusId: df.id, outcome: 'helped', note: 'It helped.' });
     const outcomeTurn = await propose('focus-composer', 'record_focus_outcome', 'It helped.', { kind: 'focus', id: cf.id }, { outcome: 'helped' });
     const composerOutcome = await confirm('focus-composer', outcomeTurn, 'record_focus_outcome');
     ok('FP7 direct and composer outcome produce the same closed Focus state', directOutcome.json.ok && composerOutcome.json.outcome === 'helped' && JSON.stringify(comparable(df)) === JSON.stringify(comparable(cf)));

@@ -12597,7 +12597,10 @@ const MemberApp = {
       const data = r.data;
       const x = data.opening || {};
       const p = data.present || {}; const sum = p.summary || {}; const det = p.detail || {};
-      this._inquiryThread = { kind, objectId, about: data.about, conversationId: data.conversation && data.conversation.id };
+      /* `scope` TRAVELS WITH THE THREAD. Which vocabulary a Focus outcome is offered in depends
+         on whether it belongs to a node, and the only reader that knows is the one that opened
+         it. Guessing it later from the object id is how two surfaces come to disagree. */
+      this._inquiryThread = { kind, objectId, scope, about: data.about, conversationId: data.conversation && data.conversation.id };
 
       const turns = (data.messages || []);
       const returning = turns.length > 0;
@@ -12723,6 +12726,25 @@ const MemberApp = {
           <button type="button" class="iqt-verdict"
             onclick="MemberApp.beginObjectAction('keep_in_library','${esc(kind)}','${esc(objectId)}')">Keep</button>
           ${kind === 'inquiry' ? `<button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('settle_inquiry','${esc(kind)}','${esc(objectId)}')">That's settled</button>` : ''}
+          ${/* ── THE ONE VERDICT A FOCUS ACTUALLY NEEDS ─────────────────────────────────────
+                LIVE iPHONE BLOCKER, findings R1 #14. The founder reported trying an extra
+                defender and still conceding, and the Focus afterwards still showed no outcome.
+
+                `record_focus_outcome` has existed as a governed action the whole time. Its ONLY
+                door was a model proposing it — so with models off, which is the pilot's own
+                configuration, closing the loop on a commitment was a capability nobody had, and
+                with models on it depended on a model choosing to offer it. That is the vertical
+                slice law this repository keeps finding: a capability reachable from no control
+                is a capability nobody has.
+
+                A Focus is the deliberate A → B commitment, and how it went is the half of the
+                loop that has anything to say. This is the door, on the object it belongs to,
+                and only there — a High, a Low and an Inquiry have no outcome to record.
+
+                It stages the same typed request the model may propose, so the button does not own
+                the mutation and the confirmation still crosses the one dispatcher. */''}
+          ${kind === 'focus' && !det.outcome
+            ? `<button type="button" class="iqt-verdict is-do" onclick="MemberApp.beginFocusOutcome()">Record what happened</button>` : ''}
           <button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('disagree_with_inquiry','${esc(kind)}','${esc(objectId)}')">I disagree</button>
           <!-- KEEP THIS NEAR THE TOP. The personal attention override, and the only writer of it
                from a screen. It is a VERDICT, beside the others, because it is a thing a person
@@ -14874,6 +14896,68 @@ const MemberApp = {
       : type === 'unprioritise_object' ? 'Take this off my priorities.'
       : type === 'discuss_with_group' ? 'I would like to discuss this with the group.' : 'Open this.';
     await this.inquirySend();
+  },
+
+  /* ── HOW IT WENT, IN THE WORDS ITS OWN OWNER ACCEPTS ──────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #14. Two things have to be true at once and they pull
+     against each other, which is why this is a picker and not a text box.
+
+     THE OUTCOME WORD IS A CLOSED VOCABULARY. A personal focus records helped / no / mixed; a
+     group focus records better / no_change / worse / unclear. They were separated deliberately
+     and the canonical writer refuses a word from the other grain, so free text cannot become an
+     outcome — a person typing "it was alright" has said nothing the record can hold.
+
+     AND THE WORD MUST BE THEIR OWN. A model may never decide for somebody how their commitment
+     went. Tapping one of the words the product itself offers is a declaration at least as
+     deliberate as typing it, and more exact; `ai/composer-actions.js` honours it only for a word
+     in the vocabulary for THIS focus's grain, and only when the person pressed a control.
+
+     WHICH VOCABULARY IS ASKED OF THE OBJECT, not guessed here. A focus that belongs to a node is
+     a group focus, which is the same thing every other reader in the product keys on. Asking a
+     coach "did it help, not help, or was it mixed?" about their squad's focus invites an answer
+     the canonical route would then refuse — the exact failure the grounding layer's own note
+     records. */
+  beginFocusOutcome() {
+    const t = this._inquiryThread;
+    if (!t || t.kind !== 'focus') return;
+    const host = document.querySelector('.iqt-verdicts');
+    if (!host) return;
+    const open = document.getElementById('iqt-outcome');
+    if (open) { open.remove(); return; }              // idempotent: a second tap closes it
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const group = !!(t.scope && String(t.scope).startsWith('group:'));
+    const WORDS = group
+      ? [['better', 'It got better'], ['no_change', 'Nothing changed'], ['worse', 'It got worse'], ['unclear', 'Too tangled to tell']]
+      : [['helped', 'It helped'], ['no', 'It did not help'], ['mixed', 'Mixed']];
+    const row = document.createElement('div');
+    row.className = 'iqt-outcome';
+    row.id = 'iqt-outcome';
+    row.innerHTML = `<span class="iqt-outcome-q">What happened after this?</span>
+      <span class="iqt-outcome-btns">${WORDS.map(([w, label]) =>
+        `<button type="button" class="iqt-verdict" onclick="MemberApp.beginFocusOutcomeWord('${esc(w)}')">${esc(label)}</button>`).join('')}</span>
+      <span class="iqt-outcome-n">Nothing is recorded until you confirm it.</span>`;
+    host.insertAdjacentElement('afterend', row);
+  },
+
+  /* THE WORD IS CHOSEN, THE SENTENCE IS THEIRS. What was tried is the other half of #14 — "it
+     did not help" is a verdict on nothing until the record says what it is about — and the
+     outcome record has carried a `note` field since it was written. So the word is staged and
+     the composer asks for the tactic in their own words; that sentence becomes the turn AND the
+     note, and the governed proposal is what actually writes, after they confirm it. */
+  beginFocusOutcomeWord(word) {
+    const t = this._inquiryThread;
+    const input = document.getElementById('iq-object-input');
+    if (!t || !input) return;
+    const row = document.getElementById('iqt-outcome');
+    if (row) row.remove();
+    this._pendingComposerAction = { type: 'record_focus_outcome', arguments: { outcome: String(word) } };
+    this._composerAbout = { kind: t.kind, id: t.objectId };
+    input.value = '';
+    input.placeholder = 'What did you try, and what happened?';
+    this._wsGrow(input);
+    input.focus();
+    const state = document.getElementById('iqt-voice-state');
+    if (state) state.textContent = 'Say what you tried. Nothing is recorded until you confirm it.';
   },
 
   /* The three things a person can do to a belief. Each prefills the composer rather than firing

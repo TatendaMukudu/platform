@@ -589,7 +589,37 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
       const words = _isGroupFocus ? GROUP_WORDS : SELF_WORDS;
       const test = words[outcome];
       const explicit = !!test && test.test(current);
-      if (explicit) { args.outcome = outcome; sources.outcome = 'user_stated'; }
+      /* ── AND CHOOSING THE WORD IS SAYING IT ───────────────────────────────────────────────
+         LIVE iPHONE, findings R1 #14: the founder reported trying an extra defender and still
+         conceding, and the Focus afterwards still showed no outcome.
+
+         THE LAW HERE IS RIGHT AND IS NOT CHANGED: the outcome word must be the PERSON'S OWN, and
+         a model may never decide for somebody how their own commitment went. What was too narrow
+         was the assumption that the only way to say a thing is to type it in prose. A Focus screen
+         now offers the three words that focus's own canonical owner accepts, and tapping one is a
+         declaration at least as deliberate as typing it — more so, since the wording is exact.
+
+         `requested` is the flag this file already uses for "the person pressed the control", and
+         it is honoured here only for a word that is IN the closed vocabulary for THIS focus's
+         grain. A pressed control cannot smuggle in a word the canonical owner would refuse, and
+         the model-proposed path passes no such flag, so nothing about what a model may decide
+         moves a millimetre. The source is recorded as `user_chosen` rather than `user_stated`
+         so the confirmation surface can say which it was rather than implying prose. */
+      const chosen = requested === true && Object.prototype.hasOwnProperty.call(words, outcome);
+      if (explicit || chosen) { args.outcome = outcome; sources.outcome = explicit ? 'user_stated' : 'user_chosen'; }
+      /* ── AND WHAT THEY TRIED GOES WITH IT ─────────────────────────────────────────────────
+         Findings R1 #14 asks for "tactic + reported result" through the canonical owner, and the
+         outcome record has carried a `note` field since it was written — hard-wired to the empty
+         string on the personal path, so the half of the loop that says WHAT WAS TRIED had nowhere
+         to live. "It didn't help" is a verdict on nothing until the record says what it is about.
+
+         THE NOTE IS THE PERSON'S OWN SENTENCE AND NOTHING ELSE. It is the literal text of the
+         turn they sent, never a model's summary of it and never assembled here, which is the same
+         rule the outcome word above obeys. Nothing is written until they confirm the proposal. */
+      if (args.outcome && String(current || '').trim()) {
+        args.note = String(current).trim().slice(0, 400);
+        sources.note = 'user_stated';
+      }
       /* AND THE QUESTION OFFERS THE WORDS THAT FOCUS'S OWN SCREEN OFFERS. Asking a coach "did it
          help, not help, or was it mixed?" about a team focus invites an answer the route refuses. */
       else needsClarification = needsClarification || (_isGroupFocus

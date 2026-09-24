@@ -3198,6 +3198,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    The verdict row rendered as three words of body text run together — "That's settled I
    disagree Not now" — because the buttons had no rules at all. */
 .iqt-verdicts{display:flex;flex-wrap:wrap;gap:.45rem;margin:0 0 1rem}
+/* HOW A FOCUS WENT, in the words its own canonical owner accepts (findings R1 #14). A row rather
+   than a menu: three or four short verdicts a thumb can hit, with the one sentence that matters
+   under them — nothing is written until the person confirms the proposal this stages. */
+.iqt-outcome{display:flex;flex-direction:column;gap:.4rem;margin:0 0 1rem}
+.iqt-outcome-q{font-size:var(--fs-md);color:var(--text-primary)}
+.iqt-outcome-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iqt-outcome-n{font-size:var(--fs-xs);color:var(--text-muted)}
 .iqt-verdict{min-height:40px;padding:.4rem .85rem;border-radius:999px;cursor:pointer;font-size:var(--fs);
   color:var(--text-secondary);background:transparent;border:1px solid var(--border)}
 .iqt-verdict:hover{color:var(--text-primary);border-color:var(--border-light)}
