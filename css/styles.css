@@ -966,7 +966,8 @@ img { max-width: 100%; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
 /* Hamburger retired with the drawer — never shown. */
-.topbar-hamburger { display: none !important; }
+/* .topbar-hamburger was hidden here. No element in this product carries that class any more --
+   the menu control is .iq-navbtn in the topbar and is visible -- so the rule hid nothing. */
 @media (max-width: 700px) {
   .topbar-search { display: none; }
 }

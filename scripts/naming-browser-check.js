@@ -62,6 +62,11 @@ _loadAllStores({
     falsifiers: [{ statement: 'we keep the ball when we start deeper' }],
     timeline: [], lastUpdatedAt: NOW,
   } } } },
+  /* A FOCUS OF THE COACH'S OWN, so section E can compare two kinds rendered by the same owner. */
+  userAiProfiles: { [`${C}:coach`]: { focuses: [{
+    id: 'f_press', text: 'Press from the first touch', status: 'active',
+    createdAt: new Date(NOW - 2 * DAY).toISOString(),
+  }] } },
 });
 _rebuildEmailIndex();
 
@@ -183,6 +188,75 @@ _rebuildEmailIndex();
       !/not found/i.test(failed));
     ok('NM-D0d …while still offering a way out rather than a dead end',
       /try again/i.test(failed) || /back to/i.test(failed));
+
+    console.log('\n  E — AND THE OBJECT KINDS DIFFER IN INFORMATION, NOT IN MECHANICS');
+    /* P2: "The object kinds should differ in INFORMATION, not in basic interaction mechanics."
+       `openObjectThread` is the single renderer for all four, so the grammar cannot diverge by
+       kind — this walks two of them to show the skeleton really is the same one on screen.
+
+       HIGH AND LOW ARE NOT SEEDED HERE, and that is deliberate rather than an omission: they are
+       kernel-derived projections, not store rows, so a fixture that hand-built one would be
+       asserting the renderer against a state the kernel would never produce — the empty-fixture
+       lie this repository keeps finding in its own tests. They travel through the same
+       `openObjectThread`, which is what makes the shared grammar structural rather than a
+       coincidence of two fixtures. */
+    const skeleton = () => page.evaluate(() => {
+      const root = document.querySelector('.iq-object-thread');
+      if (!root) return null;
+      return {
+        back: !!root.querySelector('.iqt-back'),
+        title: ((root.querySelector('.iqt-title') || {}).textContent || '').trim(),
+        composer: !!document.querySelector('#iq-object-input, .iq-composer textarea, #iq-composer-input'),
+        bar: ((document.querySelector('.topbar-title') || {}).textContent || '').trim(),
+      };
+    });
+    await go(() => MemberApp.openObjectThread('inquiry', 'q1', 'group:n'));
+    const inq = await skeleton();
+    await go(() => MemberApp.openObjectThread('focus', 'f_press'));
+    const foc = await skeleton();
+    ok('NM-E1 both kinds render the same page shell', !!inq && !!foc);
+    ok('NM-E2 …each with a way back, its own title, and one composer',
+      !!inq && !!foc && inq.back && foc.back && inq.composer && foc.composer
+      && inq.title.length > 0 && foc.title.length > 0);
+    ok('NM-E3 …and the bar names the kind, which is the one thing that should differ',
+      inq.bar === 'Inquiry' && foc.bar === 'Focus');
+    ok('NM-E4 …and they are genuinely different objects, not the same screen twice',
+      inq.title !== foc.title);
+
+    console.log('\n  F — AND YOUR OTHER CHATS ARE ONE TAP AWAY (Priority R&D P1)');
+    /* P1 asks that a person can answer, without thinking: where are my other chats, which one am I
+       in, and how do I start fresh without losing this one. The drawer is the answer, so it has to
+       actually list them — the fixture above has no conversations, and a "Recent" heading over an
+       empty box satisfies a careless assertion for the wrong reason. This makes two real ones
+       through the ordinary turn route first. */
+    for (const t of ['What is going on with the last twenty?', 'And what about the long throws?']) {
+      await page.evaluate(async ([text, base]) => {
+        const tok = JSON.parse(localStorage.getItem('iq_auth')).token;
+        await fetch('/api/assistant/turn', { method: 'POST',
+          headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }) });
+      }, [t, base]);
+    }
+    const recents = await page.evaluate(async () => {
+      MemberApp.navToggle();
+      await new Promise(r => setTimeout(r, 900));
+      const box = document.getElementById('iq-nav-recents');
+      const items = [...document.querySelectorAll('.iq-nav-recent')];
+      const out = { count: items.length, labels: items.map(b => (b.textContent || '').trim()),
+        empty: /no conversations yet/i.test((box || {}).innerText || ''),
+        newChat: !!document.querySelector('.iq-nav-new'),
+        newChatBox: null };
+      const nb = document.querySelector('.iq-nav-new');
+      if (nb) { const r = nb.getBoundingClientRect(); out.newChatBox = { h: r.height, right: r.right }; }
+      MemberApp.navClose();
+      return out;
+    });
+    ok('NM-F1 the menu lists the conversations this person actually has',
+      recents.count >= 2 && !recents.empty);
+    ok('NM-F2 …with human-readable titles rather than ids',
+      recents.labels.every(l => l.length > 3 && !/^conv_/.test(l)));
+    ok('NM-F3 …and a way to start a fresh one without losing them, as a real tap target',
+      recents.newChat && recents.newChatBox.h >= 44 && recents.newChatBox.right <= 390);
 
     ok('NM-D1 none of that raised an uncaught client error', errors.length === 0);
     if (errors.length) errors.slice(0, 4).forEach(e => console.error('        ' + e));
