@@ -1548,3 +1548,150 @@ database and reads it back after a restart.
 
 Live Render, live Neon (network, pooler, cold start), real provider quality, real iPhone/Safari, real
 invite delivery. **The persistence layer is no longer among them.**
+
+## 13. Claude — pilot UX closure — 2026-09-24
+
+**Head at end:** `56f6503`. Nothing merged or deployed.
+
+| SHA | Change |
+|---|---|
+| `e46cad2` | One playback control — Play, Pause, and carry on from the same place |
+| `e202561` | Light is the pilot default, navy is the alternative, and the type scale is legible |
+| `67dd7e9` | Say which screen you are on, and put the product's own word on the door |
+| `56f6503` | Conversation navigation and shared object grammar proved; a dead rule dropped |
+
+### The reconciliation asked for, and what it turned out to be
+
+The brief set the founder's instinct (extremely simple, obvious, effortless) against the mockup
+direction's instinct (keep enough structure, hierarchy and provenance to stay powerful) and asked for
+a synthesis rather than obedience to either.
+
+**Driving the real app at 390px showed the two are not actually in conflict here.** Home is already
+one greeting, two cards and one composer. The drawer already carries destinations, Recents and New
+chat. Sources are already compact and inspectable. The object page already carries claim, basis,
+falsifier, what was tried and provenance. The structure the mockup direction wants is largely built,
+and it is already simple.
+
+What was wrong was not the amount of structure. It was that **several things on screen did not say
+what they were** — and that is where simplicity was actually being lost, because a person cannot feel
+a product is effortless while guessing at it.
+
+### Where I did not follow either proposal
+
+**The Forum doorway.** The code carried a note arguing that a text label in a header bar competes
+with the object's title for the one line a phone gives you, so the label should be carried accessibly
+and not visually. That argument is RIGHT about the header and WRONG about the conclusion: it left a
+sighted coach with a tray glyph and a people glyph side by side and no way to tell what either did.
+P2 says the opposite — use the word Forum, make the access point clear.
+
+Neither: the doors came OUT of the header onto a row of their own, where there is room for words and
+nothing to compete with. The competition the old note identified is gone because the header is gone,
+not because the words are.
+
+**And the door now opens the room.** It staged `discuss_with_group` into the composer, so a control
+labelled Forum wrote a sentence into the text box and waited for the person to send it, be offered a
+proposal and confirm — three steps to reach a room they were already allowed to read. Opening a room
+you can read is a READ. The governed confirmation belongs to SAYING something into it, which is
+untouched.
+
+**`prefers-color-scheme` was rejected deliberately.** "Light as the default pilot experience" is a
+decision about what the product IS during the pilot. Honouring the OS would mean a coach whose phone
+is in dark mode sees a different product from the one the founder demonstrated, with no way to tell
+why. Light is in the served markup; navy is a deliberate choice in Settings, remembered per device.
+
+**The type scale was raised rather than the palette patched.** Sixteen elements rendered below 10px,
+including the provenance line at 9.52px. The cause was one number — `html { font-size: 14px }` — so
+the fix is one number, preserving every proportion in the design rather than compressing the bottom
+of the scale.
+
+### Retained from the existing direction, unchanged
+
+The one-page-plus-drawer architecture, the Composer as the primary surface, the existing object page
+grammar, compact inspectable Sources, the anonymity notice in the Forum, the option sets as reading
+rather than buttons, and every privacy, authority, provenance and canonical-owner law. **No truth
+store, audience owner, Focus lifecycle or conversation store was touched.**
+
+### Rejected
+
+Per-message Forum authorship choice (P2). The rooms in the pilot are configured anonymous and say so
+in the room itself; a per-message identity control would put a one-tap way to break that promise
+directly beside the composer. It needs a room configuration that permits named posting before the
+control is safe to offer, and that configuration is not in the product. **Recorded, not built.**
+
+### The measurement that was wrong before the product was
+
+`theme-browser-check` reported a leader chip at 1.25:1 and it was fine. The chip is painted
+`rgba(124,90,245,0.15)` and the calculator read the three numbers and dropped the alpha, scoring
+fifteen percent purple as though it were solid. Every translucent layer is now composited onto the
+first opaque one, back to front. **Measuring wrongly and then "fixing" what it reported would have
+been worse than not measuring at all.**
+
+### Stale assumptions and obsolete tests found and corrected
+
+- `V25c` pinned the aria-label "Stop reading aloud" — the old playback semantics.
+- `V29f` pinned `STATES.length === 8` under a name that said "a seventh state"; it had drifted once
+  already, so the count now derives from the list and the name carries no number.
+- `FA-K3` searched the WHOLE of `js/app.js` for the word "Forum" in a span though it is about the
+  list card. A list row wants a glyph and a doorway wants its name; a file-wide search cannot tell
+  them apart. Scoped to the card.
+- `US3b`/`US3c` pinned matches within 2200 and 2600 **characters** of `async _read(` — so they were
+  counting comment length inside the function they were checking, and adding an explanation turned
+  the suite red while the law was untouched. **A distance window is not a scope.** They now slice the
+  function body. Both re-mutated to confirm they still bite.
+- Section B of the voice gate was reframed, not deleted: it runs on an engine with no pause, where a
+  real stop IS correct, and it now says so instead of reading as the general rule.
+- A duplicate `.iqt-forum` CSS rule styled the control as an uppercase chip that nothing renders —
+  not inert, because its `text-transform` leaked into the live door and made it shout.
+- `.topbar-hamburger { display: none !important; }` hid an element that no longer exists.
+
+### Recorded, not done, with the reason
+
+- **The retired sidebar still ships.** `<aside class="sidebar">` is in `index.html` on every load,
+  hidden by CSS, and `renderSidebar()` still writes into it — including setting a wordmark to
+  "Platform", a name the product no longer uses. Removing it touches `renderSidebar`, `data.js`'s nav
+  list and `frontend-smoke.js`, which asserts against it. It is invisible to users, so this is
+  hygiene with real regression risk and no user-visible gain: it belongs in a deliberate change of
+  its own, not folded into UX closure.
+- **Distance-window regexes are a systemic brittleness class**, not just the two that broke. Roughly
+  a dozen suites use `[\s\S]{0,N}` windows to scope source assertions. The small ones (120–400) are
+  lower risk. Rewriting them all would be churn; the class is recorded so the next person recognises
+  the failure shape.
+- **Library copy says "not a copy" three times** in three sentences. Correct, and wordier than it
+  needs to be. Low value, no defect.
+
+### Proof
+
+- **Full Truth Layer green.**
+- **Thirteen browser gates green on real Chromium, 625 assertions**: chart-shape 42, exhausted-help
+  26, forum-share 21, group-loop 55, library 33, naming 28, onboard 34, pilot-coach 133,
+  priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34.
+- **Durable restart against a real PostgreSQL: 35 passed**, service process killed between writes
+  and reads.
+- **Two new gates**: `theme-browser-check` (21) and `naming-browser-check` (28).
+- **Twenty mutations across the four commits**, each required red then restored. Four survived first
+  and every one of them changed something real: two exposed missing engine cases, one was an
+  equivalent mutant that got removed, one exposed an assertion that checked a class instead of what a
+  person can see.
+
+### Required pilot concerns — state
+
+| Concern | State |
+|---|---|
+| Top-left hamburger navigation | Already built; verified on screen |
+| Multiple-conversation / history navigation | Verified against real conversations (NM-F1..F3) |
+| Consistent High/Low/Inquiry/Focus grammar | One renderer for all four; proved on the two seedable kinds |
+| Forum behaviour, private vs shared | Door named, opens the room, anonymity stated in the room |
+| Governed Ask IntelliQ | Built in the previous round; answer is private and never posted |
+| Compact inspectable Sources | Already built; collapsed, expandable, source classes incl. external |
+| Consistent Play / Pause / Resume | Done, with three engine-failure cases proved |
+| Light default, navy alternative | Done, AA across seven screens in both themes |
+| Library as a simple resource surface | Already correct; copy is wordy, recorded |
+| Org Tree as a real tree | Already a tree; now has one name instead of four |
+| Mobile-first clarity | Type scale raised; no element under 10px; no sideways scroll at 390px |
+| No generated contextual imagery | Verified absent — nothing to remove |
+
+### External gates — unchanged and genuinely external
+
+Live Render, live Neon (network, pooler, cold start), real provider quality, real invite delivery,
+and an actual iPhone/Safari. **Everything else in this branch has been driven on a real browser at
+phone width or against a real database.**
