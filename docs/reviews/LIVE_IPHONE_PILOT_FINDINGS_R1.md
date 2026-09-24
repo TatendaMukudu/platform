@@ -276,3 +276,98 @@ Result:
 - the author-only `YOU` marker is therefore local presentation rather than identity leakage to other readers.
 
 Classification: **PASS — live cross-account anonymity presentation confirmed.**
+## Consolidated pre-pilot fix direction
+
+These are the founder-observed fixes from the live iPhone rehearsal and should be treated as the current pre-pilot closure list. Do not redesign stable product law while fixing them.
+
+### Must fix before pilot
+
+1. **Image attachment end to end**
+   - real image bytes must reach the vision gateway;
+   - resulting visual description must bind to the same conversation/material context;
+   - later turns must be able to reason from it;
+   - image-derived material remains described/observed context, not independent empirical truth.
+
+2. **Current-turn provenance**
+   - text in the user's current message is immediately available as user-reported information;
+   - attachment verification failure must not erase text the user explicitly typed;
+   - assistant may reason from it while clearly distinguishing reported vs independently verified.
+
+3. **Reasoning restraint**
+   - do not infer tactical, mental, causal or time-window explanations that the record does not support;
+   - separate observed/reported facts from hypotheses;
+   - avoid evaluative upgrades such as calling a short self-reported run 'real form' without broader support.
+
+4. **Assistant capability model vs actual Focus owner**
+   - assistant must not deny Focus audience/collaboration capabilities that the Focus UI actually supports;
+   - all audience changes continue through the canonical Focus audience owner and confirmation path;
+   - no parallel collaborator system.
+
+5. **Forum Ask IntelliQ**
+   - repair malformed/missing node binding on Focus Forums;
+   - private answer must come from the Forum/object governed projection only;
+   - nothing is posted to the room automatically;
+   - do not leak raw route/method errors to users.
+
+6. **Canonical standing agreement for High/Low**
+   - assistant language and High/Low projection must read the same standing owner;
+   - if canonical Low threshold is not met, the assistant must not say the record now 'counts as something worth attention';
+   - if threshold is met, the Low must appear end to end.
+
+7. **Focus outcome/attempt capture**
+   - preserve user-reported attempts immediately as speech;
+   - once scoped/confirmed to the active Focus, record the tactic and reported result through the canonical outcome/attempt owner;
+   - do not silently lose an attempt while clarifying.
+
+8. **No-op Focus updates**
+   - do not surface 'Revise this focus' when the proposed canonical state is unchanged;
+   - interpretation/history changes do not require a fake write proposal.
+
+9. **Shared composer mobile layout**
+   - fix clipped placeholders on Highs, Lows, Library and other shared-composer pages;
+   - keep one canonical composer but ensure text does not disappear behind attachment/mic/send controls.
+
+10. **Focus composer reachability**
+    - private Focus composer must remain persistently reachable on mobile after long responses/history;
+    - do not make users scroll through the whole object page to continue the conversation.
+
+11. **Audience editor idempotence**
+    - exactly one 'Who can see this' editor per Focus;
+    - repeated taps/open calls must not append duplicates.
+
+12. **Network resilience**
+    - do not fall back on the first brief network/provider wobble;
+    - bounded retry/backoff for idempotent model reads;
+    - preserve pending turn across reconnect;
+    - no duplicate human turns or canonical writes on retry;
+    - deterministic fallback remains the final safe path, not the first response to weak mobile connectivity.
+
+### Pilot UX tightening
+
+- Replace unclear personal-card wording such as 'What they say they bring' / 'What else they wanted known' with direct first/second-person language.
+- Simplify Library copy; foreground user benefit, not canonical-reference architecture.
+- Review Library product value: if it is manual saved items, make Keep obvious and surface useful/recent resources; attached materials need a discoverable home if Library is meant to be the resource surface.
+- Replace one-point chart-like Focus visuals with a simple event/readout when no trend exists.
+- Replace implementation-facing copy such as 'no concept to search on' with plain user-facing language.
+- Reduce repeated cohort-unavailable notices unless the user actually asks for cohort intelligence.
+- Keep response style concise: minimum useful answer first, one strong clarifying question, fewer classification/meta restatements.
+- Preserve Forum anonymity behavior already proven cross-account: author may see local 'YOU', other readers must not receive identity.
+
+## Candidate enhancement — conversational Forum sharing
+
+Founder idea: while speaking privately in the Composer, IntelliQ may ask whether the user wants to share the emerging object/topic to a Forum. If the user says yes, present only audiences the user is already authorised to address — for example direct parent groups and/or the groups the user currently belongs to, by human-readable name.
+
+Product constraints:
+- this must be a thin conversational front-end over the existing canonical audience/share owner, not a new Forum/audience system;
+- default remains private;
+- nothing becomes shared until the user explicitly chooses an eligible group/audience and confirms;
+- membership/parent options must be derived live from the authoritative org tree, including people who belong to more than one group or have multiple direct parents;
+- do not infer a single parent;
+- do not expose groups the user cannot address;
+- sharing must not change the empirical subject or standing of High/Low/Inquiry/Focus;
+- Forum creation/readership continues to follow governed audience law.
+
+Pilot recommendation:
+- **Do not build a new sharing architecture.**
+- If this can be implemented as a small Composer proposal that simply calls the existing audience selector/confirmation machinery and lists already-authorised groups, it is acceptable as a low-risk polish item.
+- If it requires new membership semantics, parent-resolution law, new write routes, or a parallel Forum creation flow, defer it until immediately after the pilot.
