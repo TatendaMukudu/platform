@@ -102,3 +102,94 @@ The live test should prove:
 - progress/strength can establish a High;
 - opportunity/neutral/data-gap do not enter either bucket;
 - corrections/withdrawals recompute or remove the standing instead of leaving a stale card.
+
+### 6. Focus capability mismatch: assistant denies a capability the Focus UI exposes
+
+Live iPhone reproduction:
+- A Focus was created from the conversation: "Focus more on wins and conceding less".
+- In conversation, IntelliQ then said: "I can't add collaborators or change who sees this focus" and "The available actions do not include inviting collaborators to a focus."
+- The actual Focus screen exposes "Who can see this" and an audience editor with "Only me", "Whoever leads a group I am in", and "People I choose".
+- After audience change, the Focus screen showed a Forum with "9 can read this".
+
+This is a product-capability contradiction. The assistant's capability model is stale relative to the real Focus owner.
+
+Required fix:
+- The assistant must know that Focus audience/participants are governed capabilities.
+- It may propose or guide audience changes only through the canonical Focus audience owner and confirmation path.
+- It must not claim a supported capability is unavailable.
+- Do not create a parallel collaborator system.
+
+Classification: **LIVE BLOCKER — assistant capability model and canonical Focus audience owner disagree.**
+
+### 7. Unrelated calendar proposal surfaced while handling Focus collaboration
+
+During the same flow IntelliQ proposed a "Draft a calendar hold (nothing scheduled yet)" action while the visible issue was Focus sharing/collaboration.
+
+This is a relevance/intent-routing defect. A scheduling proposal should not pre-empt the user's active Focus-management intent merely because meeting/scheduling language is nearby.
+
+Required fix:
+- active object intent should dominate generic action proposal routing;
+- calendar proposals require a clear scheduling request;
+- no unrelated action card should appear during a Focus audience operation.
+
+Classification: **REASONING / ACTION-ROUTING BUG.**
+
+### 8. "Who can see this" audience editor duplicates itself on mobile
+
+Live iPhone screenshot shows the Focus audience editor rendered three times in one scroll:
+- repeated "WHO CAN SEE THIS"
+- repeated visibility choices
+- repeated Save / Cancel controls.
+
+This is a real rendered-state defect, not cosmetic polish.
+
+Required fix:
+- exactly one live audience editor per Focus page;
+- repeated taps/open calls must be idempotent and must not append duplicate editors;
+- browser proof should double-tap/open repeatedly and assert one editor and one save target.
+
+Classification: **PILOT UX BLOCKER.**
+
+### 9. Focus outcome/relationship reading contradicts the Focus content
+
+The Focus screen shows:
+- title: "Focus more on wins and conceding less"
+- status: being worked on
+
+But the lower reading says:
+"Still open: this focus does not say what it was started to work on; no outcome has been recorded yet."
+
+The second clause may be true; the first is false on its face. The Focus clearly states what it is working on.
+
+Required fix:
+- outcome/loop reader must distinguish "no origin/source Inquiry link" from "no declared work";
+- a Focus created directly from a conversation may have a clear B/commitment without an Inquiry origin;
+- do not translate missing canonical relation into missing human intent.
+
+Classification: **SEMANTIC READER BUG.**
+
+### 10. Focus evidence/chart surface is visually under-explained
+
+The live Focus page shows "Recorded events" followed by a lone blue point. The surrounding note says everything is from one moment and not a change over time, but the visualization still reads as an unexplained graph.
+
+This is not necessarily false, but it is weak UX for a pilot.
+
+Required direction:
+- if one point has no meaningful trend, prefer a compact event/readout over a chart-like surface;
+- never make one point look like a time-series finding;
+- preserve the existing refusal to invent a line/trend.
+
+Classification: **UX ISSUE — simplify rather than add charting.**
+
+### 11. Focus page copy leaks internal epistemic architecture
+
+Live copy:
+"No outside reading here — no concept to search on — there is nothing here that is not somebody's own words."
+
+The underlying rule is sound: a directly-created Focus may not have a canonical concept safe for external search. The wording is implementation-facing and confusing.
+
+Preferred direction:
+- say the useful thing, e.g. "No external sources are linked to this Focus yet."
+- keep the reason (no governed concept/query basis) in inspectable provenance/debug detail, not foreground UI.
+
+Classification: **UX WORDING ISSUE.**
