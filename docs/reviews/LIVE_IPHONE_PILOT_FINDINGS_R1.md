@@ -542,3 +542,146 @@ Required list-card grammar:
 Do not force filler text. If there is genuinely no summary yet, show a plain honest empty state, but use the same structure across all four object kinds.
 
 Classification: **PILOT UX CONSISTENCY FIX — unify object-list cards across High/Low/Inquiry/Focus.**
+
+## Recovered live findings from the rehearsal
+
+### 12. Composer placeholder text is clipped on Highs, Lows and Library
+
+Live iPhone screenshots show the bottom composer placeholder truncated/cut off on multiple pages, including Highs, Lows, Library and at least one Focuses surface.
+
+Required fix:
+- fix the shared composer shell rather than page-specific patches;
+- reserve width for attachment, mic and send controls;
+- placeholder should fit, wrap intentionally, or use shorter page-specific copy;
+- verify at real iPhone width.
+
+Classification: **PILOT UX BUG — shared composer sizing/overflow.**
+
+### 13. Duplicate current-turn submission visible during provider degradation
+
+A live screenshot showed the exact same human message twice around a degraded-provider response.
+
+Required investigation:
+- determine whether this was an intentional second send or retry/replay;
+- one send must create one durable human turn;
+- repeated taps, provider fallback, reload and recovery must not duplicate the human turn.
+
+Classification: **NEEDS REPRO — potential duplicate-send blocker.**
+
+### 14. Focus outcome conversation does not record the user's reported failed tactic
+
+User reported trying an extra defender and still conceding. The assistant clarified scope, but the Focus later still showed no outcome.
+
+Required behavior:
+- preserve the statement immediately as user-reported speech;
+- do not silently promote it to canonical outcome without confirmation;
+- once scoped to the current Focus, record tactic + reported result through the canonical outcome/attempt owner.
+
+Classification: **LIVE SEMANTIC / WORKFLOW GAP.**
+
+### 15. Model-generated response uses unsupported causal framing again
+
+Live response bundled complacency, going ahead, communication breakdown and conceding into one explanatory hypothesis without clean evidence for every link.
+
+Required behavior:
+- separate observations from hypotheses;
+- do not imply causality from aggregate stats or loosely related speech;
+- ask what evidence would discriminate between competing explanations.
+
+Classification: **REASONING QUALITY BUG — causal bundling.**
+
+### 16. Low does not appear despite assistant saying the record now warrants attention
+
+Live contradiction:
+- assistant said there was enough to count as something worth attention;
+- Lows page still said nothing needs attention.
+
+Required fix:
+- assistant prose and High/Low projection must read the same canonical standing owner;
+- if threshold is not met, use language such as worth investigating / still a hypothesis;
+- if threshold is met, the Low must appear end to end.
+
+Classification: **PILOT BLOCKER — prose standing and canonical Low disagree.**
+
+### 17. `Revise this focus` proposal appears when canonical Focus wording is unchanged
+
+A proposal card offered to revise the Focus while presenting the same wording.
+
+Required fix:
+- suppress no-op update proposals when old and new canonical Focus state are equivalent;
+- interpretation/history changes should not masquerade as a write.
+
+Classification: **ACTION QUALITY BUG — no-op write proposal.**
+
+### 18. Home cards still contain unclear legacy wording
+
+Live Home screens show third-person/profile-era labels such as `What else they wanted known`.
+
+Required direction:
+- use direct first/second-person language for the current viewer;
+- simplify empty states;
+- remove profile-questionnaire wording from general Home/object surfaces.
+
+Classification: **UX WORDING ISSUE.**
+
+### 22. Focus conversation composer is effectively off-screen after long responses
+
+On live iPhone Focus pages, the user must scroll through long object/history content to reach the private composer.
+
+Required direction:
+- keep one canonical Focus composer persistently reachable on mobile;
+- long intelligence/history content must not bury the primary conversational affordance.
+
+Classification: **PILOT UX BLOCKER — core interaction accessibility.**
+
+### 23. Library is functionally empty/useless in live player flow
+
+Player account shows an effectively empty Library despite active Focuses, conversations and attached material elsewhere.
+
+Required product/UX review:
+- decide whether Library is manual saved-items, a resource/file surface, or both;
+- make Keep discoverable if manual;
+- surface useful/recent resources;
+- give attached materials a discoverable home if Library owns resources;
+- remove implementation-facing copy.
+
+Classification: **PILOT UX / PRODUCT GAP.**
+
+### 24. Player-account Forum anonymity presentation is proven cross-account
+
+Founder posted from one account and opened the same Forum from a second player account. The second account could read the post but did not see the original author's identity; the author-only `YOU` marker is local presentation.
+
+Classification: **PASS — live anonymity presentation confirmed.**
+
+### 25. Repeated anonymous-cohort refusal is noisy on personal conversations
+
+The product repeatedly shows `Not enough people for a picture that stays anonymous — no cohort.`
+
+Privacy behavior is correct, but the repeated full-card refusal is noisy.
+
+Preferred direction:
+- show it when cohort intelligence is explicitly requested;
+- otherwise collapse/omit repetitive cohort-unavailable notices.
+
+Classification: **UX NOISE / SIMPLICITY ISSUE.**
+
+### 26. Player response overstates user-reported form
+
+User reported scoring twice in the last three games. IntelliQ called that `real form`.
+
+Required behavior:
+- preserve provenance: `you've reported scoring twice in your last three games`;
+- do not upgrade a short self-reported run into a settled performance finding without broader support.
+
+Classification: **REASONING QUALITY / PROVENANCE TONE ISSUE.**
+
+### 27. Focus/player response contains templated/meta phrasing
+
+Live responses contain classification-style restatements such as `You're expressing a concern about...` that feel like internal interpretation templates leaking into the final answer.
+
+Required direction:
+- minimum useful answer first;
+- fewer meta/classification restatements;
+- one strong clarifying question rather than stacked interpretations.
+
+Classification: **UX / RESPONSE QUALITY ISSUE.**
