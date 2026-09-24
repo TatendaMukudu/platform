@@ -371,3 +371,20 @@ Pilot recommendation:
 - **Do not build a new sharing architecture.**
 - If this can be implemented as a small Composer proposal that simply calls the existing audience selector/confirmation machinery and lists already-authorised groups, it is acceptable as a low-risk polish item.
 - If it requires new membership semantics, parent-resolution law, new write routes, or a parallel Forum creation flow, defer it until immediately after the pilot.
+
+### 30. Remove standalone Attach material button from Focus pages
+
+Founder live decision:
+- remove the standalone `Attach material` control from Focus/object pages;
+- users already have the attachment control in the Composer;
+- attaching through the Composer is the clearer interaction because the material arrives in conversational context instead of as a separate page-level action.
+
+Required implementation:
+- remove/hide the standalone Focus `Attach material` button and any redundant page-level attachment affordance;
+- preserve the canonical attachment/material owner behind the Composer path;
+- do not remove the underlying material capability;
+- ensure Composer attachments can still bind material to the currently open Focus/object;
+- add browser proof that an attachment sent from the Focus Composer is bound to that Focus and survives reopen/reload;
+- keep only one obvious attachment entry point on the page.
+
+Classification: **RATIFIED PILOT UX CHANGE — simplify to Composer-only attachment entry.**
