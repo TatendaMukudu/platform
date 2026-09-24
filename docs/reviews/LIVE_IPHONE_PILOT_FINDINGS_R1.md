@@ -519,3 +519,26 @@ Required direction:
 - avoid repeating generic profile unknowns that are not needed to resolve the current object.
 
 Classification: **KEEP THE CONCEPT, SIMPLIFY THE SURFACE.**
+### 39. High/Low/Inquiry/Focus list cards need one uniform summary grammar
+
+Live iPhone screenshot shows inconsistent Focus list cards:
+- one Focus card includes a long body/explanation plus `STILL WORKING OUT`;
+- another Focus that has received substantial work shows only the title/status with no concise summary;
+- the same inconsistency exists across Highs, Lows and Inquiries.
+
+Founder decision:
+- High, Low, Inquiry and Focus list cards should use one consistent summary grammar;
+- card density should reflect the object's current state, not arbitrary creation path or legacy field availability;
+- an object with more work/history should not look emptier than a less-developed one.
+
+Required list-card grammar:
+- title;
+- status/standing;
+- one concise current read or summary when available;
+- one concise `Still working out` / next unresolved question when applicable;
+- optional Forum/readership indicator;
+- no long profile-style prose on some cards while peer cards are blank.
+
+Do not force filler text. If there is genuinely no summary yet, show a plain honest empty state, but use the same structure across all four object kinds.
+
+Classification: **PILOT UX CONSISTENCY FIX — unify object-list cards across High/Low/Inquiry/Focus.**
