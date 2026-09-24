@@ -1891,3 +1891,43 @@ the long placeholders back (A1, by 21px); the mic/send swap removed (A1 on four 
 B1, B3, B5); the page's reservation removed (C6, C6b). `pilot-coach-browser-check` 135 — `PC-U1`
 and `PC-U5` pin the six invitations as exact strings so they cannot drift back into one generic
 line, and they were updated to the trimmed wording rather than loosened.
+
+### A fragment is not an answer — finding #34
+
+The founder photographed an assistant card rendered as a visibly incomplete sentence — "There's
+nothing rec..." — with the source control sitting beside it as though the answer were finished.
+
+**The mechanism was not a mystery once it was looked for.** `_composeTurn` asks the provider for at
+most 320 tokens, a deliberate ceiling behind the prompt's own word budget. When a reply runs into it
+the provider stops mid-word and reports `stop_reason: max_tokens` — and `ai/gateway.js` read the
+words and **dropped the reason**, so every caller committed the fragment. The file already knew this
+happens: its JSON path's own diagnostic says *"unparseable usually means maxTokens cut the object off
+mid-write"*. Prose had no equivalent, and prose is what a person reads.
+
+**How the fact travels.** The reply is still a string — a `String` object carrying a non-enumerable
+marker — so every existing call site keeps working unchanged and only the one that cares asks
+`ai.isTruncated(reply)`. Changing the return shape to an object would have meant auditing dozens of
+call sites in one commit to fix a defect in one of them, which is how a repair becomes the next
+outage. An *empty* truncated reply stays a plain empty string, because `new String('')` is truthy
+and this codebase tests `if (!response)` in a dozen places.
+
+**What is done with it, and why not simply degrading.** What the model managed to say was governed
+like anything else and is not suspect; it is *incomplete*, which is a different problem with a
+different honest answer. Throwing away four good sentences because the fifth was cut would replace a
+visible defect with a silent one — the person would get the deterministic fallback with no sign that
+anything had been lost. So the reply is cut back to the last sentence that actually ended, and the
+loss is stated in the prose *and* in the limitations, because those reach two different readers. Only
+a reply with no complete sentence in it degrades, and it degrades as `cut_short` rather than `empty`
+— the model had things to say and was interrupted, and a log reading "empty" sends the next reader
+after the wrong fault.
+
+One thing found on the way: `_composeTurn`'s own `limitations` reached the manifest and the spoken
+rendering and then stopped. "This rests on a single account" was being said aloud and omitted from
+the response body. They are merged now.
+
+`truncated-turn-http-smoke` (18). Section E is the control — an uninterrupted reply is delivered
+untouched, with no bolted-on sentence, no limitation and no degraded flag — so nothing above can pass
+by degrading everything. **Four mutations, each red then restored:** the composer no longer asking
+whether the reply was cut off (6 red); the gateway no longer marking a `max_tokens` stop (7 red);
+degrading instead of keeping the finished sentences (3 red, including B4, which is what proves the
+keeping half is not vacuous); and the loss no longer said in the prose (C1).

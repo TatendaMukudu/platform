@@ -151,7 +151,8 @@ async function _openaiComplete({ system, msgs, maxTokens, temperature, model, or
   if (!res.ok) throw new Error('openai HTTP ' + res.status);
   const data = await res.json();
   _recordUsage({ org, taskType, tier, promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens });
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  return _reply(data.choices?.[0]?.message?.content?.trim() || '',
+    data.choices?.[0]?.finish_reason === 'length');
 }
 
 function _isModelUnavailable(err) {
@@ -180,6 +181,39 @@ function _text(resp) {
   const blocks = Array.isArray(resp?.content) ? resp.content : [];
   return blocks.filter(b => b && b.type === 'text' && typeof b.text === 'string')
     .map(b => b.text).join('').trim();
+}
+
+/* ── WHETHER THE MODEL FINISHED ITS SENTENCE, CARRIED WITH THE SENTENCE ───────────────────────
+   LIVE iPHONE BLOCKER, findings R1 #34: an assistant card rendered as a visibly incomplete
+   fragment with the source control beside it, as though it were a finished answer.
+
+   A reply cut off by `max_tokens` came back through here INDISTINGUISHABLE from a complete one —
+   `_text` reads the words and drops `stop_reason` — so every caller committed the fragment. This
+   file already knew it happens: the JSON path's own diagnostic says "unparseable usually means
+   maxTokens cut the object off mid-write". Prose had no equivalent, and prose is what a person
+   reads.
+
+   A STRING THAT KNOWS, so nothing breaks. Every existing caller treats the return as a string and
+   keeps working — it IS a string, and `String`, `+`, `.trim()`, `.length` and a template literal
+   all behave. A caller that cares asks `isTruncated(reply)`. The alternative, changing the return
+   shape to an object, would have meant auditing every call site in one commit to fix a defect in
+   one of them, which is how a repair becomes the next outage. */
+function _reply(text, truncated) {
+  /* AN EMPTY REPLY STAYS A PLAIN EMPTY STRING even when the provider says it was cut off, because
+     `new String('')` is TRUTHY and callers all over this codebase test `if (!response)`. There is
+     nothing to salvage from an empty answer anyway, so the marker would buy nothing and would
+     quietly turn "the model said nothing" into "the model said something" at a dozen call sites. */
+  if (!truncated || !String(text || '')) return String(text || '');
+  const s = new String(String(text || ''));   // eslint-disable-line no-new-wrappers
+  try { Object.defineProperty(s, '__iqTruncated', { value: true, enumerable: false }); } catch (_) {}
+  return s;
+}
+
+/* Asked of a reply rather than inferred from its punctuation. A heuristic over the last character
+   would call an honest answer ending in a list item truncated, and would miss a fragment that
+   happened to stop after a full stop. */
+function isTruncated(reply) {
+  return !!(reply && typeof reply === 'object' && reply.__iqTruncated === true);
 }
 
 /* A 400 that names a sampling parameter — the shape of "this model dropped that knob". */
@@ -319,7 +353,7 @@ async function _completeViaProvider({
     try {
       const resp = await call(primary);
       _recordUsage({ org, taskType, tier, promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
-      return _text(resp);
+      return _reply(_text(resp), resp?.stop_reason === 'max_tokens');
     } catch (err) {
       lastErr = err;
 
@@ -332,7 +366,7 @@ async function _completeViaProvider({
         try {
           const resp = await call(primary, true);
           _recordUsage({ org, taskType, tier, promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
-          return _text(resp);
+          return _reply(_text(resp), resp?.stop_reason === 'max_tokens');
         } catch (err2) { lastErr = err2; }
       }
 
@@ -344,7 +378,7 @@ async function _completeViaProvider({
         try {
           const resp = await call(FALLBACK_MODEL);
           _recordUsage({ org, taskType, tier: 'micro', promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
-          return _text(resp);
+          return _reply(_text(resp), resp?.stop_reason === 'max_tokens');
         } catch (err2) { lastErr = err2; }
       }
 
@@ -582,7 +616,7 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
   return resp?.content || [];
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
+module.exports = { complete, completeJSON, isTruncated, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
   budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
   providerFault, providerReachability, _resetProviderFault,
   canSearchWeb, searchWeb, WEB_SEARCH_TOOL };

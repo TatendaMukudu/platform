@@ -11269,7 +11269,11 @@ function _sourceList(items = [], said = '') {
    reading the reply on a phone gets one sentence saying the normal response is not available.
    Widening this to carry a message from a provider would put text nobody in this product wrote
    in front of a user, which is the whole reason the gateway exists. */
-const COMPOSER_DEGRADED = Object.freeze(['disabled', 'no_model', 'over_budget', 'empty', 'unverified', 'error']);
+/* `cut_short` — findings R1 #34. The provider stopped at the token ceiling and nothing on the way
+   back said so, so a fragment was committed as a finished answer. It is its own word rather than
+   `empty` or `error` because it is neither: the model had things to say and was interrupted, and a
+   log reading "empty" would send the next reader looking for the wrong fault. */
+const COMPOSER_DEGRADED = Object.freeze(['disabled', 'no_model', 'over_budget', 'empty', 'unverified', 'cut_short', 'error']);
 const _degraded = reason => ({ degraded: COMPOSER_DEGRADED.includes(reason) ? reason : 'error' });
 
 /* WHAT THE THING THEY ARE LOOKING AT IS CONNECTED TO, for the composer.
@@ -11601,12 +11605,51 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // maxTokens is a hard ceiling behind the prompt's word budget — a reply nobody scrolls to the
     // end of is not a better reply, and this is read on a phone.
     const reply = await ai.complete({ org: code, taskType: 'compose_turn', tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
-    const written = reasoningRegister.polish(reply);
-    if (!written || written.length < 2) {
-      console.log('[composer] model returned nothing usable');
-      _metric(code, 'composer_empty');
-      return _degraded('empty');
+    /* ── A FRAGMENT IS NOT AN ANSWER ────────────────────────────────────────────────────────
+       LIVE iPHONE BLOCKER, findings R1 #34: an assistant card rendered as a visibly incomplete
+       sentence, with the source control sitting beside it as though the answer were finished.
+
+       `maxTokens` above is a hard ceiling behind the prompt's word budget, and when a reply runs
+       into it the provider stops mid-word. That came back through the gateway INDISTINGUISHABLE
+       from a complete reply — `stop_reason` was read nowhere — so the fragment was polished,
+       grounded, given sources and committed as the turn. The gateway now carries the fact
+       (`ai.isTruncated`), and this is where it has to mean something.
+
+       WHAT IS DONE WITH IT, and why not simply degrading. What the model managed to say was
+       governed like anything else and is not suspect; it is INCOMPLETE, which is a different
+       problem with a different honest answer. Throwing away four good sentences because the fifth
+       was cut would replace a visible defect with a silent one — the person asked a question and
+       would get the deterministic fallback with no sign that anything had been lost.
+
+       So it is cut back to the last sentence that actually ended, and the loss is stated out loud
+       rather than left for the reader to notice. If nothing survives that cut there is no answer
+       to show, and the ordinary degraded path is the truthful outcome. The stated line and the
+       machine-readable limitation are both set, because they reach two different readers. */
+    let _cutShort = false;
+    let _usable = reply;
+    if (ai.isTruncated && ai.isTruncated(reply)) {
+      const _whole = String(reply || '');
+      const _end = Math.max(_whole.lastIndexOf('. '), _whole.lastIndexOf('.\n'),
+        _whole.lastIndexOf('? '), _whole.lastIndexOf('! '),
+        /[.?!]$/.test(_whole.trim()) ? _whole.trim().length - 1 : -1);
+      _usable = _end > 0 ? _whole.slice(0, _end + 1) : '';
+      _cutShort = true;
+      console.log(`[composer] the reply hit the token ceiling — kept ${_usable.length} of ${_whole.length} chars`);
+      _metric(code, 'composer_truncated');
     }
+    /* AND THE READER IS TOLD, IN THE PROSE THEY ARE READING. The limitation below reaches the
+       manifest and the spoken rendering; this reaches the person's eyes, which is where the
+       founder saw the defect. One plain sentence claiming nothing — no figure, no name, no
+       promise about a mechanism this turn does not have. */
+    const _polished = reasoningRegister.polish(_usable);
+    if (!_polished || _polished.length < 2) {
+      console.log(`[composer] model returned nothing usable${_cutShort ? ' (cut short with no complete sentence in it)' : ''}`);
+      _metric(code, 'composer_empty');
+      return _degraded(_cutShort ? 'cut_short' : 'empty');
+    }
+    const written = _cutShort
+      ? `${_polished}\n\nThat is as far as I got before I ran out of room in one answer.`
+      : _polished;
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
@@ -11641,9 +11684,15 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     /* WHAT THIS ANSWER CANNOT SHOW. One account is a starting point, not a finding, and the
        listener is the one who most needs telling — see L-MF5. Stated on the manifest so every
        channel is measured against it rather than each deciding whether to mention it. */
-    const _limits = (evidence.length + beliefs.length === 1)
-      ? ['This rests on a single account so far, so it is a starting point rather than a finding.']
-      : [];
+    const _limits = [
+      ...((evidence.length + beliefs.length === 1)
+        ? ['This rests on a single account so far, so it is a starting point rather than a finding.']
+        : []),
+      /* AND IF IT WAS CUT OFF, THAT IS A LIMIT OF THIS ANSWER. It rides on the manifest with the
+         others so every channel is measured against it — the prose, the spoken rendering and the
+         machine-readable list — rather than each deciding for itself whether to mention it. */
+      ...(_cutShort ? ['This answer ran out of room before it finished, so it stops earlier than it meant to.'] : []),
+    ];
     const _mf = manifest.manifest({
       subject: `member:${userId}`,
       at: now,
@@ -16689,7 +16738,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
        is not made wrong by the model being unavailable to phrase it. */
     composer: composerDegraded ? { degraded: true, reason: composerDegraded } : { degraded: false, reason: null },
     groundedClaims: composedReply ? [] : groundedClaims, inferred: composedReply ? [] : inferred,
-    limitations: context.limitations,
+    /* AND THE COMPOSED ANSWER'S OWN LIMITS TRAVEL WITH IT. `context.limitations` are the
+       deterministic read's; a reply the model wrote has limits of its own — "this rests on a
+       single account", and since findings R1 #34, "this ran out of room before it finished" —
+       which were reaching the manifest and the spoken rendering and then stopping there. A
+       limitation that the audio channel states and the response body omits is the same split
+       between two readers this round has already found once. */
+    limitations: [...new Set([...(context.limitations || []),
+      ...((composedReply && composedReply.limitations) || [])])],
     /* WHICH PROPOSAL A SPOKEN "yeah" REFERRED TO, resolved above and carried here so the client can
        confirm it through the one existing route. `ask` is the honest answer when several were
        offered: the product says which it cannot tell apart rather than choosing for somebody. */
