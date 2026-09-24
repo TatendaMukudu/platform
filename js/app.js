@@ -2713,7 +2713,37 @@ async function _renderBuildLine() {
 }
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
+/* ── APPEARANCE ────────────────────────────────────────────────────────────────────────────
+   ONE OWNER for "which theme is on", and it is the attribute on <html> — the same one the inline
+   boot script in index.html sets before anything paints. No second copy of the state in JS, so
+   the page and the store cannot disagree about what a person is looking at.
+
+   PER DEVICE. A coach's phone should not change colour because they opened a laptop, and this is
+   a preference about a screen rather than a fact about a person. `localStorage` is exactly the
+   right scope for that, and the boot script reads the same key. */
+function setTheme(name) {
+  const t = name === 'dark' ? 'dark' : 'light';
+  try { document.documentElement.setAttribute('data-theme', t); } catch (_) {}
+  try { localStorage.setItem('iq_theme', t); } catch (_) {}
+  _markThemeChoice();
+}
+function currentTheme() {
+  try { return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; }
+  catch (_) { return 'light'; }
+}
+/* The control says which one is on. Read from the attribute rather than from what was last
+   clicked, so opening Settings on a device that already chose navy shows navy selected. */
+function _markThemeChoice() {
+  const now = currentTheme();
+  document.querySelectorAll('[data-theme-set]').forEach(b => {
+    const on = b.getAttribute('data-theme-set') === now;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
 function renderSettings(){
+  _markThemeChoice();
   /* ── THREE TIERS, AND A TAB SOMEBODY MAY NOT USE IS NOT DRAWN ─────────────────────────────
      FOUNDER DECISION, September 2026: Personal Settings for every authenticated user,
      Organisation Settings for authorised administrators, Platform diagnostics for superadmins —

@@ -18,6 +18,13 @@
 [hidden] { display: none !important; }
 
 :root {
+  /* NATIVE UI FOLLOWS THE THEME. Without this the browser draws scrollbars, date pickers, select
+     menus and autofill from its own default, which is light — so the navy theme had a pale
+     scrollbar down the edge of every scrolling surface, and the light theme would have inherited
+     a dark one the moment this block gained a sibling. One line, and it is the difference between
+     a themed product and a themed page with the browser's furniture bolted on. */
+  color-scheme: dark;
+
   --bg-base:      #0a0c14;
   --bg-surface:   #111420;
   --bg-card:      #161b2e;
@@ -114,9 +121,81 @@
   --mode-government:#4fb8f7;
 }
 
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   LIGHT — THE PILOT DEFAULT. The navy above is the alternative, and it is unchanged.
+
+   WHY IT IS AN OVERRIDE BLOCK RATHER THAN A REWRITTEN `:root`. Inverting the root would mean
+   every one of the ~1400 rules below re-rendered against values nobody has looked at, with the
+   navy theme — which is the one that has been driven, screenshotted and gated for months —
+   reconstructed from the new values rather than left alone. This way the navy theme is literally
+   the same bytes it was, the light theme is one auditable block, and reverting is deleting it.
+
+   ONLY VALUES CHANGE, NEVER NAMES. No rule below needs to know a theme exists, which is what
+   keeps "the information architecture, spacing, accents and object semantics stay the same
+   between themes" true by construction rather than by inspection.
+
+   MEASURED, NOT EYEBALLED, to the same standard the navy ramp records above. Worst case for each
+   step is against the surface it actually sits on — the page (#f7f8fc) and a hovered card
+   (#eef1f8) — because a ratio that only holds on one of them is a ratio that fails in use:
+
+     --text-primary   #1b2135   15.0:1 page · 14.1:1 hovered
+     --text-secondary #4a5473    7.1:1 page ·  6.6:1 hovered
+     --text-muted     #5e6890    5.1:1 page ·  4.8:1 hovered   (carries real content, so >= 4.5)
+     --accent         #2563c9    5.3:1 page ·  5.7:1 on white
+
+   THE ACCENT HAD TO MOVE AND THE BRAND DID NOT. #4f8ef7 is 3.21:1 on white — fine for a border
+   or an icon, below the line for the link text and labels that also use this token. #2563c9 is
+   the same blue carried down to where text on white is readable. Filled surfaces keep
+   --accent-strong, where white text is 4.88:1 exactly as it is in navy.
+
+   SEMANTIC COLOURS ARE DARKENED FOR THE SAME REASON: a #4ff77a green that reads on navy is
+   1.6:1 on white, which is not a colour, it is a decoration where content was meant to be. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base:      #f7f8fc;
+  --bg-surface:   #ffffff;
+  --bg-card:      #ffffff;
+  --bg-hover:     #eef1f8;
+  --border:       #dde3ef;
+  --border-light: #e9edf6;
+
+  --accent:       #2563c9;
+  --accent-strong:#2f6fd0;
+  --accent-glow:  rgba(37,99,201,0.12);
+  --accent2:      #6d3fd4;
+  --accent3:      #0a7f6c;
+  --accent4:      #a35b00;
+  --danger:       #b91c1c;
+  --warning:      #c2410c;
+  --success:      #15803d;
+
+  --text-primary:   #1b2135;
+  --text-secondary: #4a5473;
+  --text-muted:     #5e6890;
+
+  --surface:    var(--bg-surface);
+  --surface-1:  var(--bg-surface);
+  --surface-2:  var(--bg-card);
+  --surface-3:  var(--bg-hover);
+  --line-soft:  var(--border);
+  --accent-soft: rgba(37,99,201,0.10);
+  --accent-dark: #1f57ae;
+  --good:       var(--success);
+
+  /* A 45%-black shadow is a bruise on a white page. Same elevation, read as depth not as dirt. */
+  --shadow: 0 4px 20px rgba(16,24,48,0.10);
+  --shadow-glow: 0 0 20px rgba(37,99,201,0.14);
+
+  /* The mode colours are brand identifiers rather than text, but two of them are pale enough to
+     vanish on white, so those two are carried down and the rest stay put. */
+  --mode-workplace: #0a7f6c;
+  --mode-military:  #a35b00;
+}
+
 /* ── RESET ─────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 14px; scroll-behavior: smooth; }
+html { font-size: 16px; scroll-behavior: smooth; }
 body {
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   background: var(--bg-base);
@@ -932,7 +1011,10 @@ img { max-width: 100%; }
 .wellness-bar .marker {
   position: absolute; top: -3px;
   width: 16px; height: 16px;
-  background: #fff;
+  /* WAS #fff. A white dot ringed by --bg-card is invisible the moment --bg-card is white, which
+     it is in the light theme; the accent reads on both and is the brand colour this marker
+     always should have used. */
+  background: var(--accent);
   border-radius: 50%;
   border: 3px solid var(--bg-card);
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
@@ -1242,7 +1324,9 @@ img { max-width: 100%; }
   font-size: var(--fs-md); line-height: 1.55;
   animation: fadeIn 0.25s ease;
 }
-.sr-feedback-strong { background: rgba(79,247,122,0.1);  border: 1px solid rgba(79,247,122,0.3);  color: #7af77a; }
+/* WAS #7af77a — a dark-theme green that is 1.6:1 on a light page. Through the token so it
+   follows the theme like everything else. */
+.sr-feedback-strong { background: rgba(79,247,122,0.1);  border: 1px solid rgba(79,247,122,0.3);  color: var(--success); }
 .sr-feedback-mid    { background: rgba(247,178,79,0.1);  border: 1px solid rgba(247,178,79,0.3);  color: var(--accent4); }
 .sr-feedback-weak   { background: rgba(247,79,79,0.1);   border: 1px solid rgba(247,79,79,0.3);   color: var(--danger); }
 
@@ -1698,7 +1782,9 @@ img { max-width: 100%; }
 }
 .org-ob-textarea:focus {
   outline: none; border-color: var(--accent);
-  background: #fff;
+  /* WAS #fff, which put near-white --text-primary on a white box the moment this was focused —
+     a dark-theme defect in its own right, and an invisible one in the light theme too. */
+  background: var(--bg-card);
 }
 .org-ob-textarea-sm { min-height: 80px; }
 .org-ob-btn-primary {
@@ -3691,3 +3777,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 /* WHAT CONNECTING SOMETHING DOES NOT DO. Shown on a confirmation card when the destination has a
    wider audience than the file: the original stays where it is, and sharing it is a separate act. */
 .iq-eff-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.3rem 0 0}
+
+/* ── APPEARANCE CHOICE ───────────────────────────────────────────────────────────────────────
+   Two options, and the one that is on says so. Sized as a real tap target because this is read
+   and used on a phone like everything else. */
+.iq-theme-pick{display:flex;gap:.5rem;flex-wrap:wrap}
+.iq-theme-opt{min-height:44px;padding:.5rem 1.1rem;border:1px solid var(--border);
+  border-radius:999px;background:var(--bg-surface);color:var(--text-secondary);
+  font-size:var(--fs);font-weight:600;cursor:pointer}
+.iq-theme-opt:hover{border-color:var(--text-muted)}
+.iq-theme-opt.is-on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
