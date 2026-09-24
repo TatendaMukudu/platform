@@ -85,6 +85,17 @@ const SYSTEM_PROMPT = [
   '',
   'AVAILABLE ACTIONS may be listed in CONTEXT. You may offer one in passing, in your own words.',
   'Nothing is ever saved or shared until they confirm it, so never claim you have done it.',
+  /* AND "YOU CANNOT DO IT" IS ABOUT YOU, NOT ABOUT THE PRODUCT. Live iPhone blocker, findings R1
+     #6: the assistant told the founder "I can't add collaborators or change who sees this focus"
+     and "the available actions do not include inviting collaborators to a focus" — while the Focus
+     screen in front of them was showing Who can see this, with Only me, Whoever leads a group I am
+     in, and People I choose, and the room afterwards read "9 can read this". The model reasoned
+     from its own action list to a claim about the product, and was wrong about the product. */
+  'CHANGING WHO CAN SEE A HIGH, LOW, INQUIRY OR FOCUS IS A REAL CAPABILITY THIS PRODUCT HAS. It is',
+  'not yours to perform, and it is not absent: it lives on the object\'s own "Who can see this"',
+  'control, which offers only me, whoever leads a group I am in, and people I choose. Never tell',
+  'somebody the product cannot do it, or that collaborators cannot be added — point them at that',
+  'control and say the change takes effect when they confirm it there.',
   'If they tell you to SHARE something, make it public, or change who can see it, do NOT say it',
   'is done — you cannot do it. Their audience only ever widens through an explicit confirmation',
   'on the card. Say plainly that you have not changed it and point them at the control. Telling',
@@ -131,6 +142,7 @@ function buildContext({
   material = null,     // { title, filename, text, sectionIds, partial } attached to THIS object
   connections = null,  // { related: [{type, kind, label}], loop } — edges the records already carry
   attention = null,    // [{ reason, kind, label, detail }] — deterministic candidates, codes only
+  standing = null,     // { highs: [label], lows: [label] } — what the Highs/Lows pages actually hold
   forum = null,        // { people, messages, sameObject } — THIS object's forum, one way only
 } = {}) {
   const L = [];
@@ -391,6 +403,38 @@ function buildContext({
 
      Each code is a fact about the PAST and about a RECORD. None is about a person and none is
      about what happens next, so the prose must not become either. */
+  /* ── WHAT HAS ACTUALLY CROSSED, AND THE WORDS FOR WHAT HAS NOT ────────────────────────────
+     LIVE iPHONE BLOCKER (findings R1 #16): the assistant said there was now enough to count as
+     something worth attention while the Lows page said nothing needed attention. One record, two
+     answers, and the person was looking at both.
+
+     The cause was silence. Nothing about standing was in this context at all, so a model with an
+     empty space filled it from the conversation — and "several people have mentioned it" reads,
+     to a model, like something that ought to have crossed. Every other block here states its empty
+     case out loud; this one did not exist.
+
+     IT IS READ FROM `_allObjectsFor`, the same authorised set the Highs and Lows pages render
+     from, so the model cannot be handed a standing the page would not show. Below the threshold
+     there is a vocabulary and it is given here, because "worth investigating" and "this now counts
+     as something worth attention" are different claims and only one of them is the product's to
+     make. */
+  if (standing && typeof standing === 'object') {
+    const hs = (standing.highs || []).filter(Boolean);
+    const ls = (standing.lows || []).filter(Boolean);
+    L.push(hs.length ? 'HIGHS THAT HAVE ACTUALLY CROSSED (this is what their Highs page shows):'
+      : 'HIGHS THAT HAVE ACTUALLY CROSSED: none. Their Highs page is empty.');
+    for (const h of hs) L.push(`  - ${_clip(h, 160)}`);
+    L.push(ls.length ? 'LOWS THAT HAVE ACTUALLY CROSSED (this is what their Lows page shows):'
+      : 'LOWS THAT HAVE ACTUALLY CROSSED: none. Their Lows page says nothing needs attention.');
+    for (const l of ls) L.push(`  - ${_clip(l, 160)}`);
+    L.push('DO NOT SAY SOMETHING HAS BECOME A HIGH OR A LOW, OR THAT IT "NOW COUNTS AS SOMETHING');
+    L.push('WORTH ATTENTION", UNLESS IT IS LISTED ABOVE. The kernel decides standing, not you, and');
+    L.push('the person can see the same page you are being shown. Below that line the honest words');
+    L.push('are "worth investigating", "still a hypothesis", "not enough to stand on yet" — say one');
+    L.push('of those instead of implying a standing the record does not have.');
+    L.push('');
+  }
+
   if (Array.isArray(attention) && attention.length) {
     L.push('WHAT THEIR RECORD SAYS IS WORTH A LOOK (decided by the system, not by you — you may only');
     L.push('put these into words, and you may NOT add anything that is not on this list):');

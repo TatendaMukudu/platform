@@ -11301,6 +11301,32 @@ function _attentionContext(code, userId) {
   } catch (_) { return null; }
 }
 
+/* THE CANONICAL STANDING, READ FROM THE OWNER THE HIGHS AND LOWS PAGES READ.
+
+   LIVE iPHONE BLOCKER (findings R1 #16). The assistant said there was now enough to count as
+   something worth attention; the Lows page said nothing needed attention. Two answers about one
+   record, and the person was looking at both.
+
+   The cause was silence, not disagreement. `_attentionContext` returns null when nothing qualifies
+   and the composer omits the block entirely, so a model with nothing in front of it about standing
+   filled the gap from the conversation. An absence is not a fact a model can read; it is a space
+   it will furnish. Every other context block in `buildContext` states its empty case out loud —
+   "nothing recorded yet", "none on this topic" — and this one did not exist at all.
+
+   SO IT IS ALWAYS PRESENT, INCLUDING EMPTY, and it is read through `_allObjectsFor`: the same
+   authorised set the Highs and Lows pages themselves render from. The model cannot be told a
+   standing the page would not show, because it is handed the page's own answer. */
+function _standingContext(code, userId) {
+  try {
+    const objs = _allObjectsFor(code, userId) || [];
+    const pick = k => objs.filter(o => o && o.kind === k && !o.parked)
+      .map(o => String((o.explained && o.explained.headline)
+        || (o.present && o.present.summary && o.present.summary.title) || '').slice(0, 160))
+      .filter(Boolean).slice(0, 5);
+    return { highs: pick('high'), lows: pick('low') };
+  } catch (_) { return { highs: [], lows: [] }; }
+}
+
 function _crossEvidenceContext(code, userId, aboutRef) {
   try {
     const a = _splitAboutRef(aboutRef);
@@ -11566,6 +11592,9 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          reason arrived with the row. Deterministic code decides what is eligible; the model
          decides only how to say it. */
       attention: _attentionContext(code, userId),
+      /* WHAT HAS ACTUALLY CROSSED, from the same owner the Highs and Lows pages read. Always
+         passed, including when nothing has, because an omitted block is a space a model fills. */
+      standing: _standingContext(code, userId),
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -27067,6 +27096,8 @@ const PORT = process.env.PORT || 3000;
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint, getVisibleUserIds,
+  // exported for the truth layer: the canonical standing the Highs/Lows pages render from
+  _standingContext,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave, _purgeOrg,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
