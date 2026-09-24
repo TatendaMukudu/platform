@@ -16153,6 +16153,38 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now(), opts.about || null);
   diagnose.noteConversationResponse(_conv, text);
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
+
+  /* ── WHAT THEY TYPED IS RECORDED BEFORE ANYTHING IS ASKED OF A MODEL ──────────────────────
+     LIVE iPHONE BLOCKER (findings R1 #32). The founder asked a question in a Focus conversation
+     and later found it gone from the visible thread.
+
+     It was appended AFTER the provider call — two hundred lines after it, with unguarded `await`s
+     in between. `_composeTurn` happens to catch its own failures, so a provider rejection does not
+     lose the turn today; but that is a property of one function's internals, not a guarantee, and
+     anything else that throws between accepting the request and reaching that line takes the
+     person's words with it. Their message was on screen because the client drew it optimistically.
+     It was never anywhere else.
+
+     RECORDED FIRST, THE ANSWER APPENDED LATER. A turn written before the model runs is durable by
+     construction; one written after it is durable only while nothing goes wrong. Nothing else
+     changes: this is the same message, in the same store, with the same id shape — it has simply
+     stopped depending on the rest of the turn succeeding.
+
+     AND A RETRY ADDS NOTHING (findings R1 #13, the same human message visible twice around a
+     degraded response). A client that resends — because the connection dropped, because the person
+     pressed again — carries the same `clientTurnId`, and the second arrival finds its own message
+     already here. Idempotency on the key, not a guess from the text: two people may legitimately
+     say "yes" twice, and deduplicating on content would eat the second one. */
+  const _turnKey = String(opts.clientTurnId || '').trim().slice(0, 64) || null;
+  const _already = _turnKey && (_conv.messages || []).some(m => m && m.clientTurnId === _turnKey);
+  const _userMsgAt = new Date().toISOString();
+  if (!_already) {
+    _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _userMsgAt,
+      id: 'm_' + generateId(), ...(_turnKey ? { clientTurnId: _turnKey } : {}) });
+    _conv.updatedAt = _userMsgAt;
+    scheduleSave();
+  }
+
   const actionContext = _composerActionContext(code, userId, opts, _conv);
   const actionReading = await _composerActionInterpret(code, text, actionContext, priorMessages, opts.requestedAction || null);
 
@@ -16709,7 +16741,8 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // Append this exchange to the private, self-only conversation history (durable — survives the
   // bounded-turn cap). Provenance rides along so history can show the two registers too.
   const _nowIso = new Date().toISOString();
-  _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _nowIso, id: 'm_' + generateId() });
+  /* THE HUMAN TURN IS ALREADY HERE. It was pushed before the model was asked anything — see the
+     comment at that push. What remains is to append what IntelliQ said in reply. */
   // The sources ride WITH the message into history. Storing them only on the live response
   // meant the chips existed for as long as the bubble was on screen and vanished the moment
   // you came back to the thread — which is the half of provenance that actually matters, since
@@ -16768,6 +16801,10 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
          against the reader's own authorised objects and against the bound object's own records
          before it decides anything, and discards it otherwise. */
       evidenceRef: req.body?.evidenceRef,
+      /* THE CLIENT'S OWN ID FOR THIS SEND, so a resend after a dropped connection is recognised
+         as the same turn rather than recorded as a second one. Optional: a client that does not
+         send it gets the behaviour it always had. */
+      clientTurnId: req.body?.clientTurnId,
       requestedAction: req.body?.requestedAction });
     _metric(code, 'turn');
     /* DID THIS TURN PRODUCE EVIDENCE ABOUT ME? If so the person is asked, once, which way what

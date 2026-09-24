@@ -14839,9 +14839,15 @@ const MemberApp = {
         this._pendingComposerAction.arguments = { ...(this._pendingComposerAction.arguments || {}),
           ...(this._pendingComposerAction.type === 'create_focus' ? { text } : { because: text }) };
       }
+      /* ONE ID FOR ONE SEND. If this request is retried — a dropped connection, a second tap on a
+         slow network — the server recognises its own message rather than recording the sentence
+         twice, which is what the founder saw on a live iPhone around a degraded response. Minted
+         per send, not per keystroke: a genuinely new message gets a genuinely new id. */
+      const clientTurnId = 'ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
         text, conversationId: thread.conversationId || undefined, about: thread.about,
         surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
+        clientTurnId,
       }) });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data || !data.ok) {
