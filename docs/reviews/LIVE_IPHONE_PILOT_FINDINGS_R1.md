@@ -685,3 +685,56 @@ Required direction:
 - one strong clarifying question rather than stacked interpretations.
 
 Classification: **UX / RESPONSE QUALITY ISSUE.**
+
+### 40. One-point pseudo-chart issue applies to Highs, Lows, Inquiries and Focuses
+
+Founder correction:
+- do not treat the one-point `Recorded events` problem as Focus-specific;
+- audit the shared High / Low / Inquiry / Focus detail renderer and any per-kind variants for the same pseudo-chart behavior.
+
+Required fix:
+- all four object kinds must use the same visualization rule;
+- one meaningful recorded moment => compact event/readout, not a chart;
+- two or more ordered observations still do not automatically justify a trend line unless the semantics support change over time;
+- only render a trend/chart when there is enough ordered evidence for the visual claim to be honest;
+- never use decorative interpolation or imply movement from a single point;
+- keep the object page vertically compact so conversation stays primary.
+
+Classification: **PILOT UX CONSISTENCY FIX — shared chart/event rule across all four object kinds.**
+
+### 41. Recheck external-source behavior across Highs, Lows, Inquiries and Focuses
+
+Live iPhone surfaces currently show phrases such as:
+- `No outside reading here — no concept to search on...`
+- source counts such as `1 source` / `3 sources`,
+while the actual provenance and usefulness of those sources are not always obvious.
+
+Required audit:
+- trace exactly what `sources` means on each object kind and on assistant messages;
+- distinguish internal record/evidence, user-provided material, and external/web knowledge;
+- external sources must never be presented as local empirical proof;
+- source counts must open to inspectable source detail;
+- if no external source was actually used, do not imply that one was;
+- if an object has no governed query/concept suitable for outside reading, say that plainly without implementation jargon;
+- preserve the requirement that IntelliQ messages expose compact inspectable sources at the bottom.
+
+Classification: **PILOT PROVENANCE AUDIT — source labels and source counts must mean one thing consistently.**
+
+### 42. Recheck suggestion generation for Focuses
+
+Founder request:
+- specifically re-audit how IntelliQ produces suggestions/options for a Focus after the live iPhone finding where `Can you give me suggestions on how to win and concede less?` yielded a collapsed/incomplete answer and weak grounding.
+
+Required behavior:
+- suggestions must be grounded in the current Focus, its attempts/outcomes, available internal evidence, prior relevant organizational learning, and cited external knowledge when genuinely used;
+- external knowledge may inform an option but must be clearly sourced and must not masquerade as local proof;
+- do not generate a recommendation/winner merely because the user asked for suggestions;
+- offer a small set of justified options when evidence is sufficient;
+- include uncertainty/why each option is being surfaced;
+- do not recycle a failed tactic without explaining what changed;
+- if the record is too weak, say what is missing rather than inventing tactical advice;
+- no option may auto-create or auto-revise a Focus; human confirmation remains required;
+- ensure the deterministic path and model path follow the same policy;
+- add realistic live/browser cases for: no evidence, one failed tactic, multiple attempts, user-reported stats, external-source-backed option, and provider degradation/recovery.
+
+Classification: **PILOT REASONING + PROVENANCE RECHECK — Focus suggestions must be useful, grounded and source-honest.**
