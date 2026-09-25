@@ -738,3 +738,75 @@ Required behavior:
 - add realistic live/browser cases for: no evidence, one failed tactic, multiple attempts, user-reported stats, external-source-backed option, and provider degradation/recovery.
 
 Classification: **PILOT REASONING + PROVENANCE RECHECK — Focus suggestions must be useful, grounded and source-honest.**
+### 43. Inquiry conversation still bleeds into unrelated team-draw context
+
+Live iPhone reproduction on Titi's personal Inquiry (`Where they are trying to get to`) shows object-bound conversation drifting into a separate team-draws topic:
+- `You're asking what's known about why there have been many draws this season...`
+- subsequent answers ask whether the user is analysing this with the First Team group.
+
+Required fix:
+- object-bound conversation must keep the current object as the primary subject;
+- related context may be consulted but must not silently replace the active subject;
+- a topic switch should require an explicit user transition or a clearly signposted branch;
+- add browser proof that unrelated recent/team topics cannot hijack a personal Inquiry thread.
+
+Classification: **PILOT REASONING BUG — object/topic binding is not strict enough.**
+
+### 44. Direct epistemic question can still receive an evasive/non-classifying answer
+
+Live prompt: `Does the record actually support that, or is that just a hypothesis?`
+Observed response: `That is the same part of the record I just showed you...`
+
+Required behavior:
+- answer the classification directly first: supported / unsupported / hypothesis / unknown;
+- then explain why and cite the relevant record/source;
+- do not dodge a binary epistemic question with navigation-style copy.
+
+Classification: **PILOT REASONING QUALITY BUG — support-vs-hypothesis answer must be explicit.**
+
+### 45. Assistant still tells users to record Highs/Lows
+
+Live response asks whether the user is `interested in recording some Highs or Lows to give me actual evidence`.
+
+This violates product law. Humans contribute observations/accounts/evidence; High/Low are governed standings produced by the canonical owner.
+
+Required fix:
+- remove any model/deterministic phrasing that asks users to create/record a High or Low;
+- ask for the underlying observation/account instead;
+- if the record later crosses standing thresholds, High/Low may surface canonically.
+
+Classification: **PILOT SEMANTIC BUG — stale create-High/Low framing remains.**
+
+### 46. `What could we try?` on Inquiry still fails to provide useful bounded options
+
+Live prompt: `What could we try?`
+Observed response declines to offer options, says it `ran out of room in one answer`, then asks broad follow-up questions.
+
+Required behavior:
+- if evidence is genuinely insufficient, say exactly what missing fact blocks action and ask the single highest-information question;
+- if enough context exists, provide a small bounded option set with rationale/uncertainty;
+- never mention internal answer-length limitations such as `ran out of room`;
+- keep Inquiry and Focus suggestion policy consistent with canonical readiness state.
+
+Classification: **PILOT UX/REASONING BUG — weak suggestion path and internal-limit leakage.**
+
+### 47. Incomplete assistant sentence is still visible as a final answer
+
+Live screenshot shows an assistant turn ending `Or are you ready to c` with controls/source count rendered beneath it as if complete.
+
+Required fix:
+- a truncated/partial sentence must never be committed/rendered as a finished assistant turn;
+- detect incomplete provider/model output and retry or show an explicit recovery state;
+- do not attach source controls to a fragment as though it were final.
+
+Classification: **PILOT RELIABILITY BLOCKER — fragment-finalization bug persists live.**
+
+### 48. Legacy third-person Inquiry label still present
+
+Live Inquiry list/detail still uses `Where they are trying to get to` on the current user's own personal Inquiry.
+
+Required direction:
+- replace remaining third-person/profile-era labels on personal object surfaces with direct object-specific language;
+- preserve the underlying primitive/data; this is presentation cleanup only.
+
+Classification: **PILOT UX CLEANUP — legacy label still visible.**
