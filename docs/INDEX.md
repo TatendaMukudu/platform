@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `71d4dc1` (restamped during the live-iPhone pilot closure pass, after the Forum Ask focus-room repair). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
+**Written against:** `46ab7e2` (restamped after the second round of live-iPhone pilot defect closure — findings R1 #43-#50: the bound object is the subject of its own conversation, a fragment is never committed as a finished turn, and a provider failure is classified rather than flattened). **Branch:** `claude/platform-work-summary-nmb0cm` remains the long-lived development branch; the current closure work is isolated on `codex/pilot-recovery-gate-r7` / draft PR #90 and must not be merged independently.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 

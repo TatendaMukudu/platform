@@ -2490,3 +2490,155 @@ say it and the prompt already forbids it), #38 (concept ratified, surface change
 **READY FOR LIVE REHEARSAL.** Internally green at this head, and stopping here so this exact
 candidate can be rehearsed on Render, Neon, a real provider and a real iPhone before merge review.
 Not ready to merge on internal evidence alone, and this handoff does not claim it is.
+
+## 17. Claude — live pilot defect closure, round two — 2026-09-25
+
+**Head:** *this commit* on `codex/pilot-recovery-gate-r7` — a commit cannot carry its own hash, so read the branch tip. The last commit carrying a product
+change is `52d52ca`; `46ab7e2` repairs a browser gate that failed under load. **Nothing merged.
+Nothing deployed. No new feature work.**
+
+Brief: close only the remaining live founder-reproduced pilot defects — findings R1 #43 to #50 —
+reproducing each before fixing it, at the canonical owners, with browser proof where the finding
+asks for it and a mutation for every new gate.
+
+### Three of the eight were one surface, and the cause was structural
+
+`_assistantAnswer` is an English-cue router. Thirteen branches, **not one of which looks at
+`opts.object`**, and the bound object is consulted LAST — after free-text retrieval has already
+dead-ended. Driven on the real route from Titi's own Inquiry:
+
+| typed into her own Inquiry | what came back |
+|---|---|
+| "How is the team doing?" | the SQUAD's open question — "is it the same ten minutes every time?" |
+| "What should I focus on?" | the attention digest — "First Team is working out many draws this season" |
+
+Neither answer mentioned the object on the screen. That is **#43**. **#44** and **#46** are the
+same shape from the other side: a question *about* the bound object that no branch could answer,
+falling through to a description of it and then to a suggestion that the person ask something else.
+
+The founder's ruling is three sentences and all three are implemented, **at the chain's single exit
+rather than in thirteen copies** — doing it per branch would mean thirteen copies of one rule and a
+fourteenth branch written later without it:
+
+- a question naming no other subject is answered about the **object**, and the wider reading is
+  **offered** rather than withheld;
+- a question that names the team still gets the team, in a sentence saying which conversation it
+  stepped out of.
+
+`_namesOther` is `workScoped` — the same team/org/everyone vocabulary the retrieval purpose is
+already chosen by. A second list here is how two lists come to disagree about what counts as
+naming the team.
+
+### #47 is not #34 again, and finding out why was the whole of it
+
+`__iqTruncated` is set from `stop_reason === 'max_tokens'`. A reply that stops because the **stream**
+stopped — an upstream error, a dropped connection, a proxy cutting the response, *which is the same
+event #50 reports* — carries no such reason. So `_cutShort` stayed false, the trim never ran, and
+"Or are you ready to c" was polished, grounded, given a source list and committed. Reproduced in
+three shapes; the middle one is the live defect and the marker never fires on it.
+
+- Unfinishedness is now read from the text as a **second** signal: does the reply end **mid-word**,
+  which no finished sentence does in any language that punctuates them. The gateway's own note
+  argues against a punctuation heuristic and is right about what it was arguing against — inferring
+  truncation from the last character alone. This asks a narrower question.
+- `'?\n'` and `'!\n'` joined the boundary set. They were missing, so even when the marker DID fire
+  a question ending its own line was thrown away with the fragment.
+- The model is **asked once more**, with room to land, before the person is given less than an
+  answer. The better of the two is kept, so a retry can never leave them with less than the first
+  attempt already had.
+
+### The rest
+
+| # | What was wrong | Where it is fixed |
+|---|---|---|
+| #45 | "recording some Highs or Lows to give me actual evidence" — a standing is not something a person creates, an account is not evidence until deliberately admitted, and a standing is not the way to give evidence | `ai/language-guard.js`, beside the prediction and diagnosis rules. Reads the **verb**, not the noun: "on the record", "your record holds", "a high appeared on your record" are this product's commonest sentences. 2,942 of the product's own strings scanned for false positives |
+| #46b | "That is as far as I got before I ran out of room in one answer" — an internal answer-length ceiling offered as the reason no options came back | the recovery state says only what is true for the reader, in the prose and in the limitations |
+| #49 | "What could we try next?" on a Focus opened by reading IMG_1918.png back | the deterministic path was already right, so `material.recitationOf` measures the longest unbroken run of the document's own words and where it starts — which tells reciting from **using**, and leaves "what does that picture say?" answered in full |
+| #50 | the degraded banner on college WiFi; every provider failure one metric and one log line | `ai.failureClass` in a closed vocabulary — timeout, rate_limited, over_capacity, upstream, unreachable, auth, model_unavailable, bad_request, cancelled. None of it reaches the person: if their connection were the problem the request would never have arrived |
+| #48 | the founder's own Inquiry read "Where they are trying to get to" | `complete-profile` writes the second-person forms; `ai/present.js` carries the old five forward as a **whole-label map**, never a pronoun rewriter — swapping "they" for "you" across arbitrary text would turn a member's account of somebody else into a statement about the reader. No stored record is rewritten |
+| #51 | no canonical High or Low exists on the live account | **no defect.** Nothing was fabricated to satisfy a test |
+
+### And one defect found while driving #44
+
+An inquiry with no admitted read answered *"I don't have a read on this yet. That rests on two
+independent accounts."* — a basis attached to a claim that does not exist. That is findings R1 #37
+in its third renderer. `because` belongs to the **observation**; with no admitted read the same
+facts are said the other way round.
+
+### Proof
+
+- **Truth Layer: green**, every registered suite, from this tree.
+- **Two new suites, registered, both reproduced red first:**
+  `object-subject-binding-http-smoke` **26**, `model-edge-honesty-http-smoke` **29**.
+- **Browser proof where #43 asks for it by name** — "add browser proof that unrelated recent/team
+  topics cannot hijack a personal Inquiry thread". `pilot-coach-browser-check` PC-J10..J13, driven
+  through the thread's **own** composer (`iq-object-input`, not the shell one) at 390px, because
+  the subject of a turn is carried by whichever box the person typed into and this product has two.
+- **Every registered real-Chromium gate at head:** chart-shape 50, composer-fit 33, exhausted-help
+  26, forum-share 31, group-loop 55, library 33, naming 32, onboard 34, pilot-coach 139,
+  priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34, plus
+  live-recovery-repro 63. **749 assertions, 0 failed.**
+- **Real PostgreSQL, process killed between write and read:** `durable-restart-check` **35 passed,
+  0 failed**. A local PostgreSQL in this container: no pooler, no cold start, no partition. **Not
+  Neon and not Render.**
+- **Fourteen mutations**, each required red then restored: the exit law disabled; the signpost
+  silenced; the support classification skipped; every record given the same verdict; the option set
+  unreachable; the legacy labels dropped; unfinishedness read from the marker only (the live defect
+  restored); the `'?\n'` boundary removed; the retry removed; the recovery copy reverted to the
+  internal limit; the High/Low guard removed; the recitation refusal removed; the request-to-read
+  exemption removed; every provider failure flattened to one class.
+
+### Three of my own assertions were unfalsifiable, and mutations found all three
+
+- **OS-A1** and **PC-J11** matched the object's **title** — which the attention digest also prints,
+  so both passed while the digest was answering. They pin the object read's own sentence now.
+- **OS-C8** compared whole answers across three records; forcing every record to one verdict still
+  produced three different strings, because each carries its own open question in the tail. It
+  compares the **verdicts**.
+
+### Two stale tests repaired at the law, not loosened
+
+- `truncated-turn` **TT-C1/C2** pinned "ran out of room" — this file's own copy, which #46 now
+  forbids. Both assert the new sentence **and the absence of the old one**, because a repair that
+  leaves the old wording available beside the new one has removed nothing.
+- `answer-depth` **DP-H3** used the absence of the Focus title as its proxy for "the organisation
+  reader was reached"; #43 requires that title to appear in the signpost. It asserts the
+  organisation reader directly now, and a new DP-H3b asserts the signpost.
+
+### One harness repair, recorded rather than explained away
+
+`forum-share-browser-check` FB-25..27 failed once, on the fifteenth Chromium started back-to-back
+in one sweep, and passed three times standalone. The second authenticated context had not finished
+its first render when the DOM was read after a fixed wait. The law was holding; the read was
+guessing. It polls for the render now — and still times out, still fails, and a mutation leaving
+other readers' messages bare still turns FB-27 red.
+
+### What remains, and it is genuinely live-only
+
+1. **Render** — the deployed build, its disk, its dashboard environment, a restart under load.
+2. **Neon** — network partition, pooler, connection ceiling, cold start, managed-service failure.
+3. **A real provider** — answer quality, latency, truncation and degradation against live models.
+   Every law this round is carried on the deterministic path for exactly that reason, and the
+   prompt is asserted to agree rather than substitute; what a real model writes is still unobserved.
+   **#50's classes will only be exercised by a real provider failing** — the vocabulary is proven,
+   the incidence is not.
+4. **Real invite delivery.**
+5. **An actual iPhone running Safari** — the 390px gates are real Chromium, which is not iOS Safari.
+6. **#51's High/Low object conversation** — the founder has no canonical High or Low, and none was
+   manufactured. If a real one emerges before the pilot, run the same four questions on it.
+
+### Unresolved blockers
+
+**None internally.** No finding classified as a blocker is open, no registered gate is red, and no
+mutation survived unrecorded.
+
+Not worked this round, unchanged and not blockers: #5, #23, #18 (copy and IA judgement, no defect
+reproduced), #25 (needs a product rule about when a refusal is worth a card), #26 and #27
+(model-path phrasing the deterministic path does not produce and the prompt already forbids), #38
+(concept ratified, surface change not reached), #39 (no divergence reproduced).
+
+### Verdict
+
+**READY FOR LIVE REHEARSAL**, unchanged from §16 and now with eight more live defects closed
+behind it. Internally green at this head. Not ready to merge on internal evidence alone, and this
+handoff does not claim it is.
