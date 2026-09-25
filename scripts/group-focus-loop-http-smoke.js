@@ -257,8 +257,15 @@ const server = app.listen(0, async () => {
     /* NAMED EXACTLY, not "either this or nothing". An assertion with an `||` fallback passes when
        the interesting branch never runs, which is how a bundle that silently stopped being built
        would still read as green here. */
-    ok('GFL-G2 …and the turn about it says WHERE THE LOOP IS OPEN rather than inventing an inquiry for it',
-      /this focus does not say what it was started to work on/i.test(handed)
+    /* AND IT SAYS WHAT IS ACTUALLY OPEN — findings R1 #9. This asserted the sentence "this focus
+       does not say what it was started to work on", which was written to prove the reader does not
+       INVENT an inquiry and proved it by requiring a clause that is false on its face: the focus
+       says exactly what it is for, in the person's own words, at the top of the same screen. The
+       law it was protecting is unchanged and is now asserted in both directions — the loop gap is
+       named, and the denial of the person's own declaration is required to be absent. */
+    ok('GFL-G2 …and the turn about it says WHERE THE LOOP IS OPEN rather than denying what they declared',
+      /this focus is not linked to a question on the record/i.test(handed)
+      && !/does not say what it was started to work on/i.test(handed)
       && /no outcome has been recorded on this focus yet/i.test(handed));
     ok('GFL-G2b …and never names the inquiry the OTHER focus was started on',
       !/started to work on an inquiry: Building from the back/i.test(block()));

@@ -124,6 +124,27 @@ const server = app.listen(0, async () => {
     ok('OS-B3 …and one is not half-hidden: no card, and no thread behind it either',
       thread.status === 404 || !(thread.j || {}).ok);
 
+    /* AND NOT ONLY ON THE INQUIRIES PAGE — findings R1 #4. The founder met "What they say they
+       bring" as a HOME CARD, with "I don't have a read on this yet" under it. Home ranks what
+       deserves attention out of the same authorised set, so the split proved above should reach it
+       too; asserted rather than assumed, because "the list I happened to check" is how a fix comes
+       to cover one surface. */
+    /* READ THE WAY HOME READS IT. The first version of this asked `/api/me/attention`, which is a
+       different desk and is empty on this fixture — so it passed with the guard REMOVED, which is
+       the vacuous shape this file exists to avoid. Home builds its one card by reading all four
+       kinds at scope=all and taking the highest-scoring object, so that is what is reproduced. */
+    const homeSet = [];
+    for (const k of ['inquiry', 'focus', 'high', 'low']) {
+      const r = await call('GET', `/api/objects?kind=${k}&scope=all`);
+      homeSet.push(...(((r.j || {}).objects) || []).filter(o => !o.parked));
+    }
+    homeSet.sort((a2, b2) => (b2.score || 0) - (a2.score || 0));
+    const homeCard = homeSet[0] || null;
+    ok('OS-B4 …and the card Home would put first is not one of the form fields',
+      !!homeCard && !LEGACY.test(String(((homeCard.present || {}).summary || {}).title || '')));
+    ok('OS-B4b …nor is any card Home could reach at all',
+      !LEGACY.test(JSON.stringify(homeSet.map(o => ((o.present || {}).summary || {}).title || ''))));
+
     console.log('\n  C — WHAT THE FORM REALLY OPENED IS STILL THERE');
     /* THE NEAREST WAY TO GET THIS WRONG. The main goal is not an account of the person, it is a
        thing they said they would do — so it becomes a Focus, which is the object built for

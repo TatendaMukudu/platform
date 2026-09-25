@@ -144,7 +144,7 @@ const server = app.listen(0, async () => {
     ok('AB-C6 the focus knows what it addresses (it reported null)',
       !!loopFromFocus && _names.has(loopFromFocus.addresses));
     ok('AB-C7 …and no longer says the focus did not record what it was started to work on',
-      !(loopFromFocus.open || []).some(t => /does not say what it was started to work on/i.test(String(t))));
+      !(loopFromFocus.open || []).some(t => /not linked to a question on the record/i.test(String(t))));
 
     console.log('\n  D — AND THE OUTCOME REACHES THE QUESTION, WHICH IS WHERE A COACH STANDS');
     await call('POST', `/api/group/squad/focus/${focus.focusId}/outcome`,

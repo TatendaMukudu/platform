@@ -1703,7 +1703,7 @@ order — blockers and live contradictions first, cosmetics last. Nothing merged
 
 | SHA | Findings | Change |
 |---|---|---|
-| `9155f8c` | #10 | Ask IntelliQ works in a Forum that is not a group, and a failure no longer shows the route |
+| `9155f8c` | #19, #21 | Ask IntelliQ works in a Forum that is not a group, and a failure no longer shows the route |
 | `6851b5b` | #1 | An image the person attached is an image IntelliQ has read |
 | `200a41c` | #2, #3 | What you just told me is something I have, and it is still not evidence |
 | `2d5fe9c` | #16, #6 | The assistant and the Highs/Lows pages read one owner |
@@ -2171,20 +2171,20 @@ assertion was satisfied by the title it was meant to look past. It pins the sent
 
 | SHA | Findings | Change |
 |---|---|---|
-| `9155f8c` | #10 | Ask IntelliQ works in a Forum that is not a group |
+| `9155f8c` | #19, #21 | Ask IntelliQ works in a Forum that is not a group |
 | `6851b5b` | #1 | An image the person attached is an image IntelliQ has read |
 | `200a41c` | #2, #3 | What you just told me is something I have, and it is still not evidence |
 | `2d5fe9c` | #16, #6 | The assistant and the Highs/Lows pages read one owner |
 | `1b48ba4` | #32, #13 | One send is one durable human turn |
 | `9470aee` | #8, #30 | One audience editor, one attachment door |
-| `e2d8b96` | #31, #40, #36, #37 | One moment is a readout; the record stops reading as a questionnaire |
+| `e2d8b96` | #31, #40, #36, #37, #10 | One moment is a readout; the record stops reading as a questionnaire |
 | `7615a7e` | #22, #12 | The box you type in is on the screen, and the invitation in it is whole |
 | `ac5c5a1` | — | Two stale assertions in `live-recovery-repro`, repaired at the law |
 | `da1682f` | #34 | A fragment is not an answer |
 | `62c577e` | #28, #13 | A weak link is not a failure, and a retry is not a second turn |
 | `ca82c15` | #14 | How a Focus went is a thing a person can record |
 | `459907a` | #35, #33 | A group you are in is an audience |
-| `fc3ba0b` | #41 | A source says which kind of thing it is |
+| `fc3ba0b` | #41, #11 | A source says which kind of thing it is, and the refusal copy is plain English |
 | `027afc1` | #42 | Asking a Focus what to try answers from the Focus |
 | `a8237ff` | #17 | A revision that revises nothing is not a proposal |
 

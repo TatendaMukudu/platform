@@ -14305,12 +14305,30 @@ const MemberApp = {
           </button>
         </div>
         <h1 class="iqt-title">Forum</h1>
-        <p class="iqt-p">Everyone here is anonymous, including to coaches. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
+        <p class="iqt-p">Everyone here is anonymous, including to coaches. Only you can see which of these are yours — to everybody else your messages are unsigned like the rest. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
         ${j.people && j.people <= 3 ? `<p class="iqt-p iqt-small-room">There are only ${j.people} people in here, so names being hidden will not stop anyone working out who said what. Say it as though they will.</p>` : ''}
+        ${/* ── "YOU" IS SELF-RECOGNITION, AND THE PAGE HAS TO SAY SO ───────────────────────
+              Live finding #20: the room promised anonymity in one paragraph and then wrote YOU
+              beside a message in the next, so the screen appeared to contradict itself. Both
+              halves were true — the server's read projection (ai/forum.js visibleThread) sets
+              `mine` from the VIEWER's own id and sends `authorId: null` to everyone, leader
+              included — but a reader cannot see a projection. They can only see the screen.
+
+              So the screen now carries the whole fact rather than half of it: the lede says the
+              marker is visible to you alone, and every message another person wrote is labelled
+              Anonymous rather than left bare. Unlabelled messages made anonymity look like an
+              absence of information, which is indistinguishable from a bug. Labelled, it reads
+              as the deliberate property it is.
+
+              Nothing about authorship changed here, and nothing should: the kernel still keeps
+              `authorId` on the stored message so five posts by one person cannot look like five
+              origins (scripts/forum-anonymity-smoke.js A6-A10). This is rendering. */''}
         <div class="iqt-turns">${msgs.length
           ? msgs.map(m => m.status === 'removed'
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
-              : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
+              : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine
+                  ? `<span class="iqf-you">You</span> `
+                  : `<span class="iqf-you iqf-anon">Anonymous</span> `}${esc(m.text)}</div>`).join('')
           : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
         ${/* ── ASK INTELLIQ, AND WHY IT IS A BUTTON RATHER THAN A SECOND BOX ────────────────
               Founder ruling: answer the asker privately from the object's governed projection,

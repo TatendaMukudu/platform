@@ -307,6 +307,70 @@ Object.assign(ai, {
     ok('FB-19 …so the other member reads the room and finds none of that answer',
       !JSON.stringify((await room()).j.messages).includes(answerText.slice(-60)));
 
+    /* ── THE SAME MESSAGE, READ BY ITS AUTHOR AND BY SOMEBODY ELSE ──────────────────────────
+       Findings R1 #20, and the proof it asked for by name: "browser proof should compare the
+       same Forum message from author and another reader."
+
+       The live screen promised "Everyone here is anonymous, including to coaches" and then wrote
+       YOU beside a message. Both halves were true and the screen still read as a contradiction,
+       because a reader cannot see that `mine` is computed per viewer. Nothing short of rendering
+       the SAME message id in TWO authenticated browsers can settle it: a one-browser assertion
+       proves what the author sees, which was never the part in doubt.
+
+       So this opens a second context as p2 and reads the same two messages: one p1 wrote through
+       the product a moment ago, one p2 writes here. Each reader must see their own marked You,
+       the other's marked Anonymous, and no trace of the other person's name or id anywhere in
+       the rendered room. */
+    const OTHERS = 'the second half felt slower to me too';
+    await req('/api/group/sq/forum/inq_q', reader, { text: OTHERS });
+    const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const page2 = await ctx2.newPage();
+    page2.on('pageerror', e => { if (!/^Chart is not defined$/.test(e.message)) errors.push(e.message); });
+    await page2.addInitScript(([t, code]) => {
+      localStorage.setItem('iq_auth', JSON.stringify({
+        user: { id: 'p2', name: 'Player 2', role: 'member', orgCode: code, profileComplete: true },
+        org: { orgName: 'Alma College', orgMode: 'sports', organizationProfileComplete: true },
+        token: t, permissions: null, domain: null }));
+      localStorage.setItem('iq_profile_complete_p2', '1');
+    }, [reader, C]);
+    await page2.goto(base + '/', { waitUntil: 'domcontentloaded' });
+    await page2.waitForTimeout(1700);
+    const notice2 = await page2.$('button:has-text("I understand")');
+    if (notice2) await notice2.click().catch(() => {});
+    await page2.evaluate(() => MemberApp.openForum('sq', 'inq_q', 'group', 'inquiry'));
+    await page2.waitForTimeout(900);
+    await page.evaluate(() => MemberApp.openForum('sq', 'inq_q', 'group', 'inquiry'));
+    await page.waitForTimeout(900);
+    /* Read the rendered line each browser draws for a given sentence, not the whole room: the
+       question is what sits NEXT TO this message, and a room-wide match would be satisfied by
+       the label on any other line. */
+    const lineFor = (p, text) => p.evaluate(t => {
+      const el = [...document.querySelectorAll('.iqt-turns .iq-msg')].find(n => n.textContent.includes(t));
+      return el ? el.textContent.replace(/\s+/g, ' ').trim() : null;
+    }, text);
+    const mineToP1 = await lineFor(page, homeWords);
+    const mineToP2 = await lineFor(page2, OTHERS);
+    const theirsToP1 = await lineFor(page, OTHERS);
+    const theirsToP2 = await lineFor(page2, homeWords);
+    ok('FB-25 both people are reading the same two messages in the same room',
+      !!mineToP1 && !!mineToP2 && !!theirsToP1 && !!theirsToP2);
+    ok('FB-26 each reader sees their OWN message marked as theirs',
+      /^You\b/.test(mineToP1 || '') && /^You\b/.test(mineToP2 || ''));
+    ok('FB-27 …and the SAME message, read by the other person, is labelled Anonymous rather than left bare',
+      /^Anonymous\b/.test(theirsToP1 || '') && /^Anonymous\b/.test(theirsToP2 || '')
+      && !/\bYou\b/.test(theirsToP1 || '') && !/\bYou\b/.test(theirsToP2 || ''));
+    /* THE PROMISE IN THE LEDE HAS TO MATCH THE MARKERS UNDER IT. This is the contradiction the
+       finding actually reported, and it is a copy assertion because it was a copy defect. */
+    ok('FB-28 …and the room says in words that the marker is visible to the author alone',
+      /only you can see which of these are yours/i.test(
+        await page2.locator('#iq-inquiries-page .iq-object-thread').innerText()));
+    /* NO NAME, NO ID, NO HANDLE. Rendering is where a leak would actually reach a person. */
+    const roomHTML = await page2.locator('#iq-inquiries-page .iq-object-thread').innerHTML();
+    ok('FB-29 …and nothing in the other reader\'s rendered room carries the author\'s name or id',
+      !/Player 1/.test(roomHTML) && !/\bp1\b/.test(roomHTML));
+    await ctx2.close();
+
     /* ── ASK INTELLIQ IN A FOCUS FORUM, WHICH IS WHERE IT BROKE LIVE ────────────────────────
        Findings R1 #19: on a real iPhone the founder opened a Focus Forum, tapped "Ask IntelliQ
        about this", and was shown

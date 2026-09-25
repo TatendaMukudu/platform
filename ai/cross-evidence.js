@@ -397,7 +397,28 @@ function loop(objects = [], focusRef = null) {
     /* WHERE THE LOOP IS OPEN. A person asking "are we closer?" deserves to be told which part of
        the answer does not exist yet, rather than a confident-sounding sentence built over a gap. */
     open: [
-      !addressesRef ? 'this focus does not say what it was started to work on' : null,
+      /* ── A MISSING LINK IS NOT A MISSING INTENTION ──────────────────────────────────────────
+         LIVE iPHONE, findings R1 #9. The founder's Focus was titled "Focus more on wins and
+         conceding less" and its own screen said, underneath: "this focus does not say what it was
+         started to work on". The second half of that sentence was true about the RECORD and false
+         on its face about the focus, which says exactly what it is for in the person's own words
+         at the top of the same screen.
+
+         The requirement is stated in the finding: distinguish "no origin/source Inquiry link" from
+         "no declared work", and do not translate a missing canonical relation into missing human
+         intent. A Focus created straight out of a conversation is the ordinary case — it has a
+         clear B and no Inquiry behind it — and telling somebody their commitment says nothing is
+         the product contradicting the words it is displaying.
+
+         WHAT IS OPEN IS STILL OPEN, and is worth saying: with nothing addressed there is no
+         question to measure this against, so "we tried this about that, and here is what happened"
+         cannot be said whatever the outcome. That is a fact about the loop. The line says that
+         now, and says nothing about what the person declared.
+
+         (`group-focus-loop-http-smoke` GFL-G2 pinned the old sentence, which is to say it pinned
+         the defect: it was written to prove the reader does not INVENT an inquiry, and it proved
+         that by requiring the false half as well. It asserts the corrected law instead.) */
+      !addressesRef ? 'this focus is not linked to a question on the record, so there is nothing to measure it against' : null,
       !outcome ? 'no outcome has been recorded yet' : null,
       addressesRef && outcome && observedSince && observedSince.records === 0
         ? 'nothing has been recorded on it since the outcome' : null,

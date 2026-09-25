@@ -139,10 +139,19 @@ ok('CE-G6 …without copying its tactic, conversation or evidence into the relat
   && !JSON.stringify(L.priorAttempts).includes('an earlier tactic'));
 ok('CE-G7 a closed Focus on a different A is not treated as comparable merely because it is a Focus',
   !L.priorAttempts.some(a => a.focus === 'focus:other'));
+/* ── AND IT SAYS WHICH LOOP IS OPEN, NOT THAT THE PERSON NEVER DECLARED ANYTHING ────────────
+   Live finding #9: a Focus the founder had written in full read back as though it were empty.
+   The missing thing was the LINK to an originating Inquiry — `addresses` — and the sentence
+   said "this focus does not say what it was started to work on", which is false on its face to
+   anybody looking at the title they typed. This assertion pinned that exact wording, so the
+   copy defect was load-bearing on a green gate: it had to be asserted in BOTH directions to
+   stop the next repair from quietly restoring it. */
 ok('CE-I1 a focus with nothing recorded says WHERE the loop is open rather than answering anyway',
   (() => { const bare = { kind: 'focus', id: 'f0', raw: { focusId: 'f0' } };
     const l = X.loop([bare], 'focus:f0');
-    return l.open.length === 2 && l.open.some(t => /does not say what it was started/.test(t))
+    return l.open.length === 2
+      && l.open.some(t => /not linked to a question on the record/.test(t))
+      && !l.open.some(t => /does not say what it was started/.test(t))
       && l.open.some(t => /no outcome/.test(t)); })());
 ok('CE-I2 …and a loop is only ever built for a focus, because only a focus has an outcome',
   X.loop(ALL, 'inquiry:inq1') === null && X.loop(ALL, 'high:hi1') === null);
