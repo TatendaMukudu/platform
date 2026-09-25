@@ -18,7 +18,10 @@ process.env.NODE_ENV    = 'test';
 process.env.IQ_COMPOSER = '1';
 
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser" — this was a hard-coded build path. See
+   scripts/lib/chromium-path.js for why resolving it per-file kept going wrong. */
+const EXE = chromiumPath(chromium);
 const WIDTHS = [{ name: '390x844', width: 390, height: 844 }, { name: '430x932', width: 430, height: 932 }];
 
 const S = require('../server.js');

@@ -525,8 +525,38 @@ const inq = (o = {}) => ({
     const mv = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mcss = fs.readFileSync(path.join(__dirname, '..', 'css', 'member.css'), 'utf8');
-    ok('13 · the member surface has a slot for their own group noticings',
-      /id="me-group"/.test(html) && /_renderGroupNoticings\(\)/.test(mv));
+    /* REWRITTEN 11 September 2026, and worth saying why rather than quietly re-spelling it.
+
+       This asserted `id="me-group"` in index.html and a zero-argument `_renderGroupNoticings()`
+       call in app.js. Both were true. Both stayed true while the surface was INVISIBLE: `#me-group`
+       carries a `hidden` attribute, the stylesheet has `[hidden]{display:none!important}`, and
+       nothing ever removed it — so the renderer ran on every Home render and drew its cards into
+       an element with `display:none` and `offsetParent:null`. Verified in Chromium, not argued
+       from source. A member could therefore never offer a noticing, and since a group inquiry
+       opens only when two INDEPENDENT people have offered one, no group inquiry could ever open
+       from the product at all.
+
+       "A slot exists and something is called" was a PROXY for "a member has a way in". The proxy
+       held while the law failed, which is the definition of a test worth rewriting. The law is
+       asserted directly now: the slot must be rendered into a container that is NOT hidden, and
+       the renderer must be called with that container. Strictly stronger — the old spelling
+       cannot satisfy this, and the defect that was live cannot come back green. */
+    const noticingMount = (mv.match(/_renderGroupNoticings\(([^)]*)\)/g) || [])
+      .filter(m => !/onlyNodeId/.test(m));
+    ok('13 · the member surface has a slot for their own group noticings, and it is CALLED',
+      noticingMount.length >= 1);
+    const mountedIds = noticingMount.map(m => (m.match(/'([a-z0-9-]+)'\s*\)/) || [])[1])
+      .filter(Boolean);
+    ok('13 · …into a container that actually exists in the document',
+      mountedIds.length >= 1 && mountedIds.every(id =>
+        new RegExp(`id="${id}"`).test(html) || new RegExp(`id="${id}"`).test(mv)));
+    ok('13 · …and that container is not one the stylesheet hides — a renderer writing into display:none is not a surface',
+      mountedIds.every(id => {
+        // Find how the container is declared, wherever it is declared, and refuse a `hidden` one.
+        const decl = (html.match(new RegExp(`<[^>]*id="${id}"[^>]*>`)) || [])[0]
+          || (mv.match(new RegExp(`<[^>]*id="${id}"[^>]*>`)) || [])[0] || '';
+        return decl && !/\bhidden\b/.test(decl);
+      }));
     ok('13 · it reads the member\'s OWN candidates, which nobody else can see',
       /\/candidates`/.test(mv));
     ok('13 · contributing declares a valence — the three the kernel accepts, and no others',

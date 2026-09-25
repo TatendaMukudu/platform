@@ -50,11 +50,13 @@ for(const id of ['a','b','c','d','e'])S._noteGroupCandidates(C,id,`member:${id}`
   r=await call('GET','/api/group/team/state','coach');ok('A11 two-sided cohort basis names a safe 5-of-14 aggregate',r.body.low?.basis?.contributors===5&&r.body.low?.basis?.of===14);
   // A12 mutation: remove prepared/act creation.
   r=await call('POST','/api/me/prepared/act','a',{text:'Protect recovery',type:'momentum_drop',decision:'approve'});const focusId=r.body.focuses?.[0]?.id;ok('A12 owner creates Focus through mutation route',r.status===200&&!!focusId);
-  // A13 mutation: remove focus/outcome state transition.
-  r=await call('POST','/api/me/focus/outcome','a',{focusId,outcome:'helped'});ok('A13 owner records Focus outcome through mutation route',r.status===200&&S.userAiProfiles[`${C}:a`].focuses.some(f=>f.id===focusId&&f.status==='done'&&f.outcome==='helped'));
+  // A13 mutation: remove focus/outcome state transition. A personal outcome is recorded as
+  // { result, note, recordedBy, at } -- the same shape a group focus uses -- rather than the bare
+  // string it once was; the assertion reads the result through it and is otherwise unchanged.
+  r=await call('POST','/api/me/focus/outcome','a',{focusId,outcome:'helped'});ok('A13 owner records Focus outcome through mutation route',r.status===200&&S.userAiProfiles[`${C}:a`].focuses.some(f=>f.id===focusId&&f.status==='done'&&(f.outcome&&f.outcome.result)==='helped'));
   // A14 mutation: remove Focus from _persistedStores.
   const units=S._durableUnits(),iu=units[`store:inquiryStates:${C}`]&&JSON.parse(JSON.stringify(units[`store:inquiryStates:${C}`])),fu=units[`store:userAiProfiles:${C}`]&&JSON.parse(JSON.stringify(units[`store:userAiProfiles:${C}`]));delete S.inquiryStates[C];delete S.userAiProfiles[`${C}:a`];S._applyUnits({[`store:inquiryStates:${C}`]:iu,[`store:userAiProfiles:${C}`]:fu});
-  r=await call('GET','/api/me/export','a');ok('A14 completed Focus survives durable reconstruction',r.status===200&&r.body.aiMemory?.focuses?.some(f=>f.id===focusId&&f.outcome==='helped'));
+  r=await call('GET','/api/me/export','a');ok('A14 completed Focus survives durable reconstruction',r.status===200&&r.body.aiMemory?.focuses?.some(f=>f.id===focusId&&(f.outcome&&f.outcome.result)==='helped'));
   // A15 mutation: remove Inquiry from _persistedStores.
   r=await call('GET','/api/group/team/inquiry','coach');ok('A15 created Inquiry survives durable reconstruction',r.status===200&&r.body.inquiries.some(i=>i.inquiryId===inquiryId));
   // A16 mutation: bypass the deterministic team-state answer in assistant runtime.

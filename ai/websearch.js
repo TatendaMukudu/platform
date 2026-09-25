@@ -83,7 +83,17 @@ function deriveQuery({ canonicalConcept = '', domain = '', intent = 'practice' }
   const conceptTerms = _terms(canonicalConcept);
   const domainTerms = _terms(domain);
   if (!conceptTerms.length) {
-    return { ok: false, query: '', reason: 'no concept to search on — there is nothing here that is not somebody\'s own words' };
+    /* SAID PLAINLY, findings R1 #41: "if an object has no governed query/concept suitable for
+       outside reading, say that plainly without implementation jargon". This read "no concept to
+       search on — there is nothing here that is not somebody's own words", which the founder met
+       on a phone as `No outside reading here — no concept to search on…`. "Concept" is this
+       codebase's word for a canonical topic key; on a screen it is a fragment of an API.
+
+       The FACT is unchanged and is worth saying: this object is made of what people said about
+       their own situation, and there is no general subject in it to go and read about. A search
+       built from somebody's sentence is the one thing L-WS1 exists to prevent. */
+    return { ok: false, query: '',
+      reason: 'this one is all first-hand accounts, and there is no general topic in it to look up' };
   }
   // The domain often repeats the concept's first segment ("sports" / "soccer.warmup"). Keeping
   // both makes a worse query, not a safer one.

@@ -942,6 +942,30 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
   .iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
 }
 
+/* ── ONE CONTROL ON THE RIGHT AT A TIME ───────────────────────────────────────────────────────
+   LIVE iPHONE BLOCKER, findings R1 #12: the composer placeholder was cut off on Highs, Lows, the
+   Library and a Focuses surface. Measured at 390px, the copy was not the cause — the row is 342px
+   and the text field got 176px, because attach, mic and send are each a 44px tap target and 44px
+   is the floor a thumb needs. About twenty characters fit, so every invitation longer than
+   "What's on your mind?" was clipped mid-word.
+
+   The rule is simply true: an empty composer has nothing to send. With no text there is a
+   microphone; the moment there is text, a send button in its place. One control either way,
+   ~52px back to the text field, and nothing becomes unreachable — send is present whenever there
+   is something to send, and Enter has always worked either way. `MemberApp._wsGrow` is the one
+   owner of "the composer's content changed" and sets the class. */
+.iq-composer:not(.has-text) .iq-send{display:none}
+.iq-composer.has-text .iq-mic{display:none}
+/* AND THE BAR DOES NOT JUMP WHEN THEY SWAP. The text field's own minimum is below both controls,
+   so the row's height was set by whichever one was showing: the microphone's 44px at rest, the
+   send button's 40px while typing. Four pixels lost on the first keystroke and handed back on
+   send — small, and exactly the kind of movement that makes a composer feel unsteady under a
+   thumb. The two controls now occupy the same 44px box, which is the tap target this file already
+   requires of everything else in the bar, so they are interchangeable in the layout as well as in
+   meaning. (A 4px margin round the 36px circle was tried first and overshot: `min-height:40px`
+   under `@media (hover:none)` had already grown the button, so the box came out at 48.) */
+.iq-composer .iq-send{width:44px;height:44px;min-height:44px}
+
 /* THE ATTACH CONTROL. A file input styled display:none inside a wrapping label does not open
    the picker on iOS Safari — the label has nothing focusable to forward the tap to. So the
    input stays in the layout at zero opacity and the label points at it by id, which is the
@@ -954,3 +978,92 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 /* The bar is the last thing on the page and stays at the bottom of the viewport, clear of the
    home indicator. */
 .iq-composer-wrap{padding-bottom:calc(.35rem + env(safe-area-inset-bottom))}
+
+/* THEIR OWN WORDS, UNDER THE HEADING. The heading of a Focus is a LEAD -- the person's own opening
+   words, cut at a clause boundary -- so when it left something out, the rest belongs directly
+   beneath it, in their wording, at reading size rather than heading size. Quiet on purpose: the
+   heading is what you scan, this is what you read if the heading was not enough. */
+.iqt-said{margin:.35rem 0 0;font-size:var(--fs);line-height:1.5;color:var(--text-secondary)}
+
+/* ── THE SHELL COMPOSER IS PINNED TO THE VIEWPORT, NOT TO THE PAGE ────────────────────────────
+   The composer in an object thread or the Forum is `position:sticky` and belongs inside that
+   thread's own scroll flow, which is right: it follows the conversation it is part of.
+
+   The shell one is not part of any page, and sticky does not hold it. `.page-content` declares
+   `overflow-y:auto` but `.main-wrap` is `min-height:100vh` rather than a fixed height, so the
+   page-content box grows with its content and the BODY does the scrolling. A sticky element then
+   pins to the bottom of a container that is itself taller than the screen. Measured on Settings
+   at 390x844: bottom = 934, ninety pixels below the fold, present in the DOM and unreachable
+   without scrolling to the end of the page.
+
+   Fixed rather than restructuring the scroll model: giving `.main-wrap` a fixed height would
+   change how every page in the app scrolls, which is not a change to make for a bar. The gutter
+   matches `.page-content`'s 1.5rem so it lines up with the content above it.
+
+   `--iq-shell-composer-h` is the room reserved below the page so the last card is never hidden
+   behind the bar. The value here is only the FALLBACK used before the first measurement;
+   _renderShellComposer observes the bar and writes the real height.
+
+   It was first written as a flat 104px "generous constant". It was not generous — the bar
+   measures about 148px at rest, so the reservation was SMALLER THAN THE THING IT RESERVED FOR and
+   the last 44px of every page sat underneath it. A constant cannot be right here in any case,
+   because the bar grows as somebody types and when the voice status line fills. */
+:root{--iq-shell-composer-h:160px}
+#iq-shell-composer .iq-composer-wrap,
+/* ── AND THE SAME MECHANISM FOR THE COMPOSERS INSIDE A PAGE ───────────────────────────────────
+   LIVE iPHONE BLOCKER, findings R1 #22. The object thread's composer and the Forum room's — one
+   markup, `.iq-object-thread` — carried `position:sticky;bottom:0` and it was inert. Sticky
+   resolves against the nearest ANCESTOR SCROLL CONTAINER, and `main.page-content` is one
+   (`overflow:auto`) while its height grows with its content and the document scrolls on `body`.
+   A scrollport with no scroll range never engages a sticky element. Measured at 390x844 on a
+   real Focus with two dozen turns, the composer sat at `top: 7203` — not buried, absent.
+
+   The shell bar met this exact model and was already solved by being fixed with the page
+   reserving its measured height; the note above says why restructuring the scroll model was the
+   wrong trade for a bar, and that has not changed. So these use the mechanism that works. The
+   reservation below is shared because exactly one bar is on screen at a time: an object thread
+   and a Forum room each stand the shell one down as they render, and MemberApp measures whichever
+   one is there into the same variable. */
+.iq-object-thread > .iq-composer-wrap{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  padding:0.5rem 1.5rem calc(.35rem + env(safe-area-inset-bottom));
+}
+/* AND THE BAR'S OWN GUTTERS GIVE WAY BEFORE THE WRITING DOES. On a phone the composer is the
+   widest thing on screen and 1.5rem either side is 48px it does not need — the content above
+   keeps its gutter, this one narrows. Worth sixteen pixels to the text field, which on a 390px
+   screen is most of a word. Placed after the two rules above deliberately: it has the same
+   specificity as they do, so order is what decides it. */
+@media (max-width:440px){
+  #iq-shell-composer .iq-composer-wrap,
+  .iq-object-thread > .iq-composer-wrap{padding-left:1rem;padding-right:1rem}
+}
+
+/* The room. Applied to the scroll box rather than to each page, so a page cannot forget it. */
+.page-content{padding-bottom:calc(1.5rem + var(--iq-shell-composer-h))}
+
+/* ── ONE-TIME TECHNICAL SETUP, COLLAPSED ──────────────────────────────────────────────────────
+   Settings held its integration wiring open in the tab an administrator opens to change the
+   organisation's name — data URLs, auth headers, JSON paths, OAuth client secrets, a redirect
+   URL — so that tab rendered twenty-four input fields on a phone. The cards are unchanged and
+   every id is where it was; they are simply behind a summary now, which is the progressive
+   disclosure the rest of the product already uses.
+
+   The summary is a real tap target on a phone, because a disclosure control somebody cannot
+   reliably hit is worse than one that was never collapsed. */
+.iq-adv-block { margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-surface); }
+.iq-adv-summary { cursor: pointer; padding: 0.85rem 1rem; font-size: var(--fs-md); font-weight: 600;
+  color: var(--text-secondary); list-style: none; display: flex; align-items: center; min-height: 44px; }
+.iq-adv-summary::-webkit-details-marker { display: none; }
+.iq-adv-summary::before { content: "\203A"; margin-right: 0.6rem; font-size: var(--fs-lg); line-height: 1;
+  transition: transform .15s ease; display: inline-block; }
+.iq-adv-block[open] > .iq-adv-summary::before { transform: rotate(90deg); }
+.iq-adv-block[open] > .iq-adv-summary { color: var(--text-primary); }
+/* EXPLICIT, because the UA rule that hides a closed <details>'s children is a low-specificity
+   one and this app's cascade was beating it: with the block closed, `conn-name` still measured
+   45px and every OAuth field was on screen. Asserting it here means the collapse does not depend
+   on which other rule happens to match a card inside. */
+.iq-adv-block:not([open]) > .iq-adv-body { display: none !important; }
+.iq-adv-body { padding: 0 0.5rem 0.5rem; }
+.iq-adv-body .card { border: 0; background: transparent; }
+@media (prefers-reduced-motion: reduce) { .iq-adv-summary::before { transition: none } }

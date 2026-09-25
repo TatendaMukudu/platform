@@ -16,6 +16,20 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
   ok('CA2 a model cannot propose an action unavailable in the current context',
     actions.normalize({ actions: [{ type: 'settle_inquiry' }] }, { object: { kind: 'focus', id: 'f1' } }).actions.length === 0);
   ok('CA3 the model-facing prompt forbids inventing audience, dates, targets and outcomes', /Do not infer missing dates, targets, audiences, folder names or outcomes/.test(actions.prompt({ text: 'do it' })));
+  const namedInquiry = actions.readCommand('Create an Inquiry into why substitutes feel disconnected.');
+  ok('CA3i explicit Inquiry wording is preserved as governed discovery intent, never a create action',
+    namedInquiry?.kind === 'inquiry' && namedInquiry.type == null && /substitutes feel disconnected/i.test(namedInquiry.text));
+  const namedEnquiry = actions.readCommand('Open an enquiry into communication after conceding.');
+  ok('CA3j enquiry spelling normalizes to Inquiry without becoming Low',
+    namedEnquiry?.kind === 'inquiry' && namedEnquiry.type == null);
+  const namedLow = actions.readCommand('Make a low about communication.');
+  ok('CA3k explicit Low wording remains Low and is not actionable', namedLow?.kind === 'low' && namedLow.type == null);
+  const focusActionPrompt = actions.prompt({ text: 'try something else', context: { object: { kind: 'focus', id: 'f1' } } });
+  ok('CA3a the real Focus action interpreter separates tactic change, revised B and a separate commitment',
+    /changed tactic does not create a new Focus/.test(focusActionPrompt)
+    && /revises this same commitment/.test(focusActionPrompt)
+    && /clearly choose a separate desired state/.test(focusActionPrompt)
+    && /propose neither and ask that smallest clarification/.test(focusActionPrompt));
   const hostile = actions.ground(actions.normalize({ actions: [{ type: 'create_focus', arguments: {
     text: 'A model rewrite', target: 'Invented target', reviewOn: '2030-01-02', visibility: 'shared', participantIds: ['hidden'] } }] },
     { object: null }), { text: 'Make that my focus', priorMessages: [{ role: 'user', text: 'Improve communication when we defend.' }], context: { object: null } });
@@ -45,6 +59,10 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
 
   try {
     const about = { kind: 'inquiry', id: inquiry.inquiryId };
+    const ordinaryKeep = await turn('keep_in_library', 'Remember this privately.', null);
+    ok('CA3b ordinary conversation cannot manufacture a private Keep/Library proposal',
+      ordinaryKeep.json.response.proposedActions.every(p => p.actionType !== 'keep_in_library'));
+
     const keepTurn = await turn('keep_in_library', 'Keep this in my Library.', about);
     ok('CA4 an explicit button shortcut enters the assistant as a typed proposal', keepTurn.json.response.proposedActions.some(p => p.actionType === 'keep_in_library'));
     ok('CA5 proposing Keep changes no shelf state', (S.shelfFilings[ALMA_CODE] || []).length === 0);
@@ -78,6 +96,24 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
       { kind: 'focus', id: focus.json.focus.id }, { target: 'Calmer defensive communication' });
     const updated = await confirm(updateTurn, 'update_focus');
     ok('CA12b focus target updates through the same confirmed dispatcher', updated.json.focus?.target === 'Calmer defensive communication');
+    const afterRevision = S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus');
+    ok('CA12b2 revising B keeps the same canonical Focus rather than proliferating one',
+      afterRevision.length === focusBefore + 1 && updated.json.focus?.id === focus.json.focus.id);
+
+    const existingBeforeSeparate = JSON.stringify(S._getMemory(ALMA_CODE, member.id).focuses
+      .find(f => f.id === focus.json.focus.id));
+    const separateTurn = await turn('create_focus', 'Start a separate focus on earlier scanning.',
+      { kind: 'focus', id: focus.json.focus.id }, { text: 'Earlier scanning' });
+    const separateProp = separateTurn.json.response.proposedActions.find(p => p.actionType === 'create_focus');
+    ok('CA12b3 a revised B proposed inside Focus is visibly a separate commitment before confirmation',
+      separateProp?.label === 'Start a separate focus'
+      && /current Focus and its history stay unchanged/.test(separateProp?.effect?.disclosure || '')
+      && S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus').length === focusBefore + 1);
+    const separate = await confirm(separateTurn, 'create_focus');
+    ok('CA12b4 confirming the explicit choice creates one separate Focus without rewriting its predecessor',
+      separate.json.focus?.id && separate.json.focus.id !== focus.json.focus.id
+      && S._allObjectsFor(ALMA_CODE, member.id).filter(o => o.kind === 'focus').length === focusBefore + 2
+      && JSON.stringify(S._getMemory(ALMA_CODE, member.id).focuses.find(f => f.id === focus.json.focus.id)) === existingBeforeSeparate);
 
     const disagreeTurn = await turn('disagree_with_inquiry', 'I think spacing is the issue, not effort.', about,
       { because: 'I think spacing is the issue, not effort.' });
@@ -266,6 +302,52 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
     const mobileCss = require('fs').readFileSync(require('path').join(__dirname, '../css/member.css'), 'utf8');
     ok('CA18 the phone composer and proposal controls stay compact rather than consuming the viewport',
       /@media \(max-width:640px\)[\s\S]*?\.iq-composer-input\{max-height:120px\}[\s\S]*?\.iq-proposal-actions/.test(mobileCss));
+
+    /* ── CA19 — A REVISION THAT REVISES NOTHING IS NOT A PROPOSAL ────────────────────────────
+       LIVE iPHONE, findings R1 #17: a card offered to revise the Focus while showing the same
+       wording. `update_focus` requires no argument — correctly, since any one of five fields may
+       be the thing being changed — so an action carrying none of them, or carrying only values
+       the Focus already holds, reached a confirmation card saying "Revise this focus". Confirming
+       it would have written nothing, and a card whose stated effect is nothing is a lie about what
+       pressing it does.
+
+       Driven at the module, because this is a grounding rule and the model-proposed path is where
+       it fires; the HTTP sections above already prove the confirmed write itself. */
+    const actions = require('../ai/composer-actions.js');
+    const boundFocus = { kind: 'focus', id: 'f1', raw: { id: 'f1', ownerId: 'owner',
+      text: 'Concede fewer late goals', target: 'Defend calmly', visibility: 'private',
+      participants: ['owner'] } };
+    const groundOne = (args, text) => actions.ground(
+      actions.normalize({ actions: [{ type: 'update_focus', arguments: args, reason: 'r' }] },
+        { object: boundFocus, groups: [], contacts: [] }),
+      { text, priorMessages: [], context: { object: boundFocus, groups: [], contacts: [] } });
+    ok('CA19 an update carrying the wording the Focus already has is not proposed',
+      !(groundOne({ text: 'Concede fewer late goals' }, 'Revise it to concede fewer late goals.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19b …and neither is one carrying nothing at all to change',
+      !(groundOne({}, 'Revise this focus.').actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19c …nor one whose only difference is spacing and case',
+      !(groundOne({ text: '  concede fewer LATE goals ' }, 'Revise the wording.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    /* THE CONTROL, and without it every assertion above is satisfied by never proposing an update
+       at all — which would be a far worse product than the card the founder photographed. */
+    ok('CA19d while a real revision is still proposed',
+      (groundOne({ text: 'Concede fewer goals in the first ten as well' }, 'Revise it to concede fewer goals in the first ten as well.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19e …and so is a genuine change to the target',
+      (groundOne({ target: 'Defend together' }, 'Set the target to Defend together.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    /* AND WITH NO FOCUS TO COMPARE AGAINST, the proposal survives: dropping it would lose a real
+       capability on the strength of a comparison that could not be made, and a person still has to
+       confirm it. Fail toward the human, not toward silence. */
+    ok('CA19f …and an update with nothing to compare against is left alone',
+      (actions.ground(
+        actions.normalize({ actions: [{ type: 'update_focus', arguments: { text: 'Something else' }, reason: 'r' }] },
+          { object: { kind: 'focus', id: 'f2', raw: null }, groups: [], contacts: [] }),
+        { text: 'Revise it to something else.', priorMessages: [],
+          context: { object: { kind: 'focus', id: 'f2', raw: null }, groups: [], contacts: [] } })
+        .actions || []).some(x => x.type === 'update_focus'));
+
   } catch (e) { fail++; console.error('  FAIL HTTP path threw', e && e.stack); }
   server.close();
   console.log(`\ncomposer-actions-smoke: ${pass} passed, ${fail} failed`);

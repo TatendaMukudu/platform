@@ -32,6 +32,11 @@ const post = async (code, route, body) => {
   const r = await fetch(base + route, { method: 'POST', headers: { authorization: `Bearer ${token(code)}`, 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
   return { status: r.status, json: await r.json() };
 };
+const as = async (code, user, route, method = 'GET', body = null) => {
+  const r = await fetch(base + route, { method, headers: { authorization: `Bearer ${S.issueToken(user, code, 'member')}`, 'content-type': 'application/json' },
+    ...(body ? { body: JSON.stringify(body) } : {}) });
+  return { status: r.status, json: await r.json() };
+};
 const propose = (code, type, text, about, args, conversationId) => post(code, '/api/assistant/turn', {
   text, about, surface: about?.kind || 'home', conversationId, requestedAction: { type, arguments: args || {} },
 });
@@ -40,7 +45,15 @@ const confirm = async (code, turn, type) => {
   return post(code, `/api/assistant/turn/${turn.json.turnId}/confirm`, { proposalId: p && p.id });
 };
 const focusState = (code, id) => S._getMemory(code, 'owner').focuses.find(f => f.id === id);
-const comparable = f => ({ text: f.text, type: f.type, status: f.status, outcome: f.outcome,
+/* An outcome is now recorded as { result, note, recordedBy, at } rather than the bare string it
+   once was, so comparing it whole would compare two clock readings taken milliseconds apart and
+   fail on a difference that is not a difference in state. Its MEANING is compared instead —
+   result, note and who recorded it — which is strictly more than the string carried, and the
+   same treatment `createdAt` already gets one line below for the same reason. */
+const outcomeOf = f => (f.outcome == null ? null
+  : typeof f.outcome === 'string' ? { result: f.outcome, note: '', recordedBy: null }
+  : { result: f.outcome.result, note: f.outcome.note || '', recordedBy: f.outcome.recordedBy || null });
+const comparable = f => ({ text: f.text, type: f.type, status: f.status, outcome: outcomeOf(f),
   visibility: f.visibility, participants: f.participants, target: f.target || null, reviewAt: f.reviewAt || null,
   hasSource: !!f.source, sourceMessages: f.source?.messageIds || [], hasCreatedAt: Number.isFinite(Date.parse(f.createdAt)) });
 const sideEffects = (code, focus) => ({
@@ -91,7 +104,12 @@ const sideEffects = (code, focus) => ({
     S._getMemory('focus-composer', 'owner').lastUpdated = '2001-01-01T00:00:00.000Z';
     const directBeforeOutcome = S._getMemory('focus-direct', 'owner').lastUpdated;
     const composerBeforeOutcome = S._getMemory('focus-composer', 'owner').lastUpdated;
-    const directOutcome = await post('focus-direct', '/api/me/focus/outcome', { focusId: df.id, outcome: 'helped' });
+    /* THE SAME WORDS DOWN BOTH TRANSPORTS. Findings R1 #14 gave the outcome record its `note` —
+       what was actually tried, in the person's own sentence, which the composer path takes from
+       their turn. Parity here is a claim about the LAW, not about the inputs: sending a note on
+       one side and none on the other would compare two different acts and call the difference a
+       divergence. So the direct control sends the sentence the composer turn carries. */
+    const directOutcome = await post('focus-direct', '/api/me/focus/outcome', { focusId: df.id, outcome: 'helped', note: 'It helped.' });
     const outcomeTurn = await propose('focus-composer', 'record_focus_outcome', 'It helped.', { kind: 'focus', id: cf.id }, { outcome: 'helped' });
     const composerOutcome = await confirm('focus-composer', outcomeTurn, 'record_focus_outcome');
     ok('FP7 direct and composer outcome produce the same closed Focus state', directOutcome.json.ok && composerOutcome.json.outcome === 'helped' && JSON.stringify(comparable(df)) === JSON.stringify(comparable(cf)));
@@ -122,6 +140,36 @@ const sideEffects = (code, focus) => ({
     const strictUpdate = S._updatePersonalFocus('focus-group-composer', 'owner', gcf.id, { participantIds: ['outsider'] }, { strictAudience: true });
     ok('FP10b a strict non-contact audience is refused without expanding Focus visibility', !strictNonContact.ok && strictNonContact.status === 403
       && !strictUpdate.ok && JSON.stringify(comparable(gcf)) === JSON.stringify(beforeStrict));
+
+    /* A real audience read, not just a stored participants array. The contact may be removed
+       after invitation; the object and its private source must not follow them. */
+    const namedConversation = await post('focus-group-direct', '/api/assistant/turn', { text: 'Private source context' });
+    const named = await post('focus-group-direct', '/api/me/focus', { text: 'A goal with exactly one invitee',
+      participants: ['peer'], sourceConversationId: namedConversation.json.conversationId });
+    const focusId = named.json?.focus?.id;
+    const peerBefore = await as('focus-group-direct', 'peer', `/api/objects/focus/${focusId}/thread`);
+    const outsiderBefore = await as('focus-group-direct', 'outsider', `/api/objects/focus/${focusId}/thread`);
+    const sourceRefused = await as('focus-group-direct', 'peer', `/api/me/focus/${focusId}/source`);
+    const sourceOwned = await as('focus-group-direct', 'owner', `/api/me/focus/${focusId}/source`);
+    ok('FP13 a selected contact can read only the invited Focus, not its source conversation; an outsider cannot read either',
+      named.status === 200 && named.json?.focus?.visibility === 'invited' &&
+      peerBefore.status === 200 && outsiderBefore.status === 404 && sourceRefused.status === 404 && sourceOwned.status === 200);
+    const mistaken = await as('focus-group-direct', 'owner', '/api/me/focus', 'POST',
+      { text: 'A different goal', participants: ['outsider'] });
+    ok('FP14 direct creation refuses unknown recipients instead of silently dropping them and claiming success',
+      mistaken.status === 403 && !S._getMemory('focus-group-direct', 'owner').focuses.some(f => f.text === 'A different goal'));
+    const differentAudience = await post('focus-group-direct', '/api/me/focus',
+      { text: 'A goal with exactly one invitee' });
+    ok('FP15 retrying the same text with another audience cannot report an invitation or change who sees the existing Focus',
+      differentAudience.status === 409 && focusState('focus-group-direct', focusId)?.participants?.includes('peer'));
+    S.orgNodes['focus-group-direct'].g.memberIds = ['owner'];
+    S.orgUsers['focus-group-direct'].peer.assignedNodeIds = ['h'];
+    const peerAfter = await as('focus-group-direct', 'peer', `/api/objects/focus/${focusId}/thread`);
+    const peerForumAfter = await as('focus-group-direct', 'peer', `/api/forum/focus/${focusId}`);
+    const ownerForumAfter = await as('focus-group-direct', 'owner', `/api/forum/focus/${focusId}`);
+    ok('FP16 leaving the shared contact scope revokes both object and Forum access; owner no longer sees a phantom recipient',
+      peerAfter.status === 404 && peerForumAfter.status === 404 && ownerForumAfter.status === 400 &&
+      (await as('focus-group-direct', 'owner', `/api/objects/focus/${focusId}/thread`)).status === 200);
 
     const serverSource = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
     const directCreateBody = serverSource.slice(serverSource.indexOf("app.post('/api/me/focus'"), serverSource.indexOf("/* GET /api/me/focus/:id/source"));

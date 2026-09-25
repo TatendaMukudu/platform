@@ -7,7 +7,7 @@
    This layer decides HOW attention is delivered — never WHAT is true, and never
    WHO may see it. It is the single, canonical place responsible for:
      • grouping insights into Home's sections
-     • ordering ("lead with a win")
+     • ordering (lead with what carries the higher declared priority)
      • volume limits (how much to show)
      • empty-state / SILENCE behaviour ("nothing deserves surfacing" is success)
      • the assistant's opening message
@@ -62,7 +62,8 @@ function _rankCmp(a, b) {
 /* ── plan() — the canonical grouping / ordering / volume / silence decision ────
    Groups verified insights into Home's buckets, ranks within each, caps volume,
    and returns first-class empty states. Neutral findings remain in the feed but enter
-   neither bucket; opportunity and milestone are Highs under D4.
+   neither bucket; a milestone is a High only when its producer represents a real human outcome,
+   while an opportunity remains in the option layer.
    Returns { empty, message, groups: { bucket: { label, empty, message, insights } } }.
    Each surfaced insight is annotated with its delivered `bucket`. Pure. */
 function plan(insights, opts = {}) {
@@ -95,8 +96,8 @@ function plan(insights, opts = {}) {
 
 /* ── opening() — the assistant's proactive opening, assembled from a plan ───────
    The assistant CONSUMES the plan (verified artifacts) to open a conversation; it
-   never generates observations. Time-aware greeting, LEADS with a win when there
-   is one (emotional balance), then needs-attention, then opportunity, plus an
+   never generates observations. Time-aware greeting, leads with the highest-priority
+   surfaced record rather than a forced positive, plus an
    invitation to explore. Empty is a calm, valid opening — never an alarm. Pure. */
 function opening(planned, opts = {}) {
   const audience = opts.audience === 'leader' ? 'leader' : 'self';
@@ -108,8 +109,13 @@ function opening(planned, opts = {}) {
   if (!planned || planned.empty) {
     return { empty: true, greeting: `${hello} ${planned && planned.message ? planned.message : _calm(audience, opts.now)}`, sections: [], invitation: null };
   }
-  // Lead with a win when there is one — emotional balance is the point.
-  const ORDER = [['high', 'High'], ['low', 'Low']];
+  const high = planned.groups && planned.groups.high && planned.groups.high.insights[0];
+  const low = planned.groups && planned.groups.low && planned.groups.low.insights[0];
+  // Compare the strongest item in each bucket. The old fixed High-first order turned positivity
+  // into an engagement rule even when a higher-priority Low needed attention.
+  const ORDER = high && low && _rankCmp(low, high) < 0
+    ? [['low', 'Low'], ['high', 'High']]
+    : [['high', 'High'], ['low', 'Low']];
   const sections = [];
   for (const [key, label] of ORDER) {
     const g = planned.groups && planned.groups[key];

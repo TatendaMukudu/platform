@@ -40,5 +40,20 @@ ok('empty input is a calm valid result', po.stamp({}).empty === true && /Nothing
 ok('normalization is deterministic', JSON.stringify(po.stamp({ reads, insights, outcomeBriefs })) === JSON.stringify(po.stamp({ reads, insights, outcomeBriefs })));
 ok('priority office does not require UI/server imports', typeof po.buildQueue === 'function' && typeof po.stamp === 'function');
 
+const separated = po.normalizeItem({
+  id: 'separated', evidenceStanding: 'supported', deliveryReliability: 'unproven_here',
+  reliability: 'reliable', title: 'A supported finding', polarity: 'progress', priority: 'medium',
+});
+const deliveryOnly = po.normalizeItem({
+  id: 'delivery-only', deliveryReliability: 'reliable_here', reliability: 'reliable',
+  title: 'A useful notification type', polarity: 'neutral', priority: 'medium',
+});
+ok('priority keeps epistemic standing separate from delivery reliability',
+  separated.confidence === 'supported' && separated.evidenceStanding === 'supported'
+    && separated.deliveryReliability === 'unproven_here');
+ok('priority cannot promote delivery reliability into epistemic confidence',
+  deliveryOnly.confidence === 'none' && deliveryOnly.evidenceStanding === 'none'
+    && deliveryOnly.deliveryReliability === 'reliable_here');
+
 console.log(`\n=== priority-office-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);

@@ -44,11 +44,11 @@ const ORG_MODES = {
   government: { label:'Government',  icon:'', color:'#4fb8f7' },
 };
 
-const PLATFORM_GRADES = {
-  A: { label:'A-Grade', features:['Full IntelliQ','Real-time monitoring','Behavioral trend analysis','Wellness alerts','AI development plans','External data integration','Mandated reporter tools','Advanced analytics','Complete security'] },
-  B: { label:'B-Grade', features:['Performance tracking','Basic IntelliQ','Limited dashboards','Limited reporting'] },
-  C: { label:'C-Grade', features:['Simple monitoring','Basic evaluation','Minimal AI','No advanced analytics'] },
-};
+/* PLATFORM_GRADES REMOVED, September 2026. It was a client-side list of nine capability claims --
+   including "Complete security" -- rendered under green ticks as "Active Features", switched by a
+   button that only set a variable in the browser and toasted success. The server has no notion of
+   a platform grade, so none of it was ever checked against anything. Settings now asks the server
+   what is switched on: see _renderRealCapabilities in js/app.js. */
 
 /* ── Utility functions ────────────────────────────────────── */
 function rnd(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }

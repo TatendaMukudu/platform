@@ -661,6 +661,19 @@ const NAV_ALIASES = {
   // named individuals with their mood numbers (a per-member leak) and duplicated the
   // privacy-safe briefing. Retired → the briefing is the one intelligence surface.
   'intelliq':     'leader-home',
+  /* THE ACCOUNT MENU OFFERED A DESTINATION THAT DID NOT EXIST. `ACCOUNT_LINKS` builds a
+     permission-gated button with `data-page="organisation"`, and `organisation` had a PAGE_TITLE
+     but no route and no alias -- so `navigate` fell through its own "never blank, never a retired
+     identity" guard to Home. A person with `view_team` tapped Organisation and arrived at Home,
+     with the title reading Home, every time, and nothing logged.
+
+     Reproduced in a browser at 390px before it was changed: hasRoute false, hasAlias false,
+     landedOn "home". The fallback is doing exactly what it was written to do; the defect is a
+     menu offering a page nobody had built.
+
+     Folded rather than built. "Organisation" and the nav's "Org tree" are the same thing said
+     twice -- `people` renders the tree -- and this pass does not add a surface to fix a surface. */
+  'organisation': 'people',
 };
 // destination → its ONE renderer (arrow-wrapped so declaration order/TDZ is never an issue).
 const NAV_ROUTES = {
@@ -705,12 +718,35 @@ function navigate(dest){
   //    (Explicit entry points — askAboutMember / askAboutWork — navigate first, THEN set context.)
   try { if (typeof MemberApp !== 'undefined') { if (MemberApp.clearSubject) MemberApp.clearSubject(); MemberApp._wsWorkItemId = null; } } catch (_) {}
 
-  // 4. Activate the canonical surface + one-authority nav/title/active state.
+  /* 3b. AND EVERY LIVE MICROPHONE STOPS. A recogniser is bound to a TEXTAREA BY ID, and
+     navigating replaces the page that textarea was on — so a session left running would keep
+     listening to somebody who has walked away from the composer, and would deliver its final
+     result into whatever element now happens to hold that id, on a screen they are not looking
+     at. `cancel` restores the draft rather than keeping the speech, which is right here: they
+     left, they did not finish.
+
+     Session end already did this (see _sessionEnded). Navigation did not, and navigation is the
+     ordinary case — somebody taps the microphone, changes their mind, and taps Home. */
+  try { if (window.IQVoice && IQVoice.cancelAll) IQVoice.cancelAll(); } catch (_) {}
+  /* And anything being READ ALOUD stops, through the one owner, so the row it was reading is
+     told it stopped rather than left announcing "Reading aloud…" on a page nobody is on. */
+  try { if (typeof MemberApp !== 'undefined' && MemberApp._voiceStop) MemberApp._voiceStop('stopped'); } catch (_) {}
+
+  /* 4. Activate the canonical surface.
+
+     THE TWO `.nav-item` LINES THAT USED TO LIVE HERE MATCHED NOTHING. The nav drawer renders its
+     buttons with class `iq-nav-item` and marks the current one `is-active` itself from its own
+     `_navActive`; no element in this product carries class `nav-item` or a static `data-page`
+     attribute. So one selector cleared an active state nobody set and the other set an active
+     state nobody read, on every navigation, since the drawer replaced the old sidebar.
+
+     Removed rather than repaired: the drawer already owns its own active state, and a second
+     owner for "which nav item is lit" is the duplicate-authority shape this file keeps folding
+     away. The account menu's `data-page` buttons are a different thing and are live -- they are
+     built in `ACCOUNT_LINKS` and read by `navigate(btn.dataset.page)`. */
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const pg = document.getElementById('page-'+page) || (['focus', 'high', 'low'].includes(page) ? document.getElementById('page-inquiry') : null);
   if(pg) pg.classList.add('active');
-  document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
   // Close the mobile sidebar drawer on navigation (and clear its outside-click handler).
   document.getElementById('sidebar')?.classList.remove('open');
   if (typeof _detachSidebarClose === 'function') _detachSidebarClose();
@@ -723,6 +759,28 @@ function navigate(dest){
 
   // Hydrate any line-icon slots the page just rendered.
   if (typeof hydrateIcons === 'function') hydrateIcons(pg || document);
+
+  /* 6. AND THE COMPOSER IS STILL THERE. It lives in the shell rather than in a page, so this is
+     not a re-render — it is the one moment that can decide whether this page brought its own
+     composer, which is a question only the rendered page can answer. It runs AFTER step 5 for
+     that reason. */
+  try { if (typeof MemberApp !== 'undefined' && MemberApp._renderShellComposer) MemberApp._renderShellComposer(page); } catch (_) {}
+}
+
+/* ── WHAT THE BAR SAYS IS WHAT YOU ARE LOOKING AT ──────────────────────────────────────────
+   `navigate()` sets the title from the PAGE, which is right until a page renders something else
+   into itself. Four surfaces do: an object thread, a Forum, a group, and the bucket list they
+   share a container with — so opening a Forum from an inquiry left the bar reading "Inquiries"
+   over a screen headed "Forum", and "which screen am I on" had two answers.
+
+   ONE OWNER, called by whoever just drew something. Passing nothing restores the page's own
+   name, so a surface that closes does not have to remember what was there before. */
+function setScreenTitle(name) {
+  const el = document.querySelector('.topbar-title');
+  if (!el) return;
+  const page = (document.querySelector('.page.active') || {}).id || '';
+  el.textContent = String(name || '').trim()
+    || PAGE_TITLES[page.replace(/^page-/, '')] || 'Platform';
 }
 
 const PAGE_TITLES = {
@@ -762,7 +820,10 @@ const PAGE_TITLES = {
   scenarios:    'Manage Assessments',
   // Management
   organisation: 'Organisation',
-  people:       'Members',
+  /* ONE NAME. The nav item said "Org tree", the bar said "Members", the heading said "Members"
+     and the only tab said "Org Tree" — four names for one place, and the person got there by
+     tapping the one word that then appeared nowhere on the screen they landed on. */
+  people:       'Org tree',
   safeguarding: 'Safeguarding',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
@@ -941,7 +1002,9 @@ async function handleSetup() {
   const lastName    = (document.getElementById('setup-last-name')?.value       || '').trim();
   const email       = (document.getElementById('setup-email')?.value           || '').trim().toLowerCase();
   const password    = (document.getElementById('setup-password')?.value        || '').trim();
-  const grade       = document.getElementById('setup-grade')?.value            || 'A';
+  // PLATFORM GRADE REMOVED: there was never a server-side grade, and nothing an organisation
+  // chose here changed anything about what they got.
+  const grade       = 'A';
   const description = (document.getElementById('setup-org-description')?.value || '').trim();
   const errEl       = document.getElementById('setup-error');
   errEl.style.display = 'none';
@@ -1188,11 +1251,24 @@ async function loadRealOrgData() {
     let realUsers = [];
 
     if (Auth.isAdmin() || Auth.isSuperAdmin()) {
-      // ── Admin / SuperAdmin: full org tree (needed for People management) ──
-      // Filter out the superadmin account from the member list — admins
-      // manage all other users but superadmin is not a "member" in the UI.
+      /* ── Admin / SuperAdmin: full org tree (needed for People management) ──
+         THE SUPER-ADMIN IS ALSO A PERSON IN THE ORGANISATION. This filtered them out with the
+         reason "superadmin is not a 'member' in the UI", and the branch below asserted that
+         "visible-members already strips superadmin" — which is not true: the server returns
+         them, and a coach's own roster read shows Boss(superadmin) beside everybody else.
+
+         So the product erased somebody the server had deliberately included. In a small
+         organisation the super-admin is usually the founder, and usually also coaches a team:
+         they were on the squad's roster, they could set a focus, check in, be somebody's
+         contact — and they did not appear in the People list, so nobody could assign them to a
+         node or see them on the team they were actually on. An account you can talk to but
+         cannot see is the worst of both.
+
+         Nothing is loosened by showing them: the server already refuses a role change from
+         anybody who is not a super-admin, so the list being complete does not make it
+         dangerous. */
       const { flat } = await Auth.getOrgTree();
-      realUsers = (flat || []).filter(u => u.role !== 'superadmin');
+      realUsers = (flat || []);
       console.log(`[VISIBILITY] Admin path — loaded ${realUsers.length} users via org-tree`);
     } else {
       // ── Coach / Member: server-enforced subtree visibility ────────────────
@@ -1201,8 +1277,10 @@ async function loadRealOrgData() {
       const res  = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
       const data = await res.json();
       if (data.ok) {
-        // visible-members already strips superadmin; map to the same shape
-        // that buildRealMemberRecord expects (id, name, email, role, …)
+        // Map to the same shape that buildRealMemberRecord expects (id, name, email, role, …).
+        // This used to say "visible-members already strips superadmin". It does not, and never
+        // did — getVisibleUserIds returns everyone a person is entitled to see, super-admin
+        // included, which is correct: somebody on your squad is on your squad.
         realUsers = (data.members || []).map(m => ({
           id:             m.userId,
           name:           m.name,
@@ -1501,7 +1579,8 @@ function renderSidebar(){
   const color    = modeInfo.color || '#4f8ef7';
 
   document.querySelector('.sb-logo-text').textContent = 'Platform';
-  document.querySelector('.sb-logo-sub').textContent  = AppState.grade + '-Grade · IntelliQ';
+  // The sidebar used to print "A-Grade · IntelliQ" from a tier that did not exist.
+  document.querySelector('.sb-logo-sub').textContent  = 'IntelliQ';
 
   const badge = document.querySelector('.mode-badge');
   if (badge) {
@@ -2029,6 +2108,35 @@ async function showAdvanceNotices() {
 const _CONFIDENCE_WORDS = { clear: 'Fairly sure', strong: 'Well supported', supported: 'Well supported',
   probable: 'Likely', emerging: 'Taking shape', tentative: 'Early thinking', weak: 'Early thinking' };
 
+/* WHAT THE BADGE MEANS, IN THE WORDS A PERSON WOULD USE. The founder read "EARLY THINKING" on a
+   Focus card and had no way to find out what it was telling them. A label that only means
+   something to whoever wrote it is not a label; it is decoration that looks like information.
+
+   THE FIRST ANSWER TO THAT WAS ITSELF A LIE, and an independent review was right to call it. It
+   was a seven-entry lookup HERE, in the browser, keyed on the BAND — and its text for `supported`,
+   `strong` and `clear` was "several separate accounts point the same way". A band cannot carry
+   that claim:
+
+     · several reports whose ORIGIN was never established reach `supported` with the independent
+       origin count at ZERO. The whole origin/occasion apparatus in ai/diagnose.js exists because
+       we cannot then rule out a room repeating one telling, and this asserted the very
+       independence the kernel had specifically failed to establish.
+     · one origin retold by four people is capped rather than refused, so it sits in a band whose
+       tooltip said several separate accounts.
+     · a CONTESTED picture — real disagreement, the most informative state the system has — was
+       described as everything pointing the same way.
+
+   The words now come from the server, composed by ai/present.js from the counts ai/diagnose.js
+   computed the score from, and arrive on the card as `summary.standingWhy`. Nothing about the
+   evidence is decided here. This function only reads that field and, where an older record
+   carries no explanation, says less rather than inventing one — because the fallback IS the
+   defect: a sentence that is always available is a sentence that is sometimes untrue. */
+function _confidenceWhy(summary) {
+  const s = (summary && typeof summary === 'object') ? summary : {};
+  const why = typeof s.standingWhy === 'string' ? s.standingWhy.trim() : '';
+  return why || 'How sure IntelliQ is about this, from what has been recorded.';
+}
+
 function _answerabilityRecords(items, emptyText) {
   if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
   return items.map(item => {
@@ -2388,31 +2496,363 @@ async function renderPeople() {
   }
 }
 
+/* ── WHICH BUILD IS THIS PHONE ACTUALLY RUNNING? ───────────────────────────────────────────────
+   The first recovery pass closed by saying stale assets could not be ruled out as an explanation
+   for what the founder saw, because nothing in the product could answer the question. It can now,
+   and without opening developer tools on a phone, which was the other half of the problem.
+
+   The client reads its own stamp from the script tag the browser actually loaded -- not from a
+   constant, which would only ever tell you what the source says rather than what arrived -- and
+   compares it with the stamp the SERVER is currently serving in index.html. Those differing is
+   exactly the stale-asset case: an old cached shell talking to a newer server. */
+function _clientAssetStamp() {
+  try {
+    const el = document.querySelector('script[src*="js/app.js?v="]')
+      || document.querySelector('link[href*="css/styles.css?v="]');
+    const src = el ? (el.getAttribute('src') || el.getAttribute('href') || '') : '';
+    const m = src.match(/[?&]v=([A-Za-z0-9]+)/);
+    return (m && m[1]) || 'unknown';
+  } catch (_) { return 'unknown'; }
+}
+
+/* One reload that actually clears the shell. Reuses the recovery path index.html already carries
+   -- drop the caches, unregister the worker, then reload with a cache-busting parameter -- rather
+   than a bare location.reload(), which on iOS will happily hand back the same cached shell. */
+async function _reloadForNewBuild() {
+  try {
+    if (window.caches && caches.keys) {
+      const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k)));
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      const rs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(rs.map(r => r.unregister()));
+    }
+  } catch (_) { /* clearing is best-effort; the reload below is the part that matters */ }
+  try { const u = new URL(location.href); u.searchParams.set('_fresh', Date.now()); location.replace(u.toString()); }
+  catch (_) { location.reload(); }
+}
+
+let _buildState = null;
+async function _checkBuildIdentity() {
+  const mine = _clientAssetStamp();
+  // Through the one bounded reader, like the capability panel above it. An unbounded fetch here
+  // was the reason "Checking which version you are running…" could sit on the screen for ever on
+  // exactly the flaky connection that makes somebody ask which version they are running.
+  const r = await MemberApp._read('/api/health');
+  const h = r.ok ? r.data : null;
+  const server = (h && h.build) || null;
+  _buildState = {
+    clientStamp: mine,
+    serverStamp: server ? server.assetStamp : 'unknown',
+    commit: server ? server.commitShort : 'unknown',
+    startedAt: server ? server.startedAt : null,
+    readiness: (h && h.readiness) || null,
+    // Only a real disagreement counts. Two unknowns are not a mismatch, they are two unknowns,
+    // and telling somebody their app is stale on that basis would be a guess wearing a warning.
+    stale: !!(server && server.assetStamp && server.assetStamp !== 'unknown'
+      && mine !== 'unknown' && server.assetStamp !== mine),
+  };
+  return _buildState;
+}
+
+/* A STALE SHELL SHOULD SAY SO, ONCE. Not a reload loop: it offers, the person chooses. */
+async function _announceStaleBuild() {
+  const st = await _checkBuildIdentity();
+  if (!st.stale) return false;
+  if (document.getElementById('iq-stale-build')) return true;
+  const bar = document.createElement('div');
+  bar.id = 'iq-stale-build';
+  bar.setAttribute('role', 'status');
+  bar.className = 'iq-stale-build';
+  bar.innerHTML = `<span>This page is running an older version of IntelliQ than the server.</span>
+    <button type="button" class="btn btn-outline btn-sm" onclick="_reloadForNewBuild()">Load the new version</button>`;
+  document.body.appendChild(bar);
+  return true;
+}
+
+/* ── WHAT IS ACTUALLY SWITCHED ON ──────────────────────────────────────────────────────────────
+   This panel used to be `PLATFORM_GRADES[grade].features` — a list in `js/data.js` — rendered with
+   green ticks under the heading "Active Features". For the A grade it claimed:
+
+     Full IntelliQ · Real-time monitoring · Behavioral trend analysis · Wellness alerts ·
+     AI development plans · External data integration · Mandated reporter tools ·
+     Advanced analytics · Complete security
+
+   None of it was checked against anything. The grade it came from was a CLIENT-SIDE VARIABLE: the
+   server has no notion of a platform grade at all, and `switchGrade` set `AppState.grade`,
+   re-rendered, and toasted "Switched to A-Grade Platform" — a success message for a change that
+   never left the browser. A person reading that panel was told nine capabilities were active, by
+   a tier they could switch themselves, backed by nothing.
+
+   "Complete security" is the one that must never be printed under any circumstances, and it was
+   printed with a tick beside it.
+
+   What replaces it is the smallest honest thing: ask the server what is on, and say so — including
+   when the answer is "off", which the old panel had no way to express. `/api/health` already
+   reports exactly this and is the owner; nothing new computes capability here. */
+async function _renderRealCapabilities() {
+  const box = document.getElementById('settings-features');
+  if (!box) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Checking…</div>`;
+  /* THE ONE READER, HERE TOO. This used to be a bare `fetch` with no timeout and no abort, which
+     is the exact shape MemberApp._read was written to retire: a host that accepts the connection
+     and never answers left "Checking…" on the screen for as long as somebody was willing to look
+     at it, and an ended session was reported as "could not check" rather than as an ended session.
+     A second networking path in the one panel whose entire job is to report truthfully about the
+     system is the worst place in the product to keep one. */
+  const r = await MemberApp._read('/api/health');
+  if (!r.ok) {
+    // One banner, written over whatever was there — never appended, so a retry cannot stack them.
+    box.innerHTML = MemberApp._readFailedHTML(r, '_renderRealCapabilities()');
+    return;
+  }
+  const h = r.data;
+  /* Each row is a fact the server just reported, with the REASON it gave where one is off.
+
+     Two defects an independent review found here. The composer row read `composer.on`, the host
+     flag alone, so a host with IQ_COMPOSER=1 and no model key showed the composer ON while the
+     same payload said every reply came from the deterministic templates. And the reason line read
+     `composer.why`, WHICH DID NOT EXIST in the payload at all, so the fallback string was printed
+     whatever the real cause was — "no key" shown to somebody whose actual reason was
+     deterministic-only mode.
+
+     `composer.effective` is the AND of every switch that has to be true, and `composer.why` is now
+     a real field carrying the server's own reason. Nothing is derived here that the server has not
+     already decided: this renders the answer rather than recomputing it. */
+  const comp = (h && h.composer) || {};
+  const compReason = comp.why
+    || (comp.effective ? '' : 'The composer is not writing replies on this host.');
+  /* TWO DIFFERENT THINGS THAT BOTH GET CALLED "VOICE", and a panel that reports on the system
+     must not be the place they get conflated.
+
+       SERVER TRANSCRIPTION  an OpenAI key turning an audio file into text, on the host. This is
+                             what /api/health's `voice` means, and it is a fact about the host.
+       THE BROWSER MICROPHONE  SpeechRecognition, on THIS device, in THIS browser. The server
+                             cannot know whether it exists — Safari and Chrome differ, and a
+                             person can decline the permission — so it is answered HERE, by
+                             asking the browser, which is the only thing that knows.
+
+     Reporting either from the other would be a lie in whichever direction it went: a host with a
+     key does not give somebody a microphone, and a browser with a microphone does not give the
+     host transcription. They are separate rows because they are separate questions with separate
+     fixes. */
+  const rows = [
+    ['Conversation written by the model', !!comp.effective, compReason],
+    ['Voice notes transcribed on the server', !!h.voice, 'Needs an OpenAI key on the host. This is not the microphone in your browser.'],
+    /* Two rows, because they fail for different reasons and one row saying "files" left a person
+       unable to tell which half was missing. A text document is extracted in this browser and
+       needs no model at all; a photograph is read by one. */
+    ['Documents read for you', !!h.readsFiles, 'Text is pulled out of the file in your browser.'],
+    ['Photos read for you', !!h.readsImages, 'Reading a picture needs the reasoning engine on this host.'],
+    ['The one composer surface', !!comp.on, 'IQ_COMPOSER is not switched on for this host.'],
+  ];
+  box.innerHTML = rows.map(([label, on, why]) => `
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:var(--fs-sm);font-weight:700;color:${on ? 'var(--success)' : 'var(--text-muted)'};min-width:2.4rem">${on ? 'ON' : 'OFF'}</span>
+      <span style="font-size:var(--fs-md)">${esc(label)}${on ? '' : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(why)}</div>`}</span>
+    </div>`).join('')
+    + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
+         This is what the server reports right now, not a plan or a tier.</div>`
+;
+  /* THE BUILD LINE MOVED, and is no longer minted here. It belongs to the person holding the
+     phone rather than to a host diagnostic, so it lives in the You tab where everybody can reach
+     it — this panel is superadmin-only. Creating it in both places would put two elements with
+     one id in the document, and getElementById returns whichever comes first. */
+}
+
+/* ── WHAT THIS DEVICE CAN DO ──────────────────────────────────────────────────────────────
+   Every authenticated person, no permission required, because none of it is anybody else's to
+   grant. And ANSWERED BY THE BROWSER, because the browser is the only thing that knows: Safari
+   and Chrome differ on speech recognition, a person can decline the microphone permission, and a
+   server with an OpenAI key has given nobody a microphone.
+
+   Deliberately separate from the server capability panel, which is superadmin-only and reports on
+   the HOST. Three things get called "voice" in this product and they share nothing but the word;
+   reporting either device capability from the server's key, or the server's transcription from
+   this browser's microphone, would be a lie in whichever direction it went. */
+async function _renderYourDevice() {
+  const box = document.getElementById('settings-you-device');
+  if (!box) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  /* THE LABEL HAS TO SAY WHICH QUESTION IT ANSWERED, and this one did not. `IQVoice.isSupported()`
+     asks whether THIS BROWSER OFFERS SPEECH RECOGNITION. It cannot ask whether the person has
+     granted the microphone, because that is a separate permission, asked the first time and
+     revocable at any time — so somebody who had declined it read "Speaking instead of typing: ON"
+     and was told they could do a thing that would not work. An independent gate named it
+     precisely: do not show permission as ON on browser capability alone.
+
+     Two changes, and the second matters more than the first. The label now says what was actually
+     checked. And the microphone note is shown when the row is ON as well as when it is OFF —
+     because the state that needed explaining was the ON one, and a panel that only explains its
+     negatives leaves its most misleading answer bare. */
+  const rows = [
+    ['Speaking instead of typing — offered by this browser',
+      !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported()),
+      'This browser does not offer speech recognition. Typing works as normal — this is about your browser, not about IntelliQ.',
+      'Your browser offers it. The microphone itself is a separate permission you are asked for the first time you use it, and can decline or withdraw — IntelliQ is not told either way until you press the button.'],
+    /* ASKED OF THE OWNER, exactly as the line above asks IQVoice. This row used to test
+       `window.speechSynthesis && window.SpeechSynthesisUtterance` itself — a second
+       implementation of one question, which is how a Settings panel comes to report a capability
+       the control beside it has already refused to draw. */
+    ['Reading replies aloud — offered by this browser',
+      !!(window.IQVoiceOut && IQVoiceOut.isSupported && IQVoiceOut.isSupported()),
+      'This browser cannot read text aloud. Replies are on screen as they always are.',
+      'Your browser offers it. Whether a voice is actually installed on this device is the device\'s business, not IntelliQ\'s.'],
+  ];
+  box.innerHTML = rows.map(([label, on, why, whenOn]) => `
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:var(--fs-sm);font-weight:700;color:${on ? 'var(--success)' : 'var(--text-muted)'};min-width:2.4rem">${on ? 'ON' : 'OFF'}</span>
+      <span style="font-size:var(--fs-md)">${esc(label)}<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(on ? (whenOn || '') : why)}</div></span>
+    </div>`).join('')
+    + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
+         This is what your browser on this device can do. It is not about the server, and nothing
+         here is switched on or off by IntelliQ.</div>`;
+  _renderBuildLine();
+}
+
+/* THE LINE THE FOUNDER CAN READ ON A PHONE. Deliberately available to any authenticated user
+   rather than hidden behind superadmin: the question "is this device running the build I just
+   deployed?" is the one that has to be answerable while standing in front of the device, and a
+   commit short-hash, a cache stamp and a start time are not secrets. The deeper persistence and
+   provider diagnostics stay behind /api/admin/persistence, which is superadmin-gated. */
+async function _renderBuildLine() {
+  const el = document.getElementById('iq-build-line');
+  if (!el) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  const st = await _checkBuildIdentity();
+  const r = st.readiness || {};
+  const readyWord = r.storesLoaded ? 'loaded' : 'not loaded yet';
+  el.innerHTML = `
+    <div>Server build <strong>${esc(st.commit)}</strong>, started ${esc(st.startedAt ? new Date(st.startedAt).toLocaleString() : 'unknown')}.</div>
+    <div>This device is running assets <strong>${esc(st.clientStamp)}</strong>; the server is serving <strong>${esc(st.serverStamp)}</strong>.</div>
+    <div>Records ${esc(readyWord)}${r.durableStore === false ? ' · durable store unavailable' : ''}.</div>
+    ${st.stale ? `<div style="color:var(--warning);margin-top:0.3rem">These do not match — this device has an older copy.
+      <button class="btn-ghost btn-sm" onclick="_reloadForNewBuild()">Load the new version</button></div>` : ''}`;
+}
+
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
+/* ── APPEARANCE ────────────────────────────────────────────────────────────────────────────
+   ONE OWNER for "which theme is on", and it is the attribute on <html> — the same one the inline
+   boot script in index.html sets before anything paints. No second copy of the state in JS, so
+   the page and the store cannot disagree about what a person is looking at.
+
+   PER DEVICE. A coach's phone should not change colour because they opened a laptop, and this is
+   a preference about a screen rather than a fact about a person. `localStorage` is exactly the
+   right scope for that, and the boot script reads the same key. */
+function setTheme(name) {
+  const t = name === 'dark' ? 'dark' : 'light';
+  try { document.documentElement.setAttribute('data-theme', t); } catch (_) {}
+  try { localStorage.setItem('iq_theme', t); } catch (_) {}
+  _markThemeChoice();
+}
+function currentTheme() {
+  try { return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; }
+  catch (_) { return 'light'; }
+}
+/* The control says which one is on. Read from the attribute rather than from what was last
+   clicked, so opening Settings on a device that already chose navy shows navy selected. */
+function _markThemeChoice() {
+  const now = currentTheme();
+  document.querySelectorAll('[data-theme-set]').forEach(b => {
+    const on = b.getAttribute('data-theme-set') === now;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
 function renderSettings(){
+  _markThemeChoice();
+  /* ── THREE TIERS, AND A TAB SOMEBODY MAY NOT USE IS NOT DRAWN ─────────────────────────────
+     FOUNDER DECISION, September 2026: Personal Settings for every authenticated user,
+     Organisation Settings for authorised administrators, Platform diagnostics for superadmins —
+     and "do not give ordinary members administrative Settings merely to make the route visible".
+
+     Both halves of that matter. Settings was superadmin-ONLY, so an ordinary member had nowhere
+     at all to answer "can this phone use its microphone" or "which build am I running" — the
+     second of which the founder specifically needed answerable while holding the device. And the
+     one page mixed a club's configuration with host diagnostics, so the same screen that sets
+     display language also carried a button that deletes an organisation.
+
+     Tabs a person may not use are REMOVED rather than disabled: "Settings exists but most of it
+     is greyed out" teaches somebody the product is not for them. It is a COURTESY — every route
+     behind these controls checks for itself, and _maySeeSettingsTab reads the same permissions
+     the server enforces so the tab drawn and the route that answers cannot be two opinions. */
+  const allowed = SETTINGS_TABS.filter(t => _maySeeSettingsTab(t));
+  SETTINGS_TABS.forEach(t => {
+    const btn = document.querySelector(`#page-settings .tab-btn[data-tab="${t}"]`);
+    if (btn) btn.hidden = !allowed.includes(t);
+  });
+
+  // Org fields are only in the DOM for people who have the org tab; guard every write.
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const mode  = AppState.mode;
   const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '' };
-  const grade = AppState.grade;
+  set('settings-org-name', AppState.orgName);
+  set('settings-mode', `${info.icon || ''} ${info.label || mode}`.trim());
+  set('settings-admin', AppState.adminName);
 
-  document.getElementById('settings-org-name').textContent  = AppState.orgName;
-  document.getElementById('settings-mode').textContent      = `${info.icon || ''} ${info.label || mode}`.trim();
-  document.getElementById('settings-grade').innerHTML       = gradeBadgeHTML(grade);
-  document.getElementById('settings-admin').textContent     = AppState.adminName;
+  /* EVERY PERSON LANDS ON THEIR OWN TAB. Not on the organisation's — that is somebody's job,
+     not everybody's first screen, and for a member it would be the one tab they cannot open. */
+  switchSettingsTab('you');
 
-  const features = PLATFORM_GRADES[grade]?.features || [];
-  document.getElementById('settings-features').innerHTML = features.map(f=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--success);font-size:var(--fs-lg)"></span>
-      <span style="font-size:var(--fs-md)">${f}</span>
-    </div>`).join('');
+  // The host diagnostics panel, only for whoever can actually see the tab it lives in. Calling
+  // it for a member would fire a request whose answer has nowhere to render.
+  if (_maySeeSettingsTab('platform')) _renderRealCapabilities();
 
-  // Load values into textarea
-  _loadValuesIntoTextarea();
-  if (typeof loadConnections === 'function') loadConnections();
-  if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
-  if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
-  if (typeof loadMappings === 'function') loadMappings();
-  if (typeof loadPolicies === 'function') loadPolicies();
+  if (_maySeeSettingsTab('org')) {
+    // The Organisation tab also opens for metrics-only and tree-only grants. A
+    // jump to Values is a write affordance and must be shown only to its editor.
+    const valuesShortcut = document.getElementById('settings-org-values-shortcut');
+    if (valuesShortcut) valuesShortcut.style.display = Auth.canDo('manage_values') ? '' : 'none';
+    if (Auth.canDo('manage_values')) _loadValuesIntoTextarea();
+    /* THE TAB IS NOT THE CONTROL, and an independent gate was right that treating them as one
+       thing was a lie on the screen. `SETTINGS_TAB_ACCESS.org` opens for ANY of four permissions
+       — settings, values, metrics or tree — because the Organisation tab holds things that belong
+       to each of them. But the connection cards inside it (the ingest token, the auto-sync
+       connections, the OAuth apps, the field mappings, the display language) all call routes
+       gated on `manage_settings` alone. So somebody with `manage_metrics` and nothing else saw
+       every one of those cards, pressed the buttons, and collected 403s from a screen that had
+       just offered them the work.
+
+       A control that will refuse you should not be drawn. The tab stays — Organisation Details is
+       a read and is genuinely theirs to see — and each card that needs `manage_settings` is
+       replaced by the reason it is not there, rather than by nothing: an absence with no
+       explanation is indistinguishable from a product that is broken. */
+    _gateOrgSettingsControls();
+    if (Auth.canDo('manage_settings')) {
+      if (typeof loadConnections === 'function') loadConnections();
+      if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
+      if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
+      if (typeof loadMappings === 'function') loadMappings();
+      if (typeof loadPolicies === 'function') loadPolicies();
+    }
+  }
+}
+
+/* WHICH CARDS IN THE ORGANISATION TAB NEED `manage_settings`, named once. Each id is the card's
+   own body, so the heading stays and the reason lands where the controls were. */
+const ORG_SETTINGS_ONLY = ['domain-catalog', 'ingest-token-box', 'connections-list', 'oauth-catalog', 'mappings-list', 'policies-list'];
+
+function _gateOrgSettingsControls() {
+  let may = false;
+  try { may = !!Auth.canDo('manage_settings'); } catch (_) { may = false; }
+  if (may) return;
+  const why = 'Changing this needs the organisation-settings permission. Ask an administrator who has it.';
+  for (const id of ORG_SETTINGS_ONLY) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const card = el.closest ? el.closest('.card') : null;
+    const body = card && card.querySelector ? card.querySelector('.card-body') : null;
+    if (body) body.innerHTML = `<div class="iq-act-note" data-gated="manage_settings">${why}</div>`;
+    else el.innerHTML = `<div class="iq-act-note" data-gated="manage_settings">${why}</div>`;
+  }
+  /* AND THE BUTTONS THAT SIT OUTSIDE A GATED BODY. Removing the card body takes most of them with
+     it; these are named so a layout change cannot quietly leave one live. */
+  for (const id of ['ingest-token-btn', 'conn-add-btn']) {
+    const b = document.getElementById(id);
+    if (b) b.remove();
+  }
 }
 
 /* The organisational constitution — the rules IntelliQ follows before acting. */
@@ -2549,7 +2989,8 @@ async function mappingReprocess(provider) {
   } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
 }
 
-/* Display language (domain pack) — the same kernel, the org's own words. Renders
+/* The TERMINOLOGY PACK — the same kernel, the org's own words. Not the language it
+   replies in, which ai/language.js decides from what each person writes. Renders
    the catalog with the current pack highlighted; picking one re-renders the whole
    app in that vocabulary. Admin-only; the server enforces manage_settings. */
 async function loadDomainCatalog() {
@@ -2808,6 +3249,29 @@ async function loadIngestToken(regen) {
   }
 }
 
+/* THE HOST'S OWN KEY, read from the one field the Platform tab carries.
+
+   These controls act on the WHOLE INSTANCE — replacing the demo organisation, flipping
+   deterministic-only mode, spending the host's provider budget on a self-test — and they used to
+   be guarded by `manage_settings`, which every tenant superadmin holds. Driven at head 99a6544:
+   a superadmin of an unrelated tenant replaced the pilot organisation, thirty-one seeded people
+   over the top of six weeks of real data, and flipped the host's language-model mode. Being the
+   top of an ORGANISATION is not the same authority as being the top of a MACHINE.
+
+   The server is the gate (see requirePlatformOperator); this is the door. Without it the
+   capability would be unreachable from the product, which is its own defect — a route with no
+   door is a capability nobody has. `purge-key` is read as a fallback so the destructive control
+   that already had its own field keeps working unchanged. */
+function _platformKey() {
+  const el = document.getElementById('platform-key') || document.getElementById('purge-key');
+  return (el && el.value) || '';
+}
+function _platformHeaders() {
+  const k = _platformKey();
+  return k ? { ...Auth._headers(), 'x-platform-key': k } : Auth._headers();
+}
+const _PLATFORM_KEY_MISSING = 'This acts on the whole instance, so it needs the platform key above.';
+
 async function runLlmSelfTest() {
   const btn = document.getElementById('llm-selftest-btn');
   const out = document.getElementById('llm-selftest-result');
@@ -2816,7 +3280,8 @@ async function runLlmSelfTest() {
   out.innerHTML = `<div style="color:var(--text-muted)">Running…</div>`;
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   try {
-    const r = await fetch('/api/admin/llm-selftest', { method: 'POST', headers: Auth._headers() });
+    if (!_platformKey()) throw new Error(_PLATFORM_KEY_MISSING);
+    const r = await fetch('/api/admin/llm-selftest', { method: 'POST', headers: _platformHeaders() });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'failed');
     const s = d.status || {};
@@ -2927,7 +3392,8 @@ async function seedDemoOrg() {
   if (btn) { btn.disabled = true; btn.textContent = 'Setting it up…'; }
   out.innerHTML = `<div style="color:var(--text-muted)">Building the roster…</div>`;
   try {
-    const r = await fetch('/api/admin/seed-alma', { method: 'POST', headers: Auth._headers() });
+    if (!_platformKey()) throw new Error(_PLATFORM_KEY_MISSING);
+    const r = await fetch('/api/admin/seed-alma', { method: 'POST', headers: _platformHeaders() });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
     const s = d.summary || {};
@@ -2946,13 +3412,42 @@ async function seedDemoOrg() {
   }
 }
 
+const SETTINGS_TABS = ['you', 'org', 'metrics', 'values', 'goals', 'platform', 'grade'];
+
+/* WHO MAY SEE WHICH TAB. Read from the same permissions the server enforces, so the tab that is
+   drawn and the route that will answer cannot be two different opinions. This is a COURTESY: it
+   decides what is shown, never what is possible, and every route behind these controls checks
+   for itself. A `canDo` that throws — an older cached session with no permissions block — is read
+   as "no", because showing somebody a control that will refuse them is its own small lie. */
+const SETTINGS_TAB_ACCESS = {
+  // Yours. No permission required, because none of it is anybody else's to grant.
+  you:      () => true,
+  // An authorised administrator. Not "a superadmin": the founder's word is administrators, and
+  // the org's own configuration belongs to whoever runs the org.
+  org:      () => Auth.canDo('manage_settings') || Auth.canDo('manage_values')
+                || Auth.canDo('manage_metrics') || Auth.canDo('manage_tree'),
+  metrics:  () => Auth.canDo('manage_metrics'),
+  values:   () => Auth.canDo('manage_values'),
+  goals:    () => Auth.canDo('manage_goals'),
+  // The HOST. Diagnostics that belong to whoever runs the instance, not whoever runs the club.
+  platform: () => Auth.isSuperAdmin(),
+  grade:    () => false,
+};
+function _maySeeSettingsTab(tab) {
+  const f = SETTINGS_TAB_ACCESS[tab];
+  try { return typeof f === 'function' ? !!f() : false; } catch (_) { return false; }
+}
+
 function switchSettingsTab(tab) {
-  ['org','metrics','values','goals','grade'].forEach(t => {
+  // A tab somebody may not use is not a tab they may switch to, whatever they type in a console.
+  if (!_maySeeSettingsTab(tab)) tab = 'you';
+  SETTINGS_TABS.forEach(t => {
     const el  = document.getElementById(`settings-tab-${t}`);
     const btn = document.querySelector(`#page-settings .tab-btn[data-tab="${t}"]`);
     if (el)  el.style.display  = t === tab ? 'block' : 'none';
     if (btn) btn.classList.toggle('active', t === tab);
   });
+  if (tab === 'you')     _renderYourDevice();
   if (tab === 'metrics') renderMetricsSettings();
   if (tab === 'values')  _loadValuesIntoTextarea();
   if (tab === 'goals')   renderGoalsSettings();
@@ -3221,6 +3716,12 @@ function _applyOnboardAuthority() {
     const el = document.getElementById(id);
     if (el) el.hidden = !may;
   });
+  /* AND THE STRIP GOES WITH THE SECOND TAB. Onboard is the only sibling the Tree has, so for
+     anybody who cannot onboard the strip holds exactly one tab — a control with nothing to switch
+     to, which reads as though there is more here that they cannot reach. The page is the tree;
+     when it is the only thing on the page it does not need a tab saying so. */
+  const strip = document.getElementById('people-tabs');
+  if (strip) strip.hidden = !may;
   return may;
 }
 
@@ -4102,7 +4603,12 @@ function _showProfileInner(id, m){
   document.getElementById('pm-role').textContent    = `${m.role} · ${m.group}`;
   document.getElementById('pm-avatar').textContent  = m.initials;
   document.getElementById('pm-avatar').style.background = color;
-  document.getElementById('pm-grade').innerHTML     = gradeBadgeHTML(m.iqGrade);
+  /* NO LETTER GRADE ON A PERSON. Product law 1 is "directional, never graded — no letter grades
+     as verdicts", and this rendered `${grade}-Grade` beside somebody's name. Nothing ever set
+     `iqGrade`, so it drew nothing in practice — a loaded gun rather than a live defect, and it is
+     unloaded here rather than left for somebody to populate. */
+  const pmGrade = document.getElementById('pm-grade');
+  if (pmGrade) pmGrade.innerHTML = '';
   document.getElementById('pm-joined').textContent  = m.joinDate ? `Joined ${m.joinDate}` : '';
   document.getElementById('pm-active').textContent  = m.lastActive ? `Active: ${m.lastActive}` : 'Not active yet';
   document.getElementById('pm-streak').textContent  = m.streak ? `${m.streak}-day streak` : '';
@@ -5545,16 +6051,17 @@ async function ocRetire(id, ev) {
 function _knowledgeFormat(name) {
   const ext = String(name || '').toLowerCase().split('.').pop();
   if (ext === 'csv')  return 'csv';
-  if (ext === 'json') return 'json';
   if (ext === 'md' || ext === 'markdown') return 'markdown';
-  if (ext === 'pdf')  return 'pdf';
-  if (ext === 'doc' || ext === 'docx') return 'docx';
   return 'text';
 }
 
 async function renderDataSources() {
   const el = document.getElementById('data-sources-content');
   if (!el) return;
+  const knowledgeAccept = typeof AttachmentHandler !== 'undefined'
+    ? AttachmentHandler.knowledgeAcceptAttr() : '';
+  const knowledgeTypes = knowledgeAccept.split(',').filter(Boolean)
+    .map(x => x.replace(/^\./, '')).join(' · ');
   const connectCard = (icon, name, note) => `
     <div class="ds-connect">
       <div class="ds-connect-top"><span class="ds-connect-icon">${icon}</span><span class="ds-connect-name">${name}</span></div>
@@ -5589,10 +6096,10 @@ async function renderDataSources() {
         <label class="btn btn-outline btn-sm" style="cursor:pointer">
           ＋ Upload a file
           <input type="file" id="kn-file" style="display:none"
-            accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx"
+            accept="${_escAdvisor(knowledgeAccept)}"
             onchange="uploadKnowledgeFile(this)">
         </label>
-        <span style="font-size:var(--fs-sm);color:var(--text-muted)">txt · md · csv · json · pdf · docx — uploads use the visibility selected above.</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${_escAdvisor(knowledgeTypes)} — uploads use the visibility selected above. Other documents can be attached in a conversation.</span>
       </div>
       <div id="kn-result" style="font-size:var(--fs);margin-top:0.6rem"></div>
     </div>
@@ -5694,10 +6201,8 @@ async function uploadKnowledgeFile(input) {
   const visibility = document.getElementById('kn-visibility')?.value || 'private';
   if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `Reading ${file.name}…`; }
   try {
-    const parsed  = await AttachmentHandler.process(file);
-    const content = parsed.content || parsed.summary || '';
-    if (!String(content).trim()) throw new Error('Could not read any text from that file.');
-    await _postKnowledge({ format, content: String(content), sourceName: file.name, visibility }, res, 'Nothing new to add');
+    const parsed = await AttachmentHandler.processKnowledge(file);
+    await _postKnowledge({ format, content: parsed.content, sourceName: file.name, visibility }, res, 'Nothing new to add');
     input.value = '';
   } catch (err) {
     if (res) { res.style.color = 'var(--danger)'; res.textContent = err.message; }
@@ -6062,9 +6567,25 @@ async function todayAsk() {
 
    It does not retract the reply. The kernel decided, and a decision is not made wrong by the
    model being unavailable to phrase it. */
+/* ── AND IT IS SAID ONCE, NOT ONCE A TURN ─────────────────────────────────────
+   LIVE iPHONE, findings R1 #28: "if fallback is used, allow silent recovery on the next turn and
+   avoid repeatedly surfacing the full degradation banner". On a weak link several turns in a row
+   degrade, and the full paragraph under every one of them turns a temporary state into the loudest
+   thing on the screen — three explanations of the same fact, each longer than the answer it sits
+   under. A person needs telling that the voice has changed; they do not need telling three times.
+
+   So the full sentence is the FIRST one, and while it stays that way the note shrinks to a phrase.
+   It is never dropped altogether: an unmarked degraded reply is the defect this function exists to
+   remove. A normal reply resets it, which is what makes recovery silent — nothing announces that
+   the model is back, the answers simply read like themselves again. */
+let _iqDegradedShown = false;
 function iqDegradedNote(composer) {
-  if (!composer || !composer.degraded) return '';
-  return `<div class="iq-degraded" role="status">IntelliQ's normal response isn't available right now. This reply was put together from your record instead — what it says still holds, the wording is just plainer than usual.</div>`;
+  if (!composer || !composer.degraded) { _iqDegradedShown = false; return ''; }
+  const first = !_iqDegradedShown;
+  _iqDegradedShown = true;
+  return `<div class="iq-degraded" role="status">${first
+    ? "IntelliQ's normal response isn't available right now. This reply was put together from your record instead — what it says still holds, the wording is just plainer than usual."
+    : 'Still the plainer wording — what this says holds.'}</div>`;
 }
 
 function todayBubble(role, text, qa) {
@@ -6189,9 +6710,14 @@ function todayRenderProposals(j) {
   const proposals = r.primaryActions || r.proposedActions || [];
   const propHtml = proposals.map(p => {
     const priv = p.visibility === 'only_me' ? 'Private' : 'Confirm to share';
+    const share = p.actionType === 'share_to_forum';
+    const effect = p.effect || {};
+    const audience = effect.audience || {};
     return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
       <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
       ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
+      ${effect.disclosure ? `<div class="tdy-prop-why">${esc(effect.disclosure)}</div>` : ''}
+      ${share ? `<div class="tdy-prop-why">Audience: ${esc(audience.name || 'Forum')} (${esc(audience.readable)} current readers). Only these edited words will be shared; the rest of this conversation stays private. A Forum post is speech, not evidence.</div><label class="iq-field">Words to share<textarea class="iq-field-input iq-share-edit" aria-label="Words to share">${esc(effect.text || '')}</textarea></label>` : ''}
       <div class="tdy-actions" style="margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
         <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
@@ -6207,10 +6733,33 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
   const card = document.getElementById('today-prop-' + proposalId);
   if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
   try {
-    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
+    const edited = card && card.querySelector('.iq-share-edit');
+    if (edited && !edited.value.trim()) throw new Error('Share text is empty');
+    const overrides = edited ? { text: edited.value } : {};
+    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId, overrides }) });
     const d = await r.json();
+    if (r.status === 409 && d.error === 'forum_audience_changed') {
+      if (card) card.innerHTML = `<div class="tdy-settled" role="status">${_escAdvisor(d.note || 'The people who can read this room changed. Preview and confirm a fresh share.')}</div>`;
+      return;
+    }
     if (!d.ok) throw new Error('confirm failed');
     if (card) card.innerHTML = `<div class="tdy-settled">${_escAdvisor(d.note || 'Done.')}</div>`;
+    /* AND GO WHERE THE SERVER SAYS THE ACTION LANDED. The confirm response carries `forum` or
+       `navigate` for exactly this, and the conversation's own confirm handler has always honoured
+       both. This one dropped them: the same governed action, confirmed from Home instead of from
+       a conversation, settled the card saying "Posted to the forum for this" and then left the
+       person on Home with no way to see what they had just put in front of the group — no
+       check that it reads right, no way back to it. Two doors to one write behaving differently
+       is the kind of difference a person reads as the product being unreliable.
+
+       Delegated to the same owners rather than re-implemented here; `openForum` is what knows
+       how to get onto that page and draw the room. */
+    /* `typeof MemberApp`, not `window.MemberApp`: it is declared `const` at the top level of a
+       classic script, which makes it a global LEXICAL binding — reachable as a bare identifier,
+       never a property of window. A `window.` guard here reads as defensive and is simply always
+       false, which would have made this whole fix a no-op that still passed inspection. */
+    if (d.forum && typeof MemberApp !== 'undefined') MemberApp.openForum(d.forum.nodeId || '', d.forum.objectId, d.forum.room, 'inquiry');
+    else if (d.navigate && typeof MemberApp !== 'undefined') MemberApp.openObjectThread(d.navigate.kind, d.navigate.id);
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
 }
 /* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
@@ -6556,8 +7105,13 @@ async function _renderLeadInquiry() {
 
    Failure is silent by design. This is one strip on a page that already works without it;
    a group surface that cannot load should not take down the leader's home. */
-async function _renderTeamState() {
-  const box = document.getElementById('team-state');
+/* THE CONTAINER IS A PARAMETER because this strip now mounts in three places and an id can only
+   ever be in one of them. It renders on the leader's home, on the full team briefing, and — added
+   September 2026 — on THE ONE HOME every account lands on, which is the only one a coach reliably
+   reaches. Copying the renderer to do that would have been a second definition of what a group
+   card is; three call sites and one function is the whole point of the one-app rule. */
+async function _renderTeamState(containerId = 'team-state') {
+  const box = document.getElementById(containerId);
   if (!box) return;
   try {
     const mineRes = await fetch('/api/group/mine', { headers: Auth._headers() });
@@ -6621,18 +7175,55 @@ function _teamStateCard(s) {
     ? (focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : 'set by a leader')
     : '';
 
+  /* THE DOOR. This card has shown a group's High, Low, Inquiry and Focus for a while and led
+     NOWHERE -- so the group's half of the A -> B loop (its inquiries, setting a focus out of one,
+     recording what came of it) was three fully built routes with nothing a person could tap to
+     reach them. A summary that cannot be opened is a poster.
+
+     The whole card is the target rather than a chevron in the corner: on a phone the card is
+     already the size of the thing you would aim at, and a separate small control beside it is a
+     second place to miss. */
+  const open = `MemberApp.openGroupNode('${esc(s.node.nodeId)}')`;
   return `
-    <div class="tstate-card">
+    <div class="tstate-card tstate-open" role="button" tabindex="0"
+      aria-label="Open ${esc(s.node.name)}"
+      onclick="${open}"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open}}">
       <div class="tstate-head">
         <div class="tstate-name">${esc(s.node.name)}</div>
         <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
       </div>
-      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis, s.high && s.high.explained))}
+      ${/* ── THE LABELS ARE WHAT A COACH WOULD CALL THESE, NOT WHAT WE CALL THEM ─────────────
+            "High", "Low", "Inquiry" and "Focus" are the canonical object kinds and they stay the
+            canonical object kinds — every id, route, store and test still says so. What changed
+            is the four words a coach reads at 390px, because the first screen was a catalogue of
+            our ontology and a coach has no reason to learn it. The order is unchanged and each
+            line still renders only when the server sent one, so an honest silence stays an
+            honest silence rather than becoming a placeholder. */''}
+      ${line('Going well', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis, s.high && s.high.explained))}
       ${changeMind(s.high && s.high.explained)}
-      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis, s.low && s.low.explained))}
+      ${line('Worth attention', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis, s.low && s.low.explained))}
       ${changeMind(s.low && s.low.explained)}
-      ${line('Inquiry', s.question && s.question.question, s.question && s.question.contested ? 'people describe this differently' : '')}
-      ${line('Focus', focus && focus.text, focusSub)}
+      ${/* AND AN UNKNOWN SAYS IT IS AN UNKNOWN. The server now distinguishes a question somebody
+            could be asked from a statement about what the record does not establish; labelling
+            both "Inquiry" was how "one explanation has been offered, and nothing recorded
+            supports it yet" came to sit under a heading that implied somebody had been asked. */''}
+      ${line(s.question && s.question.kind === 'unknown' ? 'Still unknown' : 'Still working out',
+        s.question && s.question.question,
+        s.question && s.question.contested ? 'people describe this differently' : '')}
+      ${line('We are trying', focus && focus.text, focusSub)}
+      ${/* ── WHAT WE TRIED, AND WHAT CAME OF IT ──────────────────────────────────────────────
+            The fifth of the six things a coach should learn in ten seconds, and the card had no
+            line for it: `history` has travelled on this payload since the outcome loop closed and
+            reached the first screen nowhere. It is the half of the loop that has anything to say.
+            The outcome word is the group's own, and the line claims no cause — "after" is the
+            whole of what was recorded. */''}
+      ${(() => {
+        const last = (s.history || []).filter(f => f && f.outcome)[0];
+        if (!last) return '';
+        return line('We tried', last.text,
+          `after it: ${(MemberApp._OUTCOME_WORDS[last.outcome.result] || 'recorded').toLowerCase()}`);
+      })()}
       ${withheld}
       <div class="tstate-says">${esc(s.statement)}</div>
     </div>`;
@@ -7641,6 +8232,11 @@ const MemberApp = {
   _noteTag:     '',
   _notesFilter: 'All',
   _myGroups:    [],
+  /* Org NODES this person is in, from /api/group/mine -- {nodeId, name, role}. A separate field
+     from `_myGroups` above, which is the /api/groups message-recipient list, because they are
+     different things with different shapes and one name for both is how a selector ends up
+     rendering `undefined`. */
+  _myNodes:     [],
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
   _insights:    {},     // dedupeKey -> { headline, body, patternType } for the cards on screen
@@ -7666,6 +8262,192 @@ const MemberApp = {
     const h = { 'Content-Type': 'application/json' };
     if (Auth.token) h.Authorization = `Bearer ${Auth.token}`;
     return h;
+  },
+
+  /* ── THE ONE WAY THIS APP READS FROM THE SERVER ────────────────────────────────────────────
+     Not a second networking layer: a single honest reader that the surfaces which failed live now
+     share, so they can stop each inventing their own answer to "what just happened".
+
+     Two founder observations come straight from its absence.
+
+     "Looking at your record…", indefinitely. `_loadTopQuestion` awaited five requests with no
+     timeout and no abort. A request that never comes back leaves that line on the screen for as
+     long as somebody is willing to look at it. Nothing in the client was bounded except the
+     composer.
+
+     A failed read shown as an empty record. `_renderBucketPage` called `r.json()` without ever
+     looking at `r.ok`, so a 403 or a 500 with a JSON error body produced `{error:…}`, and
+     `(j && j.objects) || []` turned that into an empty list. The page then rendered "Nothing has
+     stood out as going well yet." — the product telling somebody their record is empty because it
+     could not read it. The founder suspected exactly this, and was right.
+
+     So this returns a DISCRIMINATED result and never a bare value. `ok` is the only shape that
+     carries data; every other outcome names itself, and a caller that ignores the difference will
+     read `undefined` rather than silently render emptiness.
+
+         { ok: true,  data }
+         { ok: false, reason: 'auth' | 'forbidden' | 'http' | 'timeout' | 'offline' | 'malformed',
+           status, message }
+
+     `reason` is a closed vocabulary, deliberately: fail closed, and never enumerate the bad cases
+     as "everything except empty". */
+  /* THE HEADERS ARE NOT THE ANSWER. An independent review found the timer was cleared the instant
+     `fetch` resolved — and `fetch` resolves on the RESPONSE HEADERS, not on the body. A server that
+     writes `HTTP/1.1 200` and `Content-Type: application/json` and then stalls mid-body leaves
+     `res.json()` awaiting bytes that never arrive, with the abort already cancelled and nothing
+     left to interrupt it. That is the ORIGINAL defect this helper exists to remove — "Looking at
+     your record…", indefinitely — reintroduced one line further down, and it is the shape a
+     dropped mobile connection actually takes, because the phone has the headers already.
+
+     So the timer spans the whole read, headers AND body, and is cleared in `finally` — once, on
+     every exit including a throw, which is the only placement that cannot be defeated by adding a
+     return. `ctrl.signal.aborted` then still distinguishes our timeout from a transport failure at
+     either stage, since a body aborted by this controller lands in the same catch. */
+  async _read(url, { timeoutMs = 12000, method = 'GET', body = null } = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      let res;
+      try {
+        res = await fetch(url, { method, headers: this._authHeaders(), signal: ctrl.signal,
+          body: body == null ? undefined : JSON.stringify(body) });
+      } catch (e) {
+        // An abort is OUR timeout; anything else at this layer never reached the server.
+        return ctrl.signal.aborted
+          ? { ok: false, reason: 'timeout', message: 'That took too long to come back.' }
+          : { ok: false, reason: 'offline', message: 'IntelliQ could not be reached.' };
+      }
+      if (res.status === 401) {
+        // The session is the app's state, not this call's. Told once, here, where the truth arrives.
+        this._sessionEnded();
+        return { ok: false, reason: 'auth', status: 401, message: 'Your session has ended.' };
+      }
+      if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403, message: 'You do not have access to this.' };
+      let data = null;
+      let bodyAborted = false;
+      try { data = await res.json(); } catch (_) { data = null; bodyAborted = ctrl.signal.aborted; }
+      // A body that never finished arriving is a TIMEOUT, not a malformed record. Calling it
+      // malformed would tell somebody the server sent nonsense when the server sent nothing yet.
+      if (bodyAborted) return { ok: false, reason: 'timeout', message: 'That took too long to come back.' };
+      if (!res.ok) {
+        /* THE SERVER'S `error` IS A CODE, NOT A SENTENCE, and it was being shown to people as
+           prose. `_readFailedHTML` renders `${message} Nothing has been lost.`, so a 404 carrying
+           `{error:'not found'}` reached the screen as:
+
+             not found Nothing has been lost.
+
+           Measured at 390px. Lower case, no punctuation, and the first thing a person reads is a
+           fragment of an API. Every other branch in this helper writes a human sentence; this one
+           laundered a machine string into the UI because it happened to be a string.
+
+           The code is KEPT on `errorCode` — it is useful to whoever is debugging and useless to
+           whoever is reading — and what is shown is written here, by status. */
+        return { ok: false, reason: 'http', status: res.status,
+          errorCode: (data && data.error) || null,
+          message: res.status === 404 ? 'That is not here any more.'
+            : res.status === 409 ? 'Something changed while you were looking at this.'
+            : res.status >= 500 ? 'IntelliQ had a problem at its end.'
+            : 'IntelliQ could not load this just now.' };
+      }
+      // A 200 that is not JSON, or JSON that is not an object, is not a record. Saying "malformed"
+      // is honest; treating it as an empty record is the defect this whole helper exists to remove.
+      if (!data || typeof data !== 'object') {
+        return { ok: false, reason: 'malformed', status: res.status, message: 'IntelliQ could not read the reply.' };
+      }
+      return { ok: true, data, status: res.status };
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  /* What a person is shown when a read fails. One sentence saying what happened, and one control
+     that does the same thing again — never several competing ones, which is what the founder saw.
+     `onRetry` is a JS expression string because these render into innerHTML like everything else
+     on these pages. */
+  _readFailedHTML(r, onRetry) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const msg = (r && r.message) || 'IntelliQ could not load this just now.';
+    // An ended session is not a connection problem, and must not offer a retry that cannot work.
+    if (r && r.reason === 'auth') {
+      return `<div class="iq-read-failed" role="alert"><p>${esc(msg)} Sign in again to carry on.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="Auth.logout()">Sign in</button></div>`;
+    }
+    return `<div class="iq-read-failed" role="alert"><p>${esc(msg)} Nothing has been lost.</p>
+      ${onRetry ? `<button type="button" class="btn btn-outline btn-sm" onclick="${onRetry}">Try again</button>` : ''}</div>`;
+  },
+
+  /* ── THE LAST WRITE WINS, AND IT MUST BE THE ONE YOU ASKED FOR ─────────────────────────────
+     The founder tapped Highs, then Lows, and got the Lows heading above "Nothing has stood out as
+     going well yet." — the Highs copy. The heading is written synchronously when a render starts;
+     the body is written when its request returns. So a slow earlier request finishing second
+     overwrites the page somebody is actually looking at.
+
+     Every render of a shared container takes a ticket first. When its request comes back it checks
+     whether it is still the current one, and if it is not, it writes nothing at all. */
+  /* PER CONTAINER, NOT PER APP. The first version of this used one counter for the whole client,
+     so any two surfaces rendering at once cancelled each other: Home claimed a ticket, the bucket
+     page claimed the next one, and Home then threw away its own answer and rendered nothing. The
+     race being guarded is between two renders of THE SAME container, so the ticket is per key. */
+  _renderSeq: {},
+  _claimRender(key = 'default') { return (this._renderSeq[key] = (this._renderSeq[key] || 0) + 1); },
+  _stillCurrent(key, ticket) { return ticket === this._renderSeq[key]; },
+
+  /* ── A CONTROL THAT CANNOT WORK MUST NOT INVITE YOU TO USE IT ──────────────────────────────
+     The founder's session had expired and the composer still accepted typing, still offered the
+     microphone, and still offered the paperclip. Everything typed into it was going to be thrown
+     away by a 401, and a voice note recorded there would have been recorded for nothing.
+
+     Every composer in the app comes from `_composerHTML`, so every composer is reached from here.
+     Idempotent: a dozen 401s in a row produce one state, not a dozen banners — which is the other
+     half of what the founder saw, several competing messages at once. */
+  _sessionOver: false,
+
+  /* EVERY WRITING SURFACE, NOT JUST THE COMPOSER. The first version of this selected
+     `.iq-composer` and stopped there, which was the shape of the app as I understood it and not
+     the shape of the app. An inventory found three more places a person can write:
+
+       .iq-composer          Home, object threads, Forum          (was covered)
+       .iq-cardthread-input  the thread inside an attention card  (was NOT)
+       .iq-attach-input      the file picker behind the paperclip (label, not disableable)
+       IQVoice sessions      a live microphone on any of them     (was NOT)
+
+     The microphone is the one that matters most. A recogniser left running delivers its final
+     result whenever it finishes, so a session that ended mid-sentence could put a transcript into
+     a composer minutes later — into a page that has no session to send it with, after the person
+     has already been told to sign in. `IQVoice.cancelAll` ends every live session, and cancel
+     rather than stop, because the text belongs to a session that is gone. */
+  _WRITE_SURFACES: ['.iq-composer', '.iq-cardthread-input'],
+
+  _sessionEnded() {
+    if (this._sessionOver) return;
+    this._sessionOver = true;
+    // Stop listening FIRST: a transcript arriving after the controls are disabled is exactly the
+    // late-write this is here to prevent.
+    try { if (window.IQVoice && IQVoice.cancelAll) IQVoice.cancelAll(); } catch (_) {}
+    this._WRITE_SURFACES.forEach(sel => {
+      document.querySelectorAll(sel).forEach(c => {
+        c.classList.add('iq-composer-off');
+        c.querySelectorAll('textarea, button, input, select').forEach(el => { el.disabled = true; });
+        // A <label> with a hidden file input is not disableable; hide the doorway instead.
+        c.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
+      });
+    });
+    document.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
+    document.querySelectorAll('.iq-voice-state').forEach(el => {
+      el.textContent = 'Your session has ended. Sign in again to carry on.';
+    });
+  },
+
+  /* THE ONE CLASSIFICATION, FOR WRITES AS WELL AS READS. `_read` already turns a 401 into the
+     terminal state; a POST that discovers the same thing must not answer it locally and leave the
+     rest of the app believing it is signed in. Callers keep their own shapes — this only makes
+     sure the app-wide consequence happens exactly once, wherever the truth arrives. */
+  _classifyWrite(res) {
+    if (!res) return { ok: false, reason: 'offline' };
+    if (res.status === 401) { this._sessionEnded(); return { ok: false, reason: 'auth', status: 401 }; }
+    if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403 };
+    if (!res.ok) return { ok: false, reason: 'http', status: res.status };
+    return { ok: true, status: res.status };
   },
 
   /* ── localStorage keys (userId-scoped) ──────────────────── */
@@ -7938,6 +8720,17 @@ const MemberApp = {
     // The unified MyWorkspace assistant surface is the primary home experience.
     try { this._renderMyWorkspace(this._wsActiveLens || 'today'); } catch (_) {}
     this._renderMeContext();
+    /* THE GROUP, ON THE HOME EVERYBODY ACTUALLY LANDS ON. `home` routes to _renderHome for every
+       account; the group card rendered only on `leader-home` and on the full team briefing, so a
+       coach opening the app saw their squad's High, Low, Inquiry and Focus nowhere — and since
+       that card is now the door to the group's half of the A -> B loop, the loop was unreachable
+       from the first screen as well as from the routes.
+
+       This is NOT the feed the founder cut from Home. That was five blocks of noticings,
+       questions, prepared items and notes competing above the fold. This is one card per group a
+       person is actually in, naming the four objects the product is about, and it is the same
+       renderer as the other two mounts rather than a copy of it. */
+    try { if (typeof _renderTeamState === 'function') _renderTeamState('home-team-state'); } catch (_) {}
   },
 
   /* Fetch and render the proactive open-state: the kernel has "already worked".
@@ -8017,7 +8810,10 @@ const MemberApp = {
       prepEl.innerHTML = html;
     }
     this._renderMeNotes();
-    this._renderGroupNoticings();
+    /* NOT CALLED HERE ANY MORE. It wrote into `#me-group`, which is `hidden` and which nothing
+       ever un-hides, so every Home render paid for /api/group/mine plus one /candidates request
+       per group in order to draw cards into a `display:none` box. The surface now lives on the
+       group's own screen -- see _renderGroupNoticings. */
   },
 
   /* ── THINGS THAT MIGHT CONCERN YOUR GROUP ─────────────────────────────────
@@ -8034,14 +8830,44 @@ const MemberApp = {
      second is yours to answer — the system does not read your sentence and decide it for you,
      and a team's Highs and Lows are built from those answers rather than from a sentiment
      model's guess about your words. */
-  async _renderGroupNoticings() {
-    const el = document.getElementById('me-group');
+  /* ── A SURFACE THAT HAD BEEN RENDERING INTO A NODE NOBODY COULD SEE ──────────────────────
+     Found this pass, in a browser, and it is the INPUT half of the group loop.
+
+     `#me-group` carries a `hidden` attribute in index.html, the stylesheet has
+     `[hidden]{display:none!important}`, and nothing in the client ever removes it. So this
+     renderer -- called on every single Home render, fetching /api/group/mine and one /candidates
+     per group each time -- wrote its cards into an element with `display:none` and
+     `offsetParent:null`. Verified in Chromium rather than argued from the source.
+
+     What that cost: offering a noticing to a group is the ONLY way a member's private observation
+     becomes material the group can reason about, and a group inquiry opens only when two
+     INDEPENDENT people have done it. With no visible control, no member could ever offer one, so
+     no group inquiry could ever open from the product. The group half of the A -> B loop was
+     unreachable from BOTH ends -- no door in at the bottom, no door in at the top.
+
+     It is not un-hidden on Home. The founder cut the five-block feed from the first screen
+     deliberately and this was part of it. It is mounted where it belongs instead: on the group's
+     own screen, scoped to THAT group, beside the inquiries it feeds. Same boundary, same words,
+     same server checks -- the card still says nobody can see it yet, and offering is still a
+     separate deliberate act. Only the place it is drawn has changed. */
+  async _renderGroupNoticings(onlyNodeId = null, containerId = 'me-group') {
+    const el = document.getElementById(containerId);
     if (!el) return;
     const esc = t => this._escape(t || '');
     try {
       const mineRes = await fetch('/api/group/mine', { headers: this._authHeaders() });
       if (!mineRes.ok) { el.innerHTML = ''; return; }
-      const groups = ((await mineRes.json()).groups || []);
+      let groups = ((await mineRes.json()).groups || []);
+      if (onlyNodeId) groups = groups.filter(g => g && String(g.nodeId) === String(onlyNodeId));
+      /* Remembered so the group screen can tell whether to DRAW a leader-only control. It is
+         never the gate: _leadsNode on the route is, and a forged call still gets 403 from it.
+
+         DELIBERATELY NOT `_myGroups`, which already exists and means something else entirely --
+         the /api/groups message-recipient list, whose rows are {id, name}. These rows are org
+         NODES, {nodeId, name, role}. Writing them into that field would have left the message
+         group selector rendering `value="undefined"` for every option, which is the two-meanings
+         -one-name failure this codebase keeps finding. */
+      this._myNodes = groups;
       if (!groups.length) { el.innerHTML = ''; return; }
 
       const blocks = (await Promise.all(groups.map(async g => {
@@ -8050,7 +8876,9 @@ const MemberApp = {
         const cands = (r && r.candidates) || [];
         if (!cands.length) return '';
         return `
-          <div class="me-section-label">Might concern ${esc(g.name)} — yours alone until you say otherwise</div>
+          <div class="me-section-label">${onlyNodeId
+            ? 'Things you said that might concern this group — yours alone until you say otherwise'
+            : `Might concern ${esc(g.name)} — yours alone until you say otherwise`}</div>
           ${cands.map(c => `
             <div class="card mg-card" id="mg-${esc(c.candidateId)}">
               <div class="me-row-text">${esc(c.label || c.concept)}</div>
@@ -9304,7 +10132,13 @@ const MemberApp = {
   openFromShelf(kind, refId) {
     // A conversation is resumed where conversations live; everything else has an object thread,
     // and openObjectThread is the same door every other surface in the app uses to reach it.
-    if (kind === 'conversation') { this.navigate('home'); return; }
+    if (kind === 'conversation') {
+      this.navigate('home');
+      // Library is an index into the LIVE conversation, not merely a shortcut to Home.
+      // Resume the referenced thread exactly as the navigation drawer does.
+      setTimeout(() => this.wsLoadConversation(refId), 60);
+      return;
+    }
     this.openObjectThread(kind === 'material' ? 'focus' : kind, refId);
   },
 
@@ -10544,21 +11378,12 @@ const MemberApp = {
       <!-- THE THING YOU AGREED TO TRY, asked when you come back. Placed INSIDE the conversation
            area's flow rather than in a sidebar, because it is IntelliQ speaking, not a widget. -->
       <div id="iq-continuity" aria-live="polite"></div>
-      <div id="iq-brief" aria-live="polite"></div>
-      ${/* THE BAR IS THE LAST THING ON THE PAGE. It used to sit inside the chat box, which put
-            it ABOVE the card — so the one control a person always needs was in the middle of
-            the screen with content underneath it. Founder: "that composer can sit at the very
-            bottom of the page". It is sticky, so it stays at the bottom of the viewport
-            whatever is above it, which is where a thumb already is. */ ''}
-      ${this._composerHTML({ id: 'iq-composer-input',
-        // Short, because on a phone the long one truncated to "Ask, capture a thought, or drop"
-        // and then stopped — an instruction cut off halfway is worse than no instruction.
-        placeholder: 'Type anything…',
-        send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
-        <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
-          title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
-        <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
-      </div>` })}`;
+      <div id="iq-brief" aria-live="polite"></div>`;
+    /* THE BAR IS NOT PART OF THIS PAGE ANY MORE. It was the last thing in this template, which
+       made it Home's — and a person on Focus, Inquiries, Highs, Lows, Library, People or Settings
+       had nothing to type into and no sign that IntelliQ was still there. It lives in the shell
+       now; see _renderShellComposer. */
+    this._renderShellComposer();
     // HOME IS ONE QUESTION. Founder decision, September 2026: greeting, the single
     // highest-priority thing IntelliQ wants to know, the logo, and the bar. Nothing else may
     // ever appear here. Everything the old home crowded in — the attention feed, the inquiry
@@ -10604,11 +11429,22 @@ const MemberApp = {
       const j = await r.json();
       const msgs = (j && j.messages) || [];
       if (!msgs.length) return;
+      /* AND THE THREAD IS STILL EMPTY NOW, not just when this started. The guard above runs
+         BEFORE the fetch, so anything written while the request was in flight was overwritten by
+         the line below — a restore of the same conversation, minus whatever the person had just
+         said. Reachable by typing quickly on a freshly opened Home, and much easier to hit since
+         asking from another page navigates Home and writes immediately.
+
+         Re-checking the live element rather than the captured `box`: a navigation during the
+         fetch replaces the container, and writing into the detached one would silently do
+         nothing. */
+      const live = document.getElementById('iq-conversation');
+      if (!live || live !== box || box.children.length) return;
       const esc = s => this._escape(String(s == null ? '' : s));
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
         : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
-            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: id })}</div>`).join('');
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech, conversationId: id })}</div>`).join('');
       box.scrollTop = box.scrollHeight;
     } catch (_) { /* a restore that fails leaves an empty thread, never an error card */ }
   },
@@ -10686,7 +11522,13 @@ const MemberApp = {
      for anyone who actually leads a node, which is a fact about the tree rather than a title.
      Settings (and billing, when there is billing) belong to whoever owns the account. */
   _NAV_EXTRA: [
-    { id: 'settings', label: 'Settings', when: () => Auth.isSuperAdmin(),
+    /* SETTINGS IS FOR EVERYONE, and what is inside it is what is gated. It used to be
+       superadmin-only, so an ordinary member had nowhere to answer "can this phone use its
+       microphone" or "which build am I running" — and the second is the question the founder
+       needed answerable while standing in front of the device. A member opening it gets THEIR
+       settings, not the organisation's: see renderSettings, where the tabs somebody may not use
+       are removed rather than greyed out. */
+    { id: 'settings', label: 'Settings', when: () => true,
       icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
   ],
 
@@ -10760,8 +11602,9 @@ const MemberApp = {
     inquiry: { title: 'Inquiries', sub: 'What IntelliQ is working out — including what it still does not know',
                empty: 'Nothing being worked out yet. Talk to IntelliQ and it will start.', make: null },
     focus:   { title: 'Focuses', sub: 'What you have deliberately chosen to work on',
-               empty: 'You are not working on anything yet. Start a focus when you want to change something.', make: 'Start a focus' },
-    // ^ the ONE thing a person creates.
+               empty: 'Nothing here yet. Tell IntelliQ what you want to work on.', make: null },
+    // Creation belongs to the Composer. Focus remains canonical underneath; the person should
+    // not have to operate a separate object-creation workflow.
     high:    { title: 'Highs', sub: 'What is going well',
                empty: 'Nothing has stood out as going well yet.', make: null },
     low:     { title: 'Lows', sub: 'What needs attention',
@@ -10773,6 +11616,9 @@ const MemberApp = {
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     const copy = this._bucketCopy[kind] || this._bucketCopy.inquiry;
+    /* AND BACK TO THE LIST PUTS THE LIST'S NAME BACK, so returning from one object does not
+       leave the bar still announcing it. */
+    try { setScreenTitle(copy.title); } catch (_) {}
 
     // The page shell's heading is static markup, so it is corrected here on every render.
     const shell = document.querySelector('#page-inquiry .page-header');
@@ -10782,11 +11628,24 @@ const MemberApp = {
     if (h) h.textContent = copy.title;
     if (hs) hs.textContent = copy.sub;
 
+    const ticket = this._claimRender('bucket');
     box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
     // SELF AND TEAM, one list, ranked together — the client asked only for scope=self, so every
     // team object was computed and unreachable, and a coach opened this and saw nothing.
-    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const list = (j && j.objects) || [];
+    const r = await this._read(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`);
+    /* THE PAGE MAY HAVE MOVED ON. Tapping Highs and then Lows used to leave whichever request
+       finished last in the container, under the heading of whichever was tapped last — the
+       founder read the Lows heading above the Highs empty line. */
+    if (!this._stillCurrent('bucket', ticket)) return;
+    /* AND A FAILED READ IS NOT AN EMPTY RECORD. This used to be `(j && j.objects) || []`, over a
+       `r.json()` that never checked `r.ok`, so every refusal and every server error became an
+       empty list and then the empty state. Telling somebody nothing has stood out for them when
+       the truth is that IntelliQ could not read their record is the worst kind of quiet. */
+    if (!r.ok) {
+      box.innerHTML = this._readFailedHTML(r, `MemberApp._renderBucketPage('${esc(kind)}')`);
+      return;
+    }
+    const list = Array.isArray(r.data.objects) ? r.data.objects : [];
 
     const make = copy.make
       ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}',undefined,this)">${esc(copy.make)}</button>`
@@ -10819,6 +11678,9 @@ const MemberApp = {
         : '') +
       (parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(i => this._objectCard(i, kind)).join('')}</div>` : '');
     if (kind === 'low') this._renderWaiting();
+    // Coming BACK from a thread to the list: the thread's own composer has just been replaced by
+    // this list, so the shell composer takes the surface again.
+    this._renderShellComposer();
   },
 
   /* ── WAITING ON YOU ───────────────────────────────────────────────────────────────────────
@@ -11080,34 +11942,35 @@ const MemberApp = {
        in a way worth interrupting you for" — and the ordinary top-of-record card below stands
        unchanged. A failed request is NOT an empty desk and must not silently become one, so only
        a well-formed answer with items takes this path. */
-    let att = null;
-    try {
-      att = await fetch('/api/me/attention', { headers: this._authHeaders() })
-        .then(r => (r.ok ? r.json() : null));
-    } catch (_) { att = null; }
-    if (att && att.ok && Array.isArray(att.items) && att.items.length) {
-      return this._renderAttention(att.items);
+    /* BOUNDED, because the founder watched this line for as long as they were willing to. Every
+       request here used to be an unbounded `await fetch`, so one that never came back left
+       "Looking at your record…" on the screen permanently — no timeout, no abort, no way out
+       except reloading the page. `_read` gives up and says so. */
+    const ticket = this._claimRender('brief');
+    // A shorter bound than the default: this is the first thing a person looks at, and the
+    // founder looked at it for a very long time.
+    const att = await this._read('/api/me/attention', { timeoutMs: 8000 });
+    if (!this._stillCurrent('brief', ticket)) return;
+    if (att.ok && att.data.ok && Array.isArray(att.data.items) && att.data.items.length) {
+      return this._renderAttention(att.data.items);
     }
 
     let all = [];
     let failures = 0;
-    const results = await Promise.all(kinds.map(k =>
-      fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null)));
-    for (const j of results) {
-      // A null is a request that did not come back, NOT a kind with nothing in it. The
+    let lastFailure = null;
+    const results = await Promise.all(kinds.map(k => this._read(`/api/objects?kind=${k}&scope=all`, { timeoutMs: 8000 })));
+    if (!this._stillCurrent('brief', ticket)) return;
+    for (const r of results) {
+      // A failed read is a request that did not come back, NOT a kind with nothing in it. The
       // difference is the whole point of this function.
-      if (!j || !Array.isArray(j.objects)) { failures++; continue; }
-      all = all.concat(j.objects.filter(o => !o.parked));
+      if (!r.ok || !Array.isArray(r.data.objects)) { failures++; lastFailure = lastFailure || (r.ok ? null : r); continue; }
+      all = all.concat(r.data.objects.filter(o => !o.parked));
     }
 
     if (failures === kinds.length) {
-      box.innerHTML = `<div class="iq-home-failed" role="alert">
-        <p>Your record could not be loaded just now. This is a connection problem, not an empty record —
-        nothing has been lost.</p>
-        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadTopQuestion()">Try again</button>
-      </div>`;
+      box.innerHTML = this._readFailedHTML(
+        lastFailure || { message: 'Your record could not be loaded just now.' },
+        'MemberApp._loadTopQuestion()');
       return;
     }
 
@@ -11316,7 +12179,9 @@ const MemberApp = {
        `node_forum` is a different act on a different surface: a focus is a commitment somebody
        keeps, not a deliberation. */
     const ENFORCED = ['self', 'node_leaders'];
-    const list = all.filter(a => ENFORCED.includes(a.kind));
+    // Never present an empty recipient set as a sharing choice.
+    const list = all.filter(a => ENFORCED.includes(a.kind) &&
+      (a.kind === 'self' || (Number.isFinite(a.reaches) && a.reaches > 0)));
     if (!list.length) { box.innerHTML = ''; return; }
     this._audiences = this._audiences || {};
     this._audiences[id] = list;
@@ -11339,7 +12204,9 @@ const MemberApp = {
            A group genuinely named "Squad 1" still reads correctly, because the count is now
            parenthesised and carries its own noun. */
         Number.isFinite(a.reaches) && a.kind !== 'self'
-          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}</div>`;
+          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}
+      <button type="button" class="iq-make-chip" id="${esc(id)}-aud-people"
+        onclick="MemberApp._pickNamedPeople('${esc(id)}')">Choose specific people</button></div>`;
     this._pickAudience(id, 0);
   },
 
@@ -11353,6 +12220,10 @@ const MemberApp = {
       const b = document.getElementById(`${id}-aud-${n}`);
       if (b) b.classList.toggle('is-on', n === i);
     });
+    const people = document.getElementById(id + '-people');
+    if (people) { people.hidden = true; people.querySelectorAll('.iq-contact.is-on').forEach(b => b.classList.remove('is-on')); }
+    const named = document.getElementById(id + '-aud-people');
+    if (named) named.classList.remove('is-on');
     const badge = document.getElementById(id + '-badge');
     if (badge) badge.textContent = chosen.label;
     const who = document.getElementById(id + '-who');
@@ -11363,6 +12234,37 @@ const MemberApp = {
         ? ` Right now that is ${chosen.reaches} ${chosen.reaches === 1 ? 'person' : 'people'}.` : '';
       who.textContent = `${chosen.explanation || ''}${reach}`;
     }
+  },
+
+  /* Contacts are exact invitees, not a wider node audience. The writer revalidates them. */
+  async _pickNamedPeople(id) {
+    const box = document.getElementById(id + '-people');
+    if (!box) return;
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = { kind: 'named_people' };
+    ((this._audiences || {})[id] || []).forEach((_, n) => {
+      const b = document.getElementById(`${id}-aud-${n}`);
+      if (b) b.classList.remove('is-on');
+    });
+    const named = document.getElementById(id + '-aud-people');
+    if (named) named.classList.add('is-on');
+    box.hidden = false;
+    const badge = document.getElementById(id + '-badge');
+    if (badge) badge.textContent = 'Specific people';
+    this._focusPeopleSummary(id);
+    await this._loadContacts(id, box);
+    this._focusPeopleSummary(id);
+  },
+
+  _focusPeopleSummary(id) {
+    const box = document.getElementById(id + '-people');
+    const who = document.getElementById(id + '-who');
+    if (!box || !who) return;
+    const names = [...box.querySelectorAll('.iq-contact.is-on .iq-contact-name')]
+      .map(n => n.textContent.trim()).filter(Boolean);
+    who.textContent = names.length
+      ? `Only you and ${names.join(', ')} can read this Focus. Your private conversation does not travel with it.`
+      : 'Select at least one person. Nobody else can read this Focus until you confirm.';
   },
 
   /* `_focusVis` lived here. It toggled three hard-coded chips — Just me / With people / My whole
@@ -11394,7 +12296,182 @@ const MemberApp = {
     }
   },
 
-  _toggleContact(btn) { btn.classList.toggle('is-on'); },
+  _toggleContact(btn) {
+    btn.classList.toggle('is-on');
+    const card = btn.closest('.iq-focusprop');
+    if (card) this._focusPeopleSummary(card.id);
+  },
+
+  /* ── WHO CAN SEE THIS — the door for POST /api/me/objects/:kind/:id/audience ─────────────────
+     Three of the four kinds had no way to answer this at all: a High, a Low and a personal
+     Inquiry were private with no control anywhere, so the one thing the product most wants a
+     member to do — let their coach see what they have noticed about themselves — could not be
+     done. A Focus could, through a different sheet, and that sheet's contact picker is reused
+     here rather than copied: two pickers is how two ideas of "who can I reach" come to exist.
+
+     THE SERVER DECIDES AND THIS REPORTS IT. Nothing here computes an audience; it collects a
+     choice, sends it, and prints the sentence that comes back. A refusal — naming somebody out of
+     reach, or trying to re-aim an object that is not yours — is shown in the server's own words,
+     because a second explanation written here would be a second copy of the rule. */
+  async openAudience(kind, objectId) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const box = document.getElementById('iqt-related') || document.getElementById('iq-object-turns');
+    if (!box) return;
+    const id = 'iq-aud-sheet';
+    /* ONE EDITOR, HOWEVER MANY TIMES THEY TAP. LIVE iPHONE BLOCKER (findings R1 #8): the founder's
+       screenshot showed this rendered three times in one scroll — three "WHO CAN SEE THIS"
+       headings, three sets of visibility choices, three Save/Cancel pairs.
+
+       `insertAdjacentHTML` appends, and the id below is fixed, so every tap added another editor
+       carrying the SAME id. That is worse than untidy: `getElementById` returns the first match,
+       so Save read the oldest editor while the person was choosing in the newest one, and the
+       sheet they were looking at was not the sheet that would be saved.
+
+       Removing any existing one before inserting makes repeated taps idempotent and leaves the
+       editor showing the object just tapped. The Focus panel next door already works this way and
+       says why: never two panels. */
+    const _open = document.getElementById(id);
+    if (_open) _open.remove();
+    box.insertAdjacentHTML('beforebegin', `
+      <div class="iq-focusprop" id="${id}" role="group" aria-label="Who can see this">
+        <div class="iq-focus-label">Who can see this</div>
+        <div class="iq-fp-aud">
+          <button type="button" class="iq-make-chip is-on" data-mode="self"
+            onclick="MemberApp._audMode('${id}','self',this)">Only me</button>
+          <button type="button" class="iq-make-chip" data-mode="node_leaders"
+            onclick="MemberApp._audMode('${id}','node_leaders',this)">Whoever leads a group I am in</button>
+          <button type="button" class="iq-make-chip" data-mode="named_people"
+            onclick="MemberApp._audMode('${id}','named_people',this)">People I choose</button>
+          ${/* AND A GROUP YOU ARE IN — findings R1 #33. The canonical resolver has taken a
+                `groupId` since it was written: it checks membership, expands the roster and
+                filters it through the same contact set a named-person share goes through, and the
+                audience route hands it the body. There was simply no control that said so, which
+                is the vertical slice law on an audience the product already supports.
+
+                It is offered only when there IS one that reaches somebody — the server answers
+                that, on the same route that answers who you can address, because a group whose
+                roster resolves to nobody would save as private and the chip would be a control
+                that quietly does the opposite of what it says. */''}
+          <button type="button" class="iq-make-chip" data-mode="group" hidden id="${id}-groupchip"
+            onclick="MemberApp._audMode('${id}','group',this)">A group I am in</button>
+        </div>
+        <div class="iq-focus-people" id="${id}-people" hidden></div>
+        <div class="iq-focus-people" id="${id}-groups" hidden></div>
+        <div class="iq-focus-who" id="${id}-who" role="status" aria-live="polite">Only you can see this.</div>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn-primary btn-sm"
+            onclick="MemberApp._saveAudience('${id}','${esc(kind)}','${esc(objectId)}')">Save</button>
+          <button type="button" class="btn-ghost btn-sm"
+            onclick="(function(e){e&&e.remove();})(document.getElementById('${id}'))">Cancel</button>
+        </div>
+      </div>`);
+    this._audMode(id, 'self', document.querySelector(`#${id} [data-mode="self"]`));
+    /* THE GROUP CHIP APPEARS ONLY IF THERE IS ONE. Asked of the server, which owns the answer, and
+       asked once per sheet rather than every time the mode changes. A chip that opens onto "you
+       are not in a group with anybody yet" is a control offering a capability this person does not
+       have — the mirror of the defect this whole round keeps finding, and just as misleading. */
+    try {
+      const j = await fetch('/api/contacts', { headers: this._authHeaders() }).then(r => r.json());
+      const chip = document.getElementById(`${id}-groupchip`);
+      if (chip && j && Array.isArray(j.groups) && j.groups.length) chip.hidden = false;
+    } catch (_) { /* no chip, which is the safe direction */ }
+  },
+
+  _audMode(id, mode, btn) {
+    this._audModes = this._audModes || {};
+    this._audModes[id] = mode;
+    const sheet = document.getElementById(id);
+    if (!sheet) return;
+    sheet.querySelectorAll('.iq-fp-aud .iq-make-chip').forEach(b => b.classList.remove('is-on'));
+    if (btn) btn.classList.add('is-on');
+    const people = document.getElementById(id + '-people');
+    const groups = document.getElementById(id + '-groups');
+    const who = document.getElementById(id + '-who');
+    if (people) {
+      people.hidden = mode !== 'named_people';
+      if (mode === 'named_people') this._loadContacts(id, people);
+    }
+    if (groups) {
+      groups.hidden = mode !== 'group';
+      if (mode === 'group') this._loadAudienceGroups(id, groups);
+    }
+    if (who) {
+      who.textContent = mode === 'self' ? 'Only you can see this.'
+        : mode === 'node_leaders' ? 'Whoever leads a group you are in will be able to see this. Your squad will not.'
+        : mode === 'group' ? 'Everybody in the group you choose will be able to see this.'
+        : 'Only the people you choose will be able to see this.';
+    }
+  },
+
+  /* THE GROUPS THE SERVER SAYS THIS PERSON CAN ADDRESS, from the same route that answers who they
+     can address — see GET /api/contacts. Nothing is computed here: a roster assembled in a browser
+     is a second answer to a question the audience resolver already owns, and the two would
+     eventually disagree about who a share reaches. The chip that opens this stays hidden until the
+     answer arrives, so a person is never offered a choice with nothing behind it. */
+  async _loadAudienceGroups(id, box) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div class="iq-focus-who">Loading…</div>`;
+    try {
+      const j = await fetch('/api/contacts', { headers: this._authHeaders() }).then(r => r.json());
+      const list = (j && j.groups) || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="iq-focus-who">You are not in a group with anybody yet.</div>`;
+        return;
+      }
+      box.innerHTML = list.map(g => `
+        <button type="button" class="iq-contact" data-gid="${esc(g.id)}"
+          onclick="MemberApp._pickAudienceGroup(this)">
+          <span class="iq-contact-name">${esc(g.name)}</span>
+          <span class="iq-contact-with">${esc(String(g.people))} ${g.people === 1 ? 'person' : 'people'}</span>
+        </button>`).join('');
+    } catch (_) {
+      box.innerHTML = `<div class="iq-focus-who">Could not load your groups just now.</div>`;
+    }
+  },
+
+  /* ONE GROUP, NOT SEVERAL. Two groups is two audiences, and the resolver answers for one roster;
+     letting somebody tick both would quietly union them into a set neither group's name describes. */
+  _pickAudienceGroup(btn) {
+    const box = btn.parentElement;
+    if (box) box.querySelectorAll('.iq-contact').forEach(b => b.classList.remove('is-on'));
+    btn.classList.add('is-on');
+  },
+
+  async _saveAudience(id, kind, objectId) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const who = document.getElementById(id + '-who');
+    const tell = m => { if (who) who.textContent = m; };
+    const mode = (this._audModes || {})[id] || 'self';
+    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    const pickedGroup = (document.querySelector(`#${id}-groups .iq-contact.is-on`) || {}).dataset;
+    if (mode === 'named_people' && !picked.length) { tell('Choose at least one person, or switch back to Only me.'); return; }
+    if (mode === 'group' && !(pickedGroup && pickedGroup.gid)) { tell('Choose a group, or switch back to Only me.'); return; }
+    tell('Saving…');
+    try {
+      /* `share: true` is how this client has always asked for "whoever leads a group I am in" —
+         see the focus sheet. Writing the visibility string here instead would be a second way to
+         say the same thing, which is the exact shape library-door-smoke L3b exists to forbid: a
+         quieter rule beside the governed audiences. The server's resolver owns the mapping. */
+      /* A GROUP IS SENT AS A GROUP, not as the roster this browser thinks it holds. The resolver
+         expands `groupId` itself, against the membership as it stands at the moment of the write —
+         so a person who joined or left since this sheet opened is included or excluded correctly,
+         and there is one definition of who a group is. */
+      const body = mode === 'named_people' ? { participants: picked, share: false }
+        : mode === 'group' ? { groupId: pickedGroup.gid, share: false }
+        : mode === 'node_leaders' ? { share: true, participants: [] }
+        : { share: false, participants: [] };
+      const r = await fetch(`/api/me/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/audience`,
+        { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) { tell((j && j.error) || `That did not save — the server said ${r.status}.`); return; }
+      tell(j.note || 'Saved.');
+      // The Forum appears or disappears with the audience, so the thread is re-read rather than
+      // patched here — the server is the one that knows whether there is a room now.
+      setTimeout(() => this.openObjectThread(kind, objectId), 900);
+    } catch (e) {
+      tell(`That did not save — ${(e && e.message) || 'unknown problem'}.`);
+    }
+  },
 
   _cancelFocus(id) {
     const f = document.getElementById(id);
@@ -11408,15 +12485,16 @@ const MemberApp = {
     const tell = m => { if (said) said.textContent = m; };
     const text = String((t && t.value) || '').trim();
     if (!text) { tell('Say what you want to work on first.'); if (t) t.focus(); return; }
-    const mode = (this._focusMode || {})[id] || 'private';
+    const mode = (this._focusMode || {})[id] || { kind: 'self' };
+    const kind = mode.kind || 'self';
     const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
-    if (mode === 'with' && !picked.length) { tell('Pick who this is with, or choose "Just me".'); return; }
+    if (kind === 'named_people' && !picked.length) { tell('Choose at least one person, or switch back to Only me.'); return; }
     tell('Making it…');
     try {
       const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
       const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
       const body = { text, target, reviewOn,
-        share: mode === 'shared', participants: mode === 'with' ? picked : [] };
+        share: kind === 'node_leaders', participants: kind === 'named_people' ? picked : [] };
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
       /* A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS. This path printed "Authentication
          required" over a filled-in form and left the person to retype it. The draft is kept
@@ -11454,18 +12532,32 @@ const MemberApp = {
     const title = String(sum.title || x.headline || 'Working it out').replace(/\s*\.\s*$/, '');
     const rawClaim = String(sum.thinking || x.claim || '');
     const same = rawClaim.replace(/\s*\.\s*$/, '').trim().toLowerCase() === title.trim().toLowerCase();
-    const claim = same ? '' : rawClaim;
+    /* AND THE SAME CONTRADICTION THE THREAD HAD, findings R1 #37. With no admitted read the
+       fallback above is the voice layer's "I don't have a read on this yet", and the card then
+       prints "Someone suggested: ..." directly underneath it. Three states exist upstream — no
+       read, a candidate nobody supports, an admitted read — and this line flattened the first two
+       into the first. Where a candidate exists it says the state itself, so the denial goes. */
+    const claim = (same || (!sum.thinking && sum.possibleExplanation)) ? '' : rawClaim;
     const open = () => `MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')`;
-    // A thread others were invited into carries a forum. A private one does not, and the icon
-    // is how a person tells the difference at a glance.
-    const shared = item.shared === true || (Array.isArray(item.participants) && item.participants.length > 1);
+    /* WHETHER THIS ONE HAS A ROOM IS THE SERVER'S ANSWER, from the same owner the object's own
+       screen asks. It used to be decided here — `item.shared === true || participants.length > 1`
+       — and neither field is in this payload, so the indicator was a fourth availability rule
+       that could never be true and a person scanning their list could not tell which of these
+       threads had anybody in them. */
+    const shared = item.forumAvailable === true;
     return `
       <article class="iq-inq" role="button" tabindex="0" onclick="${open()}"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open()}}">
         <div class="iq-inq-head">
           <span class="iq-inq-topic">${esc(title)}</span>
-          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
-          ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
+          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
+          ${/* THE SAME GLYPH AS THE CONTROL ON THE OBJECT'S OWN SCREEN, not the word "Forum".
+                One decision, one icon, one meaning: a text badge in a card header competes with
+                the object's title for the line a phone gives you and reads as a category rather
+                than as "there are people in here". This is an indicator and not a button — the
+                whole card is already the control that opens the thread — so it carries its
+                meaning accessibly and takes no tap target of its own. */''}
+          ${shared ? `<span class="iq-inq-forum" role="img" aria-label="Others can discuss this" title="Others can discuss this"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>` : ''}
         </div>
         ${item.whose && item.whose !== 'you'
           // WHOSE IS THIS. One list holds a person's own and their squad's, ranked together, so
@@ -11474,6 +12566,13 @@ const MemberApp = {
           // the thread-binding key and would break every object thread if written over.
           ? `<div class="iq-inq-about">${esc(item.whose)}</div>` : ''}
         ${claim ? `<p class="iq-inq-hyp">${esc(claim)}</p>` : ''}
+        ${/* A CANDIDATE EXPLANATION IS NOT DROPPED AND IS NOT PROMOTED. The card puts `thinking`
+              directly under the band badge, so the server now withholds an unevidenced
+              hypothesis from that field — and the honest thing to do with it is to say it, once,
+              with what it actually rests on attached. Silence here would have been the other
+              failure: a coach whose squad has offered a theory would see no sign of it. */''}
+        ${sum.possibleExplanation ? `<p class="iq-inq-maybe">Someone suggested: ${esc(sum.possibleExplanation.statement)}<span class="iq-inq-maybe-w">${
+          sum.possibleExplanation.supportedBy ? 'Something supports this' : 'Nothing supports this yet'}</span></p>` : ''}
         ${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}
         ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}</div>` : ''}
         ${item.parkedBecause ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Set aside</span> ${esc(item.parkedBecause)}</div>` : ''}
@@ -11495,7 +12594,46 @@ const MemberApp = {
      Returning to a thread you have already spoken in does NOT replay the opening. You pick the
      conversation back up, with one quiet link if you want to re-read what it thinks. Being told
      the same paragraph every time is how a product teaches you to scroll past it. */
-  async openObjectThread(kind, objectId) {
+  /* THE SCOPE TRAVELS WITH THE OBJECT. A group's High, Low, Inquiry or Focus lives in the
+     `group:<nodeId>` bucket, not in `self` -- so opening one with the hard-coded `scope=self` this
+     used to send was a 404 for everybody including its own leader, and the group screen therefore
+     had nothing to open into. Every surface the thread fills (material, chart, reading,
+     connections) resolves its object through the same bucket, so the scope has to reach all of
+     them or the thread opens and its contents quietly do not.
+
+     It is NOT an access claim. `_objectBucket` decides what is in a scope, and a person asking for
+     a group they are not in gets an empty bucket and a 404 -- the same answer a stranger gets, so
+     asking reveals nothing. */
+  /* ── OPEN ONE OF THIS PERSON'S OTHER CHATS ABOUT THIS OBJECT ──────────────────────────────
+     Reads the conversation through `/api/assistant/conversations/:id`, the route that already
+     owns and gates a transcript, and paints its turns into the thread that is already on screen.
+     Nothing is copied and no second store is consulted: the object's opening, chart, material and
+     verdicts all belong to the object and are unchanged by which chat you are reading.
+
+     The route is self-scoped on the server, so a chosen id that is not this reader's own answers
+     404 and the thread simply says so rather than rendering somebody else's words. */
+  async openObjectConversation(kind, objectId, conversationId) {
+    try {
+      const r = await fetch('/api/assistant/conversations/' + encodeURIComponent(conversationId),
+        { headers: Auth._headers() });
+      if (!r.ok) throw new Error('That conversation is not available.');
+      const d = await r.json();
+      const turns = document.getElementById('iq-object-turns');
+      if (turns) {
+        turns.innerHTML = (d.messages || []).map(m => this._threadTurn(m)).join('');
+        turns.scrollTop = turns.scrollHeight;
+      }
+      this._objectConversationId = conversationId;
+      document.querySelectorAll('.iqt-conv').forEach(b => {
+        const mine = b.getAttribute('onclick') || '';
+        const isIt = mine.includes(`'${conversationId}'`);
+        b.classList.toggle('is-current', isIt);
+        if (isIt) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+      });
+    } catch (err) { showToast(err.message, 'error'); }
+  },
+
+  async openObjectThread(kind, objectId, scope = 'self') {
     // The thread renders into the bucket page's container, which does not exist on Home — so
     // tapping the card on Home silently did nothing. Navigate there first, then render.
     let box = document.getElementById('iq-inquiries-page');
@@ -11510,13 +12648,28 @@ const MemberApp = {
     // thread stacked two titles and two subtitles on top of the thing you tapped.
     const shell = document.querySelector('#page-inquiry .page-header');
     if (shell) shell.setAttribute('hidden', '');
+    const ticket = this._claimRender('bucket');
     try {
-      const response = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`, { headers: this._authHeaders() });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error('not found');
+      /* BOUNDED AND DISCRIMINATED. This used to be an unbounded fetch inside a try/catch whose
+         only answer was "This could not be opened right now." — no retry, no way back, and no
+         difference between an ended session, a refusal, a server error and a bug in the render
+         below. The founder hit that wall on Highs, on Lows and on Inquiries. */
+      const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=${encodeURIComponent(scope)}`);
+      if (!this._stillCurrent('bucket', ticket)) return;
+      if (!r.ok || !r.data.ok) {
+        box.innerHTML = this._readFailedHTML(r.ok ? { message: 'IntelliQ could not open this.' } : r,
+          `MemberApp.openObjectThread('${esc(kind)}','${esc(objectId)}')`)
+          + `<button type="button" class="btn btn-outline btn-sm" style="margin-top:0.5rem"
+               onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back to ${esc((this._bucketCopy[kind] || {}).title || 'the list')}</button>`;
+        return;
+      }
+      const data = r.data;
       const x = data.opening || {};
       const p = data.present || {}; const sum = p.summary || {}; const det = p.detail || {};
-      this._inquiryThread = { kind, objectId, about: data.about, conversationId: data.conversation && data.conversation.id };
+      /* `scope` TRAVELS WITH THE THREAD. Which vocabulary a Focus outcome is offered in depends
+         on whether it belongs to a node, and the only reader that knows is the one that opened
+         it. Guessing it later from the object id is how two surfaces come to disagree. */
+      this._inquiryThread = { kind, objectId, scope, about: data.about, conversationId: data.conversation && data.conversation.id };
 
       const turns = (data.messages || []);
       const returning = turns.length > 0;
@@ -11529,13 +12682,84 @@ const MemberApp = {
         ? `<p class="iqt-p iqt-rival">It could also be that ${esc(this._lowerFirst(rival.statement))}${rival.standing ? ` — though that is only ${esc(String(rival.standing).toLowerCase())} so far` : ''}.</p>`
         : '';
 
+      /* ── WHAT SOMEBODY SUGGESTED, AT ITS OWN STANDING ──────────────────────────────────────
+         The server withholds an unevidenced hypothesis from `thinking`, because `thinking` is
+         rendered directly under the band badge. It travels as `possibleExplanation` instead, and
+         dropping it here would be the opposite failure: a coach whose squad has offered a theory
+         would see no sign of it on the one screen about that question. */
+      const maybe = sum.possibleExplanation;
+      const maybeLine = maybe && maybe.statement
+        ? `<p class="iqt-p iqt-maybe">Someone suggested it is because ${esc(this._lowerFirst(maybe.statement))} — ${
+            maybe.supportedBy ? 'something supports that' : 'nothing on the record supports that yet'}.</p>`
+        : '';
+
+      /* ── WHAT WE TRIED, AND WHAT CAME OF IT ────────────────────────────────────────────────
+         The action half of this question, on the question's own screen. It is scoped to THIS
+         inquiry by the origin a group Focus has recorded since the origin field existed, so it
+         cannot pick up what the group did about something else. The outcome word is the group's
+         own and the sentence claims no cause — "after it" is the whole of what was recorded.
+
+         Rendered only when there IS something. A "what we tried" heading over an empty list is a
+         schema showing through, and this screen already had three of those. */
+      const tried = (data.triedBefore || []).filter(t => t && t.text).slice(0, 2);
+      // Which focuses the opening has already named, so the connections panel below can add to
+      // the story rather than repeat it. Set before _renderRelated runs.
+      this._triedShown = tried.map(t => t.focusId).filter(Boolean);
+      const triedLine = tried.length ? `
+        <div class="iqt-tried">
+          <div class="iqt-tried-h">What we have tried about this</div>
+          ${tried.map(t => `<div class="iqt-tried-r"><span class="iqt-tried-t">${esc(t.text)}</span><span class="iqt-tried-o">${
+            t.outcome ? `after it: ${esc((this._OUTCOME_WORDS[t.outcome] || 'recorded').toLowerCase())}`
+              : (t.status === 'active' ? 'still running' : 'nothing recorded yet')}</span></div>`).join('')}
+          <div class="iqt-tried-n">What was recorded after each one. Nothing here says a focus caused
+            what followed it.</div>
+        </div>` : '';
+
+      /* ── AND WHETHER THERE IS ENOUGH TO TRY ANYTHING ───────────────────────────────────────
+         The server's answer in the server's words. Three states, no ranking and no score. "Not
+         enough evidence yet" is the commonest one and is printed as plainly as the others. */
+      const ready = data.readiness;
+      const readyLine = ready && ready.state ? `
+        <p class="iqt-p iqt-ready">${esc(
+          ready.state === 'worth_testing' ? 'There may be something here worth trying.'
+          : ready.state === 'gather_information' ? 'Worth learning more before trying anything.'
+          : 'Not enough evidence yet to suggest anything worth trying.')}
+          <span class="iqt-ready-w">${esc(ready.because || '')}</span></p>` : '';
+
+      /* ── THREE EPISTEMIC STATES, AND THE SURFACE COLLAPSED TWO OF THEM ─────────────────────
+         LIVE iPHONE, findings R1 #37. One card, in this order:
+
+             Where they are trying to get to
+             I don't have a read on this yet.
+             Someone suggested: the stated need to work harder is driven by fear of losing
+             current momentum...
+             Nothing supports this yet
+
+         The first sentence and the third contradict each other, and the reader has no way to
+         tell which one the product means.
+
+         THE STATE MACHINE WAS ALREADY RIGHT. ai/present.js keeps three states apart deliberately:
+         `thinking` is an admitted read (the kernel gave that hypothesis standing of its own),
+         `possibleExplanation` is a candidate nobody has supported, and both empty is genuinely
+         nothing. What was wrong was HERE — the lede falls back to the voice layer's no-read
+         sentence whenever `thinking` is empty, which is true in the middle state as well as the
+         last one. So the surface printed "nothing proposed" over a proposal.
+
+         The correction is subtraction, not new copy. With a candidate present, the candidate line
+         two rows down already states the state exactly — a suggestion, and nothing supporting it
+         — so the sentence denying it is simply removed. Nothing is hidden: the same words the
+         founder saw are still on the screen, minus the one that was false. */
+      const noReadLede = !sum.thinking && !!(maybe && maybe.statement);
       const opening = `
         <div class="iqt-opening">
-          <p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>
+          ${noReadLede ? '' : `<p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>`}
           ${x.provenance ? `<p class="iqt-p iqt-prov">${esc(x.provenance)}</p>` : ''}
+          ${maybeLine}
           ${rivalLine}
           ${(det.falsifiers || [])[0] ? `<p class="iqt-p iqt-falsify">What would change my mind: ${esc(det.falsifiers[0])}</p>` : ''}
           ${sum.openQuestion ? `<p class="iqt-ask">${esc(sum.openQuestion)}</p>` : ''}
+          ${readyLine}
+          ${triedLine}
         </div>`;
 
       // CHAT STYLE. The opening is IntelliQ's first message in the conversation, not a document
@@ -11544,15 +12768,15 @@ const MemberApp = {
       // entering a chat between you and IntelliQ."
       // The opening's sources are the object's own basis — what the belief is standing on.
       // Composed on every read (L-OC1) like the rest of the opening, never stored.
-      const openSources = [];
-      if (det.evidenceCount) openSources.push({ kind: 'record', label: `${det.evidenceCount} thing${det.evidenceCount === 1 ? '' : 's'} you told me`,
-        detail: this._provenanceLine(det) });
-      (det.because || []).slice(0, 3).forEach(b => openSources.push({ kind: 'belief', label: 'Why I think this', detail: b }));
-      (det.alternatives || []).slice(0, 2).forEach(a => a && a.statement && openSources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement }));
-      const openText = [sum.thinking || x.claim || '', sum.openQuestion || ''].filter(Boolean).join(' ');
+      // COMPOSED ON THE SERVER, beside the manifest that approved it — the card and the spoken
+      // rendering are two channels of one answer, and a browser assembling either of them is a
+      // second author for the same statement.
+      const openSources = data.openingSources || [];
+      const openText = data.openingText || '';
       const openingBubble = `<div class="iq-msg iq-msg-iq iqt-open-msg">${opening}
         ${this._sourcesHTML(openSources)}
-        ${this._msgActions(openText, { sources: openSources })}</div>`;
+        ${this._msgActions(openText, { sources: openSources, speech: data.openingSpeech })}
+        ${data.openingNote ? `<div class="iq-act-note" data-voice="refused">${esc(data.openingNote)}</div>` : ''}</div>`;
       // Closing and contesting are the two things a person can DO to a belief, so they sit with
       // the belief rather than inside an overflow menu nobody opens.
       const verdicts = `
@@ -11571,6 +12795,25 @@ const MemberApp = {
           <button type="button" class="iqt-verdict"
             onclick="MemberApp.beginObjectAction('keep_in_library','${esc(kind)}','${esc(objectId)}')">Keep</button>
           ${kind === 'inquiry' ? `<button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('settle_inquiry','${esc(kind)}','${esc(objectId)}')">That's settled</button>` : ''}
+          ${/* ── THE ONE VERDICT A FOCUS ACTUALLY NEEDS ─────────────────────────────────────
+                LIVE iPHONE BLOCKER, findings R1 #14. The founder reported trying an extra
+                defender and still conceding, and the Focus afterwards still showed no outcome.
+
+                `record_focus_outcome` has existed as a governed action the whole time. Its ONLY
+                door was a model proposing it — so with models off, which is the pilot's own
+                configuration, closing the loop on a commitment was a capability nobody had, and
+                with models on it depended on a model choosing to offer it. That is the vertical
+                slice law this repository keeps finding: a capability reachable from no control
+                is a capability nobody has.
+
+                A Focus is the deliberate A → B commitment, and how it went is the half of the
+                loop that has anything to say. This is the door, on the object it belongs to,
+                and only there — a High, a Low and an Inquiry have no outcome to record.
+
+                It stages the same typed request the model may propose, so the button does not own
+                the mutation and the confirmation still crosses the one dispatcher. */''}
+          ${kind === 'focus' && !det.outcome
+            ? `<button type="button" class="iqt-verdict is-do" onclick="MemberApp.beginFocusOutcome()">Record what happened</button>` : ''}
           <button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('disagree_with_inquiry','${esc(kind)}','${esc(objectId)}')">I disagree</button>
           <!-- KEEP THIS NEAR THE TOP. The personal attention override, and the only writer of it
                from a screen. It is a VERDICT, beside the others, because it is a thing a person
@@ -11593,8 +12836,13 @@ const MemberApp = {
         + `<div class="iqt-call" id="iqt-call"></div>`
         + `<div class="iqt-chart" id="iqt-chart"></div>`
         + `<div class="iqt-mat" id="iqt-mat"></div>`
-        + `<div class="iqt-reading" id="iqt-reading"></div>${verdicts}`;
+        + `<div class="iqt-reading" id="iqt-reading"></div>`
+        + `<div class="iqt-related" id="iqt-related"></div>${verdicts}`;
 
+      /* THE BAR NAMES THE KIND, not the object. The heading below already carries the object's
+         own title, and repeating it in the bar is the product saying the same thing twice; what
+         the bar can add is which of the four things this is. */
+      try { setScreenTitle({ inquiry: 'Inquiry', focus: 'Focus', high: 'High', low: 'Low' }[kind] || ''); } catch (_) {}
       box.innerHTML = `
         <div class="iq-object-thread">
           <div class="iqt-bar">
@@ -11606,21 +12854,136 @@ const MemberApp = {
           <div class="iqt-head">
             <div class="iqt-head-mid">
               <h1 class="iqt-title">${esc(title)}</h1>
-              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
+              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
+              ${/* THEIR OWN WORDS, WHOLE, UNDER THE HEADING. A Focus card used the entire raw
+                    paragraph as its title, so on a phone the heading WAS the paragraph. The
+                    heading is a lead now — the person's own opening words, never a summary,
+                    because summarising is the model's half and models are off for the pilot.
+
+                    Shown only when the lead left something out. When somebody writes a short
+                    Focus the heading already IS the whole thing, and repeating it underneath
+                    would be the product talking to itself. */ ''}
+              ${sum.full && sum.leadIsWhole === false
+                ? `<p class="iqt-said">${esc(sum.full)}</p>` : ''}
             </div>
-            ${data.forumAvailable ? `<button type="button" class="iqt-forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">Forum</button>` : ''}
+          </div>
+          <div class="iqt-doors">
+            ${/* THE TWO DOORS MOVED OUT OF THE HEADER, AND GAINED THEIR WORDS.
+
+                  The note that used to sit here argued that a text label in a header bar competes
+                  with the object's own title for the one line a phone gives you, and that is
+                  RIGHT -- it is why the label is not back in the header. What it then concluded
+                  was that the label should be carried accessibly and not visually, which helps a
+                  screen reader and nobody else: a sighted coach got two unlabelled glyphs, a tray
+                  and a pair of people, side by side, and had to guess. Driven at 390px, "what are
+                  those two icons" was the least answerable question on the screen.
+
+                  Priority R&D P2 also requires the product term Forum to be used consistently and
+                  the access point to be clear, and an unnamed glyph is not a clear access point.
+
+                  So neither the old note nor a label in the header: the doors come OUT of the
+                  header onto a row of their own, directly under the title, where there is room for
+                  words and nothing to compete with. The competition the old note identified is
+                  gone because the header is gone, not because the words are.
+
+                  Still the same inline-SVG system -- no emoji, per the repository convention --
+                  the same server-owned availability, and the same 44px target.
+
+                  AND IT NOW OPENS THE ROOM. It used to stage `discuss_with_group` into the
+                  composer, so a door labelled Forum did not go to the Forum: it wrote a sentence
+                  into the text box and waited for the person to send it, be offered a proposal,
+                  and confirm -- three steps to reach a room they were already allowed to read.
+                  Opening a room you can read is a READ. The governed confirmation exists for
+                  SAYING something into it, which is `share_to_forum` and is untouched, and for
+                  CREATING a shared Focus where no room exists yet -- which is the other half of
+                  `discuss_with_group` and is still there, still governed, and unreachable from
+                  this control because this control is only drawn when a room already exists.
+                  `forumKind` and `nodeId` come from the same server payload that decided the door
+                  should be drawn at all, so the room it opens is the room the server counted.
+
+                  `aria-pressed="false"` WAS A LIE ABOUT WHAT THIS CONTROL IS. aria-pressed makes a
+                  button a TOGGLE, and a screen reader announces it as one: "Open discussion,
+                  toggle button, not pressed". This opens a room. It has no on and no off, nothing
+                  ever sets it to true, and there is no state for it to report — so the attribute
+                  described a control that does not exist and would have had a blind user waiting
+                  for something to switch. Removed rather than corrected, because the honest value
+                  of an attribute that does not apply is its absence.
+
+                  WHETHER IT APPEARS AT ALL is the server's answer (_forumAudience), never this
+                  file's: a High, Low, Inquiry or Focus has a Forum when two or more people can
+                  CURRENTLY read it. `forumReadable` and `forumWhy` say how many and why not. */''}
+            ${data.forumAvailable ? `<button type="button" class="iqt-forum" aria-label="Open forum${
+              data.forumReadable ? ` — ${esc(String(data.forumReadable))} people can read this` : ''
+            }" title="Open forum" onclick="MemberApp.openForum('${esc(String(data.nodeId || ''))}','${esc(objectId)}','${esc(data.forumKind || 'group')}','${esc(kind)}')">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+              <span class="iqt-door-t">Forum</span>${data.forumReadable
+                ? `<span class="iqt-door-n">${esc(String(data.forumReadable))} can read this</span>` : ''}
+            </button>` : ''}
+            ${/* WHO CAN SEE THIS. A person's own object was private with no way to say otherwise
+                  for three of the four kinds, so the one thing the product most wants somebody to
+                  do — let their coach see what they have noticed about themselves — had no
+                  control anywhere. It sits beside the Forum deliberately: the room exists because
+                  of who is in it, and both answers come from the same server-side owner.
+
+                  Only on something that is YOURS. A group's High is not one person's to give
+                  away, and an object somebody shared WITH you is not yours to pass on — both are
+                  refused by the route, and offering a control that will 403 is its own small lie. */''}
+            ${(data.whoseNodeId || data.invited || (data.ownerId && data.ownerId !== (Auth.currentUser || {}).id)) ? '' : `
+              <button type="button" class="iqt-forum" aria-label="Choose who can see this"
+                title="Who can see this" onclick="MemberApp.openAudience('${esc(kind)}','${esc(objectId)}')">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="iqt-door-t">Who can see this</span>
+              </button>`}
 
           </div>
+          ${/* ── YOUR OTHER CHATS ABOUT THIS ────────────────────────────────────────────────
+                The thread opens the most recently updated conversation about this object, which
+                is the right default. It was also the whole answer: somebody who talked about
+                this in March and again in June saw only June, with nothing saying March existed
+                — the product deciding, silently, which of their own conversations they meant.
+
+                ONE LINE, AND ONLY WHEN THERE IS SOMETHING TO SAY. A person with a single chat
+                sees nothing new, which is almost everybody almost always; a switcher that is
+                always on screen is a dashboard for a problem most people do not have. Rendered
+                as plain buttons rather than a select, because a select on a phone opens a system
+                picker for what is a two-item choice.
+
+                These are THIS reader's own conversations — the server lists them from their own
+                workspace key — so two people with private chats about one shared object still
+                cannot see each other's. */''}
+          ${(data.conversations || []).length > 1 ? `
+            <div class="iqt-convs">
+              <span class="iqt-convs-l">Your chats about this</span>
+              ${(data.conversations || []).map(c => `
+                <button type="button" class="iqt-conv${c.current ? ' is-current' : ''}"
+                  ${c.current ? 'aria-current="true"' : ''}
+                  onclick="MemberApp.openObjectConversation('${esc(kind)}','${esc(objectId)}','${esc(c.id)}')">
+                  ${esc(this._ago(c.updatedAt))}<span class="iqt-conv-n">${esc(String(c.messageCount || 0))}</span>
+                </button>`).join('')}
+            </div>` : ''}
           ${body}
-          ${this._composerHTML({ id: 'iq-object-input', placeholder: 'Say what you know, or ask…',
+          ${this._composerHTML({ id: 'iq-object-input', placeholder: this._placeholderFor(kind),
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
       this._renderCallRow(objectId);
       this._renderChart(kind, objectId);
       this._renderMaterial(kind, objectId);
-      this._renderReading(kind, objectId);
-    } catch (_) {
-      box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
+      this._renderReading(kind, objectId, scope);
+      this._renderRelated(kind, objectId);
+      // This page has just grown its OWN composer, asking about this object and sending to this
+      // thread. The shell one stands down — it renders after navigation, which is before this.
+      this._renderShellComposer();
+      // …and the room below the page is measured from the bar that is actually on it. Findings
+      // R1 #22: this composer is fixed to the bottom now, so the last turn has to clear it.
+      this._watchComposerHeight('.iq-object-thread .iq-composer-wrap');
+    } catch (e) {
+      /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
+         answered for itself. Saying so, and still offering both a retry and a way back, is what
+         the single terminal line never did. */
+      box.innerHTML = this._readFailedHTML({ message: 'IntelliQ could not show this.' },
+        `MemberApp.openObjectThread('${esc(kind)}','${esc(objectId)}')`)
+        + `<button type="button" class="btn btn-outline btn-sm" style="margin-top:0.5rem"
+             onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back to ${esc((this._bucketCopy[kind] || {}).title || 'the list')}</button>`;
     }
   },
 
@@ -11716,15 +13079,587 @@ const MemberApp = {
 
      The query is built from the TOPIC, never from anything the person wrote, and the surface
      says so plainly rather than leaving somebody to wonder what was sent. */
-  async _renderReading(kind, objectId) {
+  /* ══ THE GROUP'S HALF OF THE LOOP ═════════════════════════════════════════════════════════
+     `/api/group/:nodeId/inquiry`, `/api/group/:nodeId/focus` and its `/outcome` had NO CLIENT
+     CALLER AT AL: three routes, fully built, fully governed, fully tested server-side, and
+     unreachable by anything a person could tap. `reachability-smoke` records them by name. The
+     personal loop (High/Low → Inquiry → Focus → outcome → what came after) has been walkable for
+     a while; the group's has not, which is why the A → B web was reported PARTIAL rather than
+     done. This is that doorway.
+
+     WHAT IT DOES NOT DO. It does not re-decide anything. Which claim may be surfaced, whether a
+     cohort is large enough to say it without naming anybody, whether an origin count is
+     independent, who may set a focus — all of that was settled by ai/team-state.js and the route
+     guards before a byte reached here. A refusal is RENDERED IN THE SERVER'S OWN WORDS, never
+     softened and never silently dropped, because "nothing is shown" and "something is being held
+     back, and here is why" are different facts and the second is the one a leader can act on.
+
+     AUTHORITY IS THE SERVER'S. The leader-only controls below are hidden from a member because
+     showing somebody a button that will 403 is its own small lie — but hiding is a courtesy, not
+     the gate. The gate is `_leadsNode` on the route, and a member who forges the call still gets
+     403 from it. */
+  async openGroupNode(nodeId) {
+    let box = document.getElementById('iq-inquiries-page');
+    if (!box || !box.offsetParent) {
+      try { navigate('inquiry'); } catch (_) {}
+      box = document.getElementById('iq-inquiries-page');
+    }
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.setAttribute('hidden', '');
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
+    const ticket = this._claimRender('bucket');
+
+    // Two reads, in parallel: the settled picture and the working list. They answer different
+    // questions and fail separately, so a failure in one must not blank the other.
+    const [st, inq] = await Promise.all([
+      this._read(`/api/group/${encodeURIComponent(nodeId)}/state`),
+      this._read(`/api/group/${encodeURIComponent(nodeId)}/inquiry`),
+    ]);
+    if (!this._stillCurrent('bucket', ticket)) return;
+    if (!st.ok || !st.data || !st.data.ok) {
+      box.innerHTML = this._readFailedHTML(st.ok ? { message: 'IntelliQ could not open this group.' } : st,
+        `MemberApp.openGroupNode('${esc(nodeId)}')`);
+      return;
+    }
+    const s = st.data;
+    const inquiries = (inq.ok && inq.data && inq.data.ok) ? (inq.data.inquiries || []) : [];
+    // A failed working-list read is NOT an empty working list. Said out loud rather than rendered
+    // as calm emptiness, which is the defect this whole recovery pass is named after.
+    const inqFailed = !(inq.ok && inq.data && inq.data.ok);
+    /* THE SERVER SAYS WHO LEADS. `viewer.leads` comes from `_leadsNode` -- the same function that
+       guards the write routes -- so the control that is drawn and the authority that is checked
+       can never be two different opinions. The fallback is the roster this client may happen to
+       have loaded, and it fails CLOSED to "not a leader": drawing nothing is recoverable (the
+       person is one tap from Home and can come back), drawing a control that 403s is not. */
+    const leads = s.viewer && typeof s.viewer.leads === 'boolean'
+      ? s.viewer.leads : this._leadsGroup(nodeId);
+    this._groupView = { nodeId, leads };
+
+    const focus = s.focus && s.focus.status === 'active' ? s.focus : null;
+    const history = (s.history || []).filter(f => f && f.outcome);
+
+    const row = (label, text, sub) => text ? `
+      <div class="iqg-line"><div class="iqg-label">${esc(label)}</div>
+        <div class="iqg-text">${esc(text)}${sub ? `<span class="iqg-sub">${esc(sub)}</span>` : ''}</div></div>` : '';
+
+    box.innerHTML = `
+      <div class="iq-object-thread iq-group-thread">
+        <div class="iqt-bar">
+          <button class="iqt-back" type="button" onclick="navigate('home')">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            Home
+          </button>
+        </div>
+        <div class="iqt-head">
+          <div class="iqt-head-mid">
+            <h1 class="iqt-title">${esc(s.node.name)}</h1>
+            <span class="iqg-count">${s.node.memberCount} ${s.node.memberCount === 1 ? 'person' : 'people'}</span>
+          </div>
+        </div>
+
+        <div class="iqg-state">
+          ${row('High', s.high && (s.high.claim || s.high.about))}
+          ${row('Low', s.low && (s.low.claim || s.low.about))}
+          ${row('Question', s.question && s.question.question,
+            s.question && s.question.contested ? 'people describe this differently' : '')}
+          ${row('Focus', focus && focus.text,
+            focus && focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : (focus ? 'set by a leader' : ''))}
+          ${(s.withheld || []).length ? `<div class="iqg-withheld">Not shown yet: ${
+            (s.withheld || []).map(w => esc(w.about)).join(', ')} — too few people have spoken about
+            ${(s.withheld || []).length === 1 ? 'it' : 'them'} to say so without pointing at individuals.</div>` : ''}
+          <div class="iqg-says">${esc(s.statement || '')}</div>
+        </div>
+
+        ${/* THE FOCUS AND ITS OUTCOME. The loop closes here for a group, and the outcome control
+              appears only on a focus that is actually running. `unclear` is offered with the same
+              weight as the other two, deliberately: a focus that ran alongside six other changes
+              has an honest answer, and recording it is worth more than a guess that later gets
+              counted as evidence about what works. */''}
+        ${focus ? `
+          <div class="iqg-focus">
+            <div class="iqg-focus-head">What this group is working on</div>
+            <div class="iqg-focus-text">${esc(focus.text)}</div>
+            ${leads ? `
+              <div class="iqg-focus-ask">When it has run, what happened?</div>
+              <div class="iqg-outcome-btns">
+                ${/* THE GROUP'S OWN FOUR WORDS. These were `helped, no_change, unclear` — and
+                      `helped` is the PERSONAL focus vocabulary, not this one. ai/team-state.js
+                      OUTCOME_RESULTS is better / no_change / worse / unclear, and anything else is
+                      coerced to `unclear`, so every time a coach pressed "It helped" the product
+                      recorded "too tangled to tell" and the group learned nothing from the single
+                      most valuable signal in the loop.
+
+                      `worse` was never offered at all, so a group could only ever record good news
+                      or no news. A product that cannot be told something made things worse is not
+                      keeping an honest record. */''}
+                ${['better', 'no_change', 'worse', 'unclear'].map(rkey => `
+                  <button type="button" class="btn btn-outline btn-sm"
+                    onclick="MemberApp.recordGroupOutcome('${esc(nodeId)}','${esc(focus.focusId)}','${rkey}')"
+                  >${esc(this._OUTCOME_WORDS[rkey])}</button>`).join('')}
+              </div>
+              <div class="iqg-note">Recording this is how the group learns what actually helped. It is
+                an observation about what followed, never a claim that the focus caused it.</div>`
+              : `<div class="iqg-note">A leader of this group records what came of it.</div>`}
+          </div>` : ''}
+
+        ${/* THE INPUT HALF, where it can actually be seen. This is the member's own private
+              noticings about this group -- nobody else can see them, they count toward nothing,
+              and offering one is a separate deliberate act. It is the only way a member's
+              observation becomes something the group can reason about, and it had been rendering
+              into a permanently hidden element on Home. */''}
+        <div class="iqg-mine" id="iqg-mine"></div>
+
+        <div class="iqg-inq">
+          <div class="iqg-inq-head">What the group is working out</div>
+          ${inqFailed
+            ? this._readFailedHTML(inq.ok ? { message: 'IntelliQ could not read what this group is working out.' } : inq,
+                `MemberApp.openGroupNode('${esc(nodeId)}')`)
+            : inquiries.length
+              ? inquiries.map(i => this._groupInquiryRow(nodeId, i, leads)).join('')
+              : `<div class="iqg-empty">Nothing is being worked out at this grain yet. It opens when
+                   more than one person has independently offered the same thing.</div>`}
+        </div>
+
+        ${history.length ? `
+          <div class="iqg-hist">
+            <div class="iqg-hist-head">What this group has tried</div>
+            ${history.map(f => `
+              <div class="iqg-hist-row">
+                <div class="iqg-hist-text">${esc(f.text)}</div>
+                <div class="iqg-hist-out">${esc(this._OUTCOME_WORDS[f.outcome && f.outcome.result] || 'recorded')}</div>
+              </div>`).join('')}
+            <div class="iqg-note">What was recorded after each one. Nothing here says a focus caused
+              what followed it.</div>
+          </div>` : ''}
+      </div>`;
+    // Filled in after the screen renders, so a slow answer never holds up the group itself.
+    this._renderGroupNoticings(nodeId, 'iqg-mine');
+  },
+
+  /* One group inquiry, and the only place a group Focus can be started FROM one — which is what
+     makes `origin.from === 'inquiry'` true rather than decorative. A leader who simply has an
+     idea uses the composer; that records `from: 'leader'`, and the difference is what stops
+     outcome learning crediting the system for a coach's own thinking. */
+  _groupInquiryRow(nodeId, i, leads) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    /* THE SERVER'S READING OF THE TOPIC, not this file's. `topic.label || canonicalConcept` is
+       what printed `football.attendance_timing` on a coach's phone: an inquiry whose topic was
+       never given a human label falls straight through to the machine key. `present.humanTopic`
+       already knew how to read one out loud and the row was not asking it. The canonical topic
+       still travels beside this and is unchanged; only what is drawn has. */
+    const label = i.topicLabel || (i.topic && i.topic.label) || 'Something the group is working out';
+    const explanations = [
+      ...(i.hypothesis ? [{ statement: i.hypothesis, band: (i.hypothesisStanding || {}).band || 'tentative',
+        supportedBy: (i.hypothesisStanding || {}).supportedBy || 0 }] : []),
+      ...(i.alternatives || []).map(a => ({ statement: a && a.statement, band: (a && a.band) || 'tentative', supportedBy: 0 })),
+    ].filter(e => e.statement).slice(0, 4);
+    const unknowns = (i.stillUnknown || []).filter(Boolean).slice(0, 3);
+    const wouldHelp = (i.wouldHelp || []).map(w => (w && (w.question || w.statement)) || w).filter(Boolean).slice(0, 2);
+    return `
+      <div class="iqg-inq-row" id="iqg-inq-${esc(i.inquiryId)}">
+        ${/* WHAT WE'RE SEEING. The observation, and what it rests on — origins, not voices.
+
+              AND IT IS A DOOR. Every one of a group's questions now has a thread — before this
+              pass only the one that won the ranking slot did, and the other three 404'd — so the
+              row that names a question opens it. A coach moves Home → the group → this question
+              → its own screen, which is the journey the product is about, and until now the last
+              step had nothing to step onto. */''}
+        <button type="button" class="iqg-inq-topic iqg-inq-open"
+          onclick="MemberApp.openObjectThread('inquiry','${esc(i.inquiryId)}','group:${esc(nodeId)}')"
+          aria-label="Open ${esc(label)}">${esc(label)}</button>
+        <div class="iqg-inq-meta">
+          ${i.contested ? 'People describe this differently' :
+            (typeof i.independentOrigins === 'number'
+              ? `${i.independentOrigins} separate ${i.independentOrigins === 1 ? 'account' : 'accounts'}`
+              : 'several accounts')}
+        </div>
+
+        ${/* WHAT MIGHT EXPLAIN IT — a SEPARATE section, and it must stay separate. Collapsing a
+              candidate explanation into the observation above is precisely how "we think it's
+              because…" becomes "it's because…". Each one carries its own standing, which is the
+              kernel's, and `supportedBy: 0` is the common and honest answer. */''}
+        <div class="iqg-inq-sec">
+          <div class="iqg-inq-sec-h">What might explain it</div>
+          ${explanations.length
+            ? explanations.map(e => `
+                <div class="iqg-inq-exp">
+                  <span class="iqg-inq-exp-t">${esc(e.statement)}</span>
+                  <span class="iq-inq-band iq-band-${esc(e.band)}">${esc(_CONFIDENCE_WORDS[e.band] || 'Early thinking')}</span>
+                  <span class="iqg-inq-exp-w">${e.supportedBy
+                    ? `${e.supportedBy} thing${e.supportedBy === 1 ? '' : 's'} support${e.supportedBy === 1 ? 's' : ''} this so far`
+                    : 'Nothing supports this yet'}</span>
+                </div>`).join('')
+            : `<div class="iqg-inq-none">No one has offered an explanation yet.</div>`}
+          ${/* THE DOOR. Open to anyone in the group, not only the leader — leading a group is not
+                evidence about why something happens, and `contribution.mayContribute` on the route
+                is the gate this merely reflects. */''}
+          ${i.leaderSubject ? '' : `<button type="button" class="btn btn-outline btn-sm"
+            onclick="MemberApp.startGroupExplanation('${esc(nodeId)}','${esc(i.inquiryId)}')">Suggest what might explain it</button>`}
+          ${/* WHAT THE GROUP ALREADY RULED OUT. Kept and shown, because a group that cannot see
+                what it considered and dropped will propose it again, and "we tried that and it
+                did not hold" is one of the more valuable things a group knows. The projection
+                decides what belongs here; this only draws it. */''}
+          ${(i.ruledOut || []).length ? `
+            <div class="iqg-inq-out">Ruled out by what came after:
+              ${(i.ruledOut || []).map(r => esc(r && r.statement)).filter(Boolean).join('; ')}</div>` : ''}
+        </div>
+
+        ${unknowns.length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we still don't know</div>
+            ${unknowns.map(u => `<div class="iqg-inq-open">${esc(u)}</div>`).join('')}
+          </div>` : ''}
+
+        ${wouldHelp.length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What would help us learn</div>
+            ${wouldHelp.map(w => `<div class="iqg-inq-help">${esc(w)}</div>`).join('')}
+          </div>` : ''}
+
+        ${/* WHAT WE HAVE TRIED ABOUT THIS, AND WHAT CAME OF IT. Scoped to this inquiry by the
+              server, from the origin a group Focus has always recorded. A blank outcome says
+              "nothing recorded yet", which is not the same as "it did nothing". */''}
+        ${(i.triedBefore || []).length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we have tried about this</div>
+            ${(i.triedBefore || []).map(t => `
+              <div class="iqg-inq-tried">
+                <span class="iqg-inq-tried-t">${esc(t.text)}</span>
+                <span class="iqg-inq-tried-o">${t.outcome
+                  ? esc(this._OUTCOME_WORDS[t.outcome] || t.outcome)
+                  : (t.status === 'active' ? 'still running' : 'nothing recorded yet')}</span>
+              </div>`).join('')}
+            <div class="iqg-note">What was recorded after each one. Nothing here says a focus caused
+              what followed it.</div>
+          </div>` : ''}
+
+        ${/* WHAT WOULD SHOW THIS IS WRONG. Computed since ai/diagnose.js was written and never
+              rendered anywhere a group could read it. It is the line no competitor produces. */''}
+        ${(i.falsifiers || []).length ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What would show we have this wrong</div>
+            ${(i.falsifiers || []).slice(0, 2).map(f => `<div class="iqg-inq-help">${esc(f)}</div>`).join('')}
+          </div>` : ''}
+
+        ${/* IS THERE ENOUGH TO TRY SOMETHING? The server's answer, in the server's words. Three
+              states, no ranking and no score. "Not enough evidence yet" is the commonest one and
+              is printed as plainly as the others, because a product that can only ever say "do
+              this" is not helping anybody decide anything. */''}
+        ${i.readiness ? `<div class="iqg-inq-ready iqg-ready-${esc(i.readiness.state)}">${esc(
+          i.readiness.state === 'worth_testing' ? 'There may be something here worth trying.'
+          : i.readiness.state === 'gather_information' ? 'Worth learning more before trying anything.'
+          : 'Not enough evidence yet to suggest anything worth trying.')}
+          <span class="iqg-inq-ready-w">${esc(i.readiness.because)}</span></div>` : ''}
+
+        ${/* ── WHAT WE COULD DO, AND WHAT EACH WOULD TEACH US ───────────────────────────────
+              Only ever present when the server answered `worth_testing`; below that the readiness
+              line above already says the honest thing and a menu would invent choice.
+
+              THESE ARE READING, NOT BUTTONS. The UI subtraction law says a permanent control does
+              not go on screen merely because a backend action exists, and "Work on this as a
+              group" below is already the one governed door into a Focus. So an option shows what
+              it is, what it rests on and what trying it would teach — and the human acts through
+              the control and the Composer that already own that step. A row of action buttons
+              here would be a second path to a canonical write, and a menu of them would read as a
+              recommendation nobody computed.
+
+              NO ORDER MEANING. The server sends `ranked:false`; nothing here numbers, sorts,
+              highlights or marks a default. */''}
+        ${(i.options && (i.options.options || []).length) ? `
+          <div class="iqg-inq-sec">
+            <div class="iqg-inq-sec-h">What we could do, and what each would teach us</div>
+            ${i.options.options.map(o => `
+              <div class="iqg-inq-opt">
+                <span class="iqg-inq-opt-t">${esc(o.text)}</span>
+                <span class="iqg-inq-opt-w">${esc(o.wouldTeach || '')}</span>
+                ${o.uncertainty ? `<span class="iqg-inq-opt-u">${esc(o.uncertainty)}</span>` : ''}
+              </div>`).join('')}
+            ${(i.options.cautions || []).length ? `
+              <div class="iqg-inq-opt-c">${(i.options.cautions || []).map(c =>
+                `${esc(c.text)} — already tried, and nothing recorded says it helped.`).join(' ')}</div>` : ''}
+            <div class="iqg-note">Possibilities, not a recommendation. They are in no particular
+              order, and none of it happens until somebody decides to work on it.</div>
+          </div>` : ''}
+
+        ${leads ? `<button type="button" class="btn btn-outline btn-sm"
+          onclick="MemberApp.startGroupFocus('${esc(nodeId)}','${esc(i.inquiryId)}')">Work on this as a group</button>` : ''}
+      </div>`;
+  },
+
+  /* PROPOSE A CANDIDATE EXPLANATION — the human half of "what might explain it".
+     `POST /api/group/:nodeId/inquiry/:inquiryId/explanation` existed with no caller, which is the
+     same failure this file has hit before: a route with no door is a capability nobody has.
+
+     The screen promises nothing the server does not do. It does not say the group now thinks
+     this, it does not show a confidence it has not earned, and the note it prints afterwards is
+     the SERVER'S note, not a sentence composed here to sound reassuring. No provider is involved
+     anywhere on this path, so it works identically when every model is unreachable. */
+  async startGroupExplanation(nodeId, inquiryId) {
+    const row = document.getElementById(`iqg-inq-${inquiryId}`);
+    if (!row) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (row.querySelector('.iqg-exp-panel')) return;      // already open; never two panels
+    const panel = document.createElement('div');
+    panel.className = 'iqg-exp-panel';
+    panel.innerHTML = `
+      <label class="iqg-start-l" for="iqg-x-${esc(inquiryId)}">What do you think might explain it?</label>
+      <div class="iq-field"><textarea id="iqg-x-${esc(inquiryId)}" class="iq-field-input" rows="2"
+        placeholder="In your own words — for example, we think it happens because…"></textarea></div>
+      <div class="iqg-start-btns">
+        <button type="button" class="btn btn-primary btn-sm"
+          onclick="MemberApp.confirmGroupExplanation('${esc(nodeId)}','${esc(inquiryId)}')">Offer this</button>
+        <button type="button" class="btn btn-outline btn-sm"
+          onclick="this.closest('.iqg-exp-panel').remove()">Not now</button>
+      </div>
+      <div class="iqg-start-note">It is recorded as a possible explanation, not as what the group
+        has found. It carries no weight until something supports it, and anyone can offer a
+        different one.</div>`;
+    row.appendChild(panel);
+    const ta = panel.querySelector('textarea');
+    if (ta) ta.focus();
+  },
+
+  async confirmGroupExplanation(nodeId, inquiryId) {
+    const ta = document.getElementById(`iqg-x-${inquiryId}`);
+    const text = ta ? String(ta.value || '').trim() : '';
+    const panel = ta && ta.closest('.iqg-exp-panel');
+    const note = panel && panel.querySelector('.iqg-start-note');
+    if (!text) {
+      if (note) note.textContent = 'Say what you think might explain it, in your own words, before offering it.';
+      return;
+    }
+    const r = await this._read(
+      `/api/group/${encodeURIComponent(nodeId)}/inquiry/${encodeURIComponent(inquiryId)}/explanation`,
+      { method: 'POST', body: { text } });
+    if (!r.ok) {
+      if (note) note.textContent = (r.message || 'That could not be offered just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
+  },
+
+  /* Does this person lead the group? Read from the roles the session already carries, and used
+     ONLY to decide what to draw. The server decides what may happen. */
+  _leadsGroup(nodeId) {
+    try {
+      const g = (this._myNodes || []).find(x => x && String(x.nodeId) === String(nodeId));
+      return !!(g && g.role === 'leader');
+    } catch (_) { return false; }
+  },
+
+  /* Start a group focus OUT OF an inquiry. The text is the leader's, typed here, because a focus
+     is a commitment somebody makes rather than a sentence the system writes for them — but the
+     inquiry it came out of travels with it, server-verified against that group's own inquiries,
+     so the origin cannot be claimed for evidence that does not exist. */
+  async startGroupFocus(nodeId, inquiryId) {
+    const row = document.getElementById(`iqg-inq-${inquiryId}`);
+    if (!row) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (row.querySelector('.iqg-start')) return;          // already open; never two panels
+    const panel = document.createElement('div');
+    panel.className = 'iqg-start';
+    panel.innerHTML = `
+      <label class="iqg-start-l" for="iqg-t-${esc(inquiryId)}">What will this group do about it?</label>
+      ${/* THE SHARED FIELD SHELL, not a box of its own. focus-shape-smoke measures this as a bill
+            that may shrink and may never grow, because "different fonts and sizes on every page"
+            is what 34 hand-rolled textareas actually looked like. My first version of this wore
+            `iq-field` -- the WRAPPER class -- on the textarea itself, and the guard was right to
+            count it as a thirty-third. */''}
+      <div class="iq-field"><textarea id="iqg-t-${esc(inquiryId)}" class="iq-field-input" rows="2"
+        placeholder="In your own words — what you are committing the group to"></textarea></div>
+      <div class="iqg-start-btns">
+        <button type="button" class="btn btn-primary btn-sm"
+          onclick="MemberApp.confirmGroupFocus('${esc(nodeId)}','${esc(inquiryId)}')">Set this focus</button>
+        <button type="button" class="btn btn-outline btn-sm"
+          onclick="this.closest('.iqg-start').remove()">Not now</button>
+      </div>
+      <div class="iqg-start-note">Everyone in this group will see it. It records that it came out of
+        this inquiry, so what is learnt later is attached to the right thing.</div>`;
+    row.appendChild(panel);
+    const ta = panel.querySelector('textarea');
+    if (ta) ta.focus();
+  },
+
+  async confirmGroupFocus(nodeId, inquiryId) {
+    const ta = document.getElementById(`iqg-t-${inquiryId}`);
+    const text = ta ? String(ta.value || '').trim() : '';
+    const panel = ta && ta.closest('.iqg-start');
+    if (!text) {
+      if (panel) panel.querySelector('.iqg-start-note').textContent =
+        'Say what the group will do, in your own words, before setting it.';
+      return;
+    }
+    const r = await this._read(`/api/group/${encodeURIComponent(nodeId)}/focus`,
+      { method: 'POST', body: { text, fromInquiryId: inquiryId } });
+    if (!r.ok) {
+      if (panel) panel.querySelector('.iqg-start-note').textContent =
+        (r.message || 'That could not be set just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
+  },
+
+  /* What came of it. Three words, the server's closed vocabulary, and the screen says plainly
+     that this is an observation rather than a verdict on cause. */
+  async recordGroupOutcome(nodeId, focusId, result) {
+    const r = await this._read(
+      `/api/group/${encodeURIComponent(nodeId)}/focus/${encodeURIComponent(focusId)}/outcome`,
+      { method: 'POST', body: { result } });
+    if (!r.ok) {
+      const box = document.querySelector('.iqg-focus .iqg-note');
+      if (box) box.textContent = (r.message || 'That could not be recorded just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
+  },
+
+  /* ── WHAT THIS IS CONNECTED TO, AND — FOR A FOCUS — THE A → B LOOP ───────────────────────
+     THE DOOR THAT WAS MISSING. `/api/objects/:kind/:id/related` has existed since the
+     cross-evidence pass and `reachability-smoke` records it by name as a route no screen fetches.
+     The composer could answer "why did we start this" in conversation because the same
+     neighbourhood is assembled server-side for it — so the capability was real and the doorway
+     was not, which is the exact failure mode that file exists to catch. A route with no caller is
+     a capability nobody has.
+
+     IT ADDS NO TRUTH AND IT MAKES NO CLAIM. Every edge is a field the records already carry, read
+     back by ai/cross-evidence.js, which takes no identity and is handed the reader's already
+     authorised set — so an edge to something they may not open cannot come back. The loop's
+     `observedSince` is a COUNT of what arrived after the outcome was recorded, on the thing the
+     focus addressed. It is not a claim that the focus caused any of it, and the words here are
+     chosen so that a reader cannot come away thinking it is: "recorded since", never "because".
+
+     `open` is rendered as prominently as the rest. A person asking "did that work" deserves to be
+     told which part of the answer does not exist yet, rather than a confident-sounding sentence
+     built over a gap. */
+  async _renderRelated(kind, objectId) {
+    const box = document.getElementById('iqt-related');
+    if (!box) return;
+    const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/related`);
+    if (!r.ok || !r.data || !r.data.ok) { box.innerHTML = ''; return; }
+    const j = r.data;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    /* ── SAID ONCE, IN THE RIGHT PLACE ─────────────────────────────────────────────────────
+       The thread's opening now names what was tried about this question and what came of it,
+       because that is where a coach reads it. This panel was saying the same two facts twice more
+       — as a "Being worked on by" link and again as "What you recorded" — so one focus and one
+       outcome word appeared three times on one screen. Repetition is how a reader learns that a
+       screen is padded.
+
+       The division of labour is by what each can say. The opening answers WHAT WE TRIED AND WHAT
+       CAME OF IT. This panel keeps what the opening cannot: what has been recorded SINCE, and
+       what is still open. So the edges the opening already covered are dropped here rather than
+       restated, and nothing is hidden that is not shown better a few lines above. */
+    const shownAbove = new Set((this._triedShown || []).map(String));
+    const related = (j.related || []).filter(x => x && x.kind && x.label)
+      .filter(x => !(x.type === 'addressed_by' && shownAbove.has(String(x.ref || '').split(':').slice(1).join(':'))));
+    const loop = j.loop || null;
+    const loopAlreadySummarised = loop && shownAbove.has(String(loop.focus || '').split(':').slice(1).join(':'));
+
+    // The words for an edge. The server sends the machine name; a person reads a sentence, and
+    // the sentence is about the RECORD rather than about cause.
+    const EDGE = {
+      addresses: 'This was started to work on',
+      addressed_by: 'Being worked on by',
+      projected_from: 'Came out of',
+      projected_to: 'Led to',
+      shares_evidence: 'Rests on some of the same records as',
+      supersedes: 'Replaced',
+      superseded_by: 'Was replaced by',
+    };
+
+    const links = related.length ? `
+      <div class="iqt-rel-list">
+        ${related.slice(0, 6).map(x => `
+          <button type="button" class="iqt-rel-row"
+            onclick="MemberApp.openObjectThread('${esc(x.kind)}','${esc(String(x.ref || '').split(':').slice(1).join(':'))}')">
+            <span class="iqt-rel-type">${esc(EDGE[x.type] || 'Connected to')}</span>
+            <span class="iqt-rel-label">${esc(x.label)}</span>
+          </button>`).join('')}
+      </div>` : '';
+
+    /* THE LOOP, IN FOUR LINES A PERSON CAN FOLLOW. Only on a focus, and only the parts that
+       exist — a missing part is named in `open` rather than filled in with a guess. */
+    let loopHTML = '';
+    if (loop) {
+      const a = related.find(x => x.ref === loop.addresses);
+      const since = loop.observedSince;
+      loopHTML = `
+        <div class="iqt-loop">
+          <div class="iqt-loop-head">How this has gone</div>
+          ${loop.addresses && a && !loopAlreadySummarised ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Started to work on</span>
+            <span class="iqt-loop-v">${esc(a.label)}</span></div>` : ''}
+          ${loop.sharedOrigins && loop.sharedOrigins.length ? `<div class="iqt-loop-step">
+            <span class="iqt-loop-k">Resting on</span>
+            <span class="iqt-loop-v">${loop.sharedOrigins.length === 1
+              ? 'the same account it came from' : 'the same accounts it came from'}</span></div>` : ''}
+          ${loop.outcome && !loopAlreadySummarised ? `<div class="iqt-loop-step"><span class="iqt-loop-k">What you recorded</span>
+            <span class="iqt-loop-v">${esc(this._OUTCOME_WORDS[loop.outcome] || loop.outcome)}</span></div>` : ''}
+          ${since ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Recorded since</span>
+            <span class="iqt-loop-v">${since.records === 0 ? 'nothing yet'
+              : `${since.records} ${since.records === 1 ? 'thing' : 'things'} on what it was working on`}</span></div>` : ''}
+          ${/* SAID EVERY TIME, not only when something arrived. The sentence exists to stop the
+                count above being read as a verdict, and a caveat that appears only sometimes is
+                one a reader learns to skip. */''}
+          ${since ? `<div class="iqt-loop-caveat">That is what has been recorded since — not a
+            claim that the focus caused it.</div>` : ''}
+          ${(loop.open || []).length ? `<div class="iqt-loop-open">Still open: ${
+            esc((loop.open || []).join('; '))}.</div>` : ''}
+        </div>`;
+    }
+
+    if (!links && !loopHTML) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="iqt-rel">
+        ${links ? `<div class="iqt-rel-head">Connected to</div>${links}` : ''}
+        ${loopHTML}
+        <div class="iqt-rel-note">${esc(j.note || '')}</div>
+      </div>`;
+  },
+
+  /* The three outcome words, in a person's language. The closed vocabulary belongs to
+     ai/team-state.js OUTCOME_RESULTS; this is only its English, in one place so the group
+     screen and the object thread cannot drift into two readings of one word. */
+  /* BOTH CLOSED VOCABULARIES, because this renders both grains and they are deliberately not the
+     same. A GROUP records better / no_change / worse / unclear about a change it tried
+     (ai/team-state.js OUTCOME_RESULTS); a PERSON answers helped / no / mixed about their own
+     commitment (server `_recordPersonalFocusOutcome`). Those are different questions and R8.3
+     kept them apart on purpose. This map was missing `better` and `worse` entirely — so the two
+     words a group is most likely to record fell through to the raw key and a coach read "better"
+     where the product meant to say something. */
+  _OUTCOME_WORDS: {
+    better: 'It got better', no_change: 'Nothing changed', worse: 'It got worse',
+    unclear: 'Too tangled to tell',
+    helped: 'It helped', no: 'It did not help', mixed: 'Mixed',
+  },
+
+  async _renderReading(kind, objectId, scope = 'self') {
     const box = document.getElementById('iqt-reading');
     if (!box) return;
-    let j = null;
-    try {
-      j = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/reading?scope=self`,
-        { headers: this._authHeaders() }).then(r => r.json());
-    } catch (_) { return; }
-    if (!j || !j.ok) { box.innerHTML = ''; return; }
+    /* THROUGH THE ONE BOUNDED READER, and carrying the scope of the object being read. A group
+       object is not in the `self` bucket, so the hard-coded scope this used to send meant reading
+       was unreachable for anything at group grain -- the route was correct and nothing could ask
+       it the right question. */
+    const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/reading?scope=${encodeURIComponent(scope)}`);
+    const j = r.ok ? r.data : null;
+    /* A REFUSAL IS NOT A FAILURE, and is not shown as one. `ok:false` here means the server
+       declined to show uncited text, or there is nothing searchable, or this deployment sends
+       nothing outside -- all correct outcomes, and none of them worth a red banner. The reason
+       is rendered quietly instead, because "no outside reading, and here is why" is a fact and an
+       empty space is a bug. */
+    if (!j) { box.innerHTML = ''; return; }
+    if (!j.ok) {
+      /* AND A FACT ABOUT THE DEPLOYMENT IS NOT NEWS ABOUT THIS OBJECT. "This deployment does not
+         send anything outside" is true of every object on every screen forever; printing it on
+         each one teaches a person to skip the place where a real refusal about THIS object would
+         appear. Only a reason that is about this object is drawn. */
+      const _aboutThisObject = j.reason && !/deployment|not configured|no provider|disabled/i.test(String(j.reason));
+      box.innerHTML = _aboutThisObject
+        ? `<div class="iqt-reading-none">No outside reading here — ${this._escape(String(j.reason))}.</div>`
+        : '';
+      return;
+    }
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `
       <div class="iqt-reading-head">Worth reading</div>
@@ -11737,6 +13672,11 @@ const MemberApp = {
             ${c.at ? `<span class="iqt-reading-at">${esc(c.at)}</span>` : ''}
           </a>`).join('')}
       </div>
+      ${/* HOW IT STANDS TO WHAT THEY ARE READING, in the server's words. A paragraph sitting
+             under a belief is assumed to be about that belief unless something says otherwise,
+             and "about the topic in general, and it changes nothing here" is the sentence that
+             stops external reading being read as corroboration from the outside world. */''}
+      ${j.relation && j.relation.line ? `<div class="iqt-reading-rel">${esc(j.relation.line)}</div>` : ''}
       <div class="iqt-reading-note">${esc(j.note)}</div>
       <div class="iqt-reading-q">Searched for "${esc(j.query)}" — ${esc(j.queryNote || 'built from the topic, not from anything you wrote.')}</div>`;
   },
@@ -11763,9 +13703,14 @@ const MemberApp = {
     } catch (_) { return; }
     if (!j || !j.ok) { box.innerHTML = ''; return; }
     if (!j.chart) {
-      // A REFUSAL IS SHOWN, NOT SWALLOWED. "Not enough people for a picture that stays anonymous"
-      // is a fact about the squad worth knowing; an empty space says nothing and reads as a bug.
-      box.innerHTML = j.note ? `<div class="iqt-chart-none">${this._escape(j.note)}</div>` : '';
+      /* A REFUSAL IS SHOWN, NOT SWALLOWED. "Not enough people for a picture that stays anonymous"
+         is a fact about the squad worth knowing; an empty space says nothing and reads as a bug.
+
+         BUT "NOTHING TO DRAW YET" IS NOT A REFUSAL. It is the ordinary state of almost every
+         object, and this drew it anyway — one of three stacked apologies a coach met on the
+         Inquiry screen, under a heading for a thing they had never asked to see. The server now
+         says which of the two it is; only a refusal earns a line. */
+      box.innerHTML = (j.note && j.refused) ? `<div class="iqt-chart-none">${this._escape(j.note)}</div>` : '';
       return;
     }
     box.innerHTML = this._chartHTML(j.chart);
@@ -11776,15 +13721,30 @@ const MemberApp = {
     const W = 320, H = 132, PADL = 30, PADR = 10, PADT = 12, PADB = 24;
     const parts = [`<div class="iqt-chart-head">${esc(c.title)}</div>`];
 
+    /* WHICH SERIES WOULD BE PLOTTED, AND WHETHER ANY OF THEM IS A MOVEMENT. Computed here rather
+       than at the point of drawing because it decides more than the picture: copy that explains
+       how to read a line is wrong on a screen with no line on it. */
+    const plotSeries = c.kind === 'firming'
+      ? (c.series || []).filter(s => s.key === 'origins')
+      : (c.series || []);
+    const anyTrend = plotSeries.some(s => s.shape === 'trend');
+
     if (c.kind === 'firming') {
       const originSeries = (c.series || []).find(s => s.key === 'origins');
       const points = (originSeries && originSeries.points) || [];
       const current = points.length ? points[points.length - 1].value : 0;
       const threshold = c.threshold && c.threshold.value;
       parts.push(`<div class="iqt-chart-summary"><strong>${esc(current)} separate supporting ${current === 1 ? 'account' : 'accounts'}</strong>${Number.isFinite(threshold) ? ` · ${esc(threshold)} needed before IntelliQ can support a call` : ''}</div>`);
-      parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
-        From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
-      </div></details>`);
+      /* AND THE KEY ONLY WHEN THERE IS SOMETHING TO KEY. Every sentence in it is about the line:
+         reading left to right, the line not moving on a repeat, the horizontal marker. With one
+         moment on the record none of that is on the screen, so it was instructions for a picture
+         the reader could not see — the same defect as the axis, in prose. What it protects is
+         already said by the limitations underneath, which are not optional. */
+      if (anyTrend) {
+        parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
+          From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
+        </div></details>`);
+      }
     }
 
     if (c.kind === 'spread') {
@@ -11810,9 +13770,7 @@ const MemberApp = {
       const x0 = Math.min(...xs), x1 = Math.max(...xs);
       const px = v => PADL + (x1 === x0 ? (W - PADL - PADR) / 2 : ((v - x0) / (x1 - x0)) * (W - PADL - PADR));
       const svg = [];
-      const visibleSeries = c.kind === 'firming'
-        ? (c.series || []).filter(s => s.key === 'origins')
-        : (c.series || []);
+      const visibleSeries = plotSeries;
       for (const s of visibleSeries) {
         const pts = s.points || [];
         if (!pts.length) continue;
@@ -11820,19 +13778,89 @@ const MemberApp = {
         const top = s.unit === 'band' ? (c.series.find(x => x.key === 'band')?.ticks || []).length - 1
           : Math.max(1, ...vs, c.threshold ? c.threshold.value : 0);
         const py = v => H - PADB - (top <= 0 ? 0 : (v / top) * (H - PADT - PADB));
-        const d = pts.map((p, i) => `${i ? 'L' : 'M'}${px(p.at).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
-        svg.push(`<path class="iqt-line iqt-line-${esc(s.key)}" d="${d}"/>`);
-        svg.push(pts.map(p => `<circle class="iqt-dot iqt-dot-${esc(s.key)}" cx="${px(p.at).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="3"><title>${esc(p.label)}</title></circle>`).join(''));
+        /* L-CH6 — A LINE IS DRAWN ONLY WHERE THE SERVER SAYS THERE IS A TREND.
+
+           THE FOUNDER SAW THIS ON A REAL SCREEN: two accounts recorded on the SAME DATE, drawn as
+           a VERTICAL LINE. `px` collapses a zero-width time range to the middle of the axis, so
+           every point landed on one x and the path between them went straight up — which is not a
+           degenerate trend, it is a picture of an infinite rate of change, produced by the least
+           information the chart can hold.
+
+           The shape is not decided here. ai/chart.js derives it from the points and the gate
+           refuses a declaration that disagrees with them, so this renders what it was told. A
+           series the server has not shaped gets no line either: an undeclared shape is exactly
+           the renderer's guess that produced the defect. */
+        const isTrend = s.shape === 'trend';
+        if (isTrend) {
+          const d = pts.map((p, i) => `${i ? 'L' : 'M'}${px(p.at).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+          svg.push(`<path class="iqt-line iqt-line-${esc(s.key)}" d="${d}"/>`);
+        }
+        svg.push(pts.map(p => `<circle class="iqt-dot iqt-dot-${esc(s.key)}${isTrend ? '' : ' iqt-dot-state'}" cx="${px(p.at).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="${isTrend ? 3 : 5}"><title>${esc(p.label)}</title></circle>`).join(''));
         if (c.threshold && s.unit === c.threshold.unit) {
           const ty = py(c.threshold.value).toFixed(1);
           svg.push(`<line class="iqt-thresh" x1="${PADL}" y1="${ty}" x2="${W - PADR}" y2="${ty}"/>`);
           svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough support</text>`);
         }
       }
-      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+      /* WHETHER TIME IS AN AXIS AT ALL. A chart the server shaped as `state` has one moment in
+         it, so a "Time" axis running from that date to the same date is a label for a dimension
+         the picture does not have — and printing the same date at both ends is how a reader
+         concludes the product is broken rather than that the record is young. */
       const first = all.length ? new Date(x0).toLocaleDateString() : '';
       const last = all.length ? new Date(x1).toLocaleDateString() : '';
-      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
+      const yLabel = c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events';
+      const distinctTimes = new Set(xs).size;
+      if (!anyTrend) {
+        /* ── NO TREND, NO CHART SURFACE ────────────────────────────────────────────────────
+           FOUNDER DECISION, findings R1 #31 and #40. The live Focus page showed "Recorded
+           events" above a single blue dot, a large amount of empty space, and copy correctly
+           explaining that this is one moment rather than change over time.
+
+           The epistemic refusal was already right — the line is withheld unless the server
+           declares a trend, and that guard stays. The PICTURE was wrong. An axis, a plot area
+           and a dot are the furniture of a time series; drawing them around one observation
+           makes a reader look for a shape that is not there, and costs a screenful of height on
+           the surface where the conversation is supposed to be primary.
+
+           SO IT IS A READOUT, NOT A PLOT. Same rule for High, Low, Inquiry and Focus, because
+           this is the one renderer all four go through — #40 asked for exactly that rather than
+           a Focus-only fix. A line returns when the server says there is a trend to draw, and
+           not before: two ordered observations are still not a shape.
+
+           WHAT A ROW SAYS DEPENDS ON THE UNIT, and getting that wrong is how this fix would have
+           shipped its own defect. A `date` series plots WHEN and nothing else — its `value` IS
+           the timestamp — so printing that value as the readout figure would have put a raw epoch
+           number on the Focus screen, which is the exact surface finding #31 came from. A date
+           series is therefore a list of what happened; a `count` series is a current figure; a
+           `band` series reads out the kernel's own word for where the evidence stands. */
+        const rows = [];
+        for (const sr of visibleSeries) {
+          const pts = sr.points || [];
+          if (!pts.length) continue;
+          /* A date series lists its events, because each one is a separate thing that happened.
+             A count or a band has one current answer, and the earlier points are how it got
+             there — a history worth a line only once there is a line to draw. */
+          const shown = sr.unit === 'date' ? pts : [pts[pts.length - 1]];
+          for (const p of shown) {
+            const when = Number.isFinite(p.at) ? new Date(p.at).toLocaleDateString() : '';
+            const lead = sr.unit === 'count' ? String(p.value)
+              : (sr.unit === 'band' ? String(p.label || '') : '');
+            const label = sr.unit === 'date' ? (p.label || sr.name || yLabel) : (sr.name || yLabel);
+            rows.push(`<div class="iqt-readout-row">
+              ${lead ? `<span class="iqt-readout-v">${esc(lead)}</span>` : ''}
+              <span class="iqt-readout-l">${esc(label)}</span>
+              ${when ? `<span class="iqt-readout-w">${esc(when)}</span>` : ''}
+            </div>`);
+          }
+        }
+        parts.push(`<div class="iqt-readout">${rows.join('')}<div class="iqt-readout-n">${
+          distinctTimes <= 1 ? 'One moment on the record — not a change over time.'
+            : 'Single observations, not a change over time.'
+        }</div></div>`);
+      } else {
+        parts.push(`<div class="iqt-chart-y">${yLabel}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+        parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
+      }
     }
     // L-CH5 — a picture with no stated limits is read as complete.
     parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);
@@ -11856,17 +13884,28 @@ const MemberApp = {
         { headers: this._authHeaders() }).then(r => r.json());
     } catch (_) { return; }
     const list = (j && j.materials) || [];
-    const attach = `<button type="button" class="iqt-mat-add" onclick="MemberApp.attachMaterial('${esc(kind)}','${esc(objectId)}')">Attach material</button>
-      ${/* `typeof AttachmentHandler`, NOT `window.AttachmentHandler`. The handler is a top-level
-            `const` in a classic script, and a top-level const does not become a property of
-            window — so this guard was always false and the accept attribute always rendered
-            EMPTY. An empty accept offers every file on the phone, which is the opposite of what
-            the guard was for, and it was invisible to every source-level test because the source
-            said the right thing. Found by opening the page. The rest of this file already uses
-            `typeof AttachmentHandler === 'undefined'` for exactly this reason. */''}
-      <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}">`;
+    /* THE STANDALONE "ATTACH MATERIAL" CONTROL IS GONE — founder decision, findings R1 #30.
+
+       The note that stood here argued that hiding a real capability makes it a capability nobody
+       has, which is the failure this file keeps finding. That is right in general and wrong here,
+       because the capability did not go anywhere: the Composer's paperclip attaches to whatever
+       object is open — `about` rides with the upload and the material comes back under
+       `attachedTo` — so this was a SECOND door into the same room rather than the only one.
+
+       And it was the worse door. This picker refused images and PDFs ("no text came out of that
+       one") while the Composer path reads a picture through the vision gateway and binds the
+       description to the same object. A page-level control that silently supports less than the
+       one beside it is how somebody concludes the product cannot do what it can.
+
+       The list of what IS attached stays: finding it again is a different need from adding to it. */
     if (!list.length) {
-      box.innerHTML = `<div class="iqt-mat-empty">Nothing attached yet. Attach a deck, a document or a spreadsheet and IntelliQ will answer from it.</div>${attach}`;
+      /* THE DOOR STAYS, THE APOLOGY GOES. "Attach material" is a real capability and hiding it
+         would make it a capability nobody has — that is the failure this file keeps finding. But
+         the sentence explaining what attaching is FOR is an instruction manual printed on every
+         object whether or not anybody wanted one, and it was the third of three stacked apologies
+         on the Inquiry screen. The control says what it does; it does not need an essay beside
+         it, and a coach who taps it can read one then. */
+      box.innerHTML = '';
       return;
     }
     box.innerHTML = `
@@ -11878,37 +13917,71 @@ const MemberApp = {
             <span class="iqt-mat-sub">${esc(m.parts)} ${m.parts === 1 ? 'part' : 'parts'} — ${esc(m.by)}</span>
           </button>
         </div>`).join('')}
-      <div class="iqt-mat-state" id="iqt-mat-state"></div>${attach}`;
+      <div class="iqt-mat-state" id="iqt-mat-state"></div>`;
   },
 
-  attachMaterial(kind, objectId) {
-    const input = document.getElementById('iqt-mat-file');
-    const state = document.getElementById('iqt-mat-state');
-    if (!input) return;
-    input.onchange = async () => {
-      const file = input.files && input.files[0];
-      input.value = '';
-      if (!file) return;
-      const say = t => { if (state) state.textContent = t; else showToast(t, 'info'); };
-      if (typeof AttachmentHandler === 'undefined') return say('The uploader is not available right now.');
-      say('Reading it…');
-      try {
-        const parsed = await AttachmentHandler.process(file);
-        // An image or a PDF arrives as bytes with no text. IntelliQ cannot work from words it
-        // does not have, and saying so is better than attaching something it will then answer
-        // about from nothing.
-        const text = parsed.content || '';
-        if (!text.trim()) return say('No text came out of that one, so there would be nothing for IntelliQ to read. A deck, a document, a spreadsheet or a text file works.');
-        const r = await fetch('/api/materials', {
-          method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text }),
-        }).then(x => x.json());
-        if (!r.ok) return say(r.error || 'That could not be attached.');
-        say(r.note || 'Attached.');
-        this._renderMaterial(kind, objectId);
-      } catch (e) { say(e && e.message ? e.message : 'That file could not be read.'); }
-    };
-    input.click();
+  /* `attachMaterial` IS GONE WITH THE CONTROL THAT CALLED IT. It posted to /api/materials with an
+     explicit `attachTo`; the Composer's paperclip reaches the same place through
+     /api/assistant/attachments with `about`, and reads pictures this one refused. One door. */
+
+  _offerClassification(materialId, kind, objectId, result) {
+    const box = document.getElementById('iqt-mat-state');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const current = String((result && result.classification) || 'external_context');
+    box.innerHTML = `
+      <div class="iqt-mat-class">
+        <div class="iqt-mat-class-now">Filed as: <strong>${esc((result && result.classificationLabel) || 'Something to read from')}</strong></div>
+        <div class="iqt-mat-class-means">${esc((result && result.classificationMeans) || '')}</div>
+        ${result && result.classificationReason ? `<div class="iqt-mat-class-why">${esc(result.classificationReason)}</div>` : ''}
+        ${current === 'external_context' ? `
+          <div class="iqt-mat-class-ask">Is it more than that?</div>
+          <div class="iqt-mat-class-btns">
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._reclassifyMaterial('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','personal_evidence')">It is my own account</button>
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._reclassifyMaterial('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','organisation_evidence')">It is evidence about this organisation</button>
+          </div>` : ''}
+      </div>`;
+  },
+
+  /* The deliberate act. For organisation evidence it also asks for the SOURCE, because a claim
+     about an organisation with no stated source is an opinion, and the difference is the whole
+     reason this classification exists. The server re-checks everything. */
+  async _reclassifyMaterial(materialId, kind, objectId, want) {
+    const box = document.getElementById('iqt-mat-state');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (want === 'organisation_evidence') {
+      box.innerHTML = `
+        <div class="iqt-mat-class">
+          <label class="iqt-mat-class-ask" for="iqt-mat-src">Where did this come from?</label>
+          <div class="iq-field"><textarea id="iqt-mat-src" class="iq-field-input" rows="2"
+            placeholder="The match report, the league's own data, a session you ran"></textarea></div>
+          <div class="iqt-mat-class-means">Evidence about this organisation needs somebody entitled
+            to say it, a stated source, and your explicit confirmation. Attaching a file is not
+            enough on its own.</div>
+          <div class="iqt-mat-class-btns">
+            <button type="button" class="btn btn-primary btn-sm"
+              onclick="MemberApp._confirmClassification('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','organisation_evidence')">Record it as that</button>
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._renderMaterial('${esc(kind)}','${esc(objectId)}')">Leave it as reading</button>
+          </div>
+        </div>`;
+      return;
+    }
+    this._confirmClassification(materialId, kind, objectId, want);
+  },
+
+  async _confirmClassification(materialId, kind, objectId, want) {
+    const src = document.getElementById('iqt-mat-src');
+    const r = await this._read(`/api/materials/${encodeURIComponent(materialId)}/classification`, {
+      method: 'POST',
+      body: { classification: want, source: src ? String(src.value || '') : '', confirmClassification: true },
+    });
+    const box = document.getElementById('iqt-mat-state');
+    if (!r.ok) { if (box) box.textContent = r.message || 'That could not be recorded just now.'; return; }
+    this._offerClassification(materialId, kind, objectId, r.data);
   },
 
   async openMaterial(materialId) {
@@ -11921,6 +13994,8 @@ const MemberApp = {
     if (!j || !j.ok) return;
     const m = j.material;
     this._matCtx = { materialId, kind: m.attachTo.kind, objectId: m.attachTo.id };
+    const _cls = { classification: m.classification, classificationLabel: m.classificationLabel,
+      classificationMeans: m.classificationMeans };
     box.innerHTML = `
       <div class="iq-object-thread">
         <div class="iqt-bar">
@@ -11931,7 +14006,20 @@ const MemberApp = {
         </div>
         <div class="iqt-head"><div class="iqt-head-mid"><h1 class="iqt-title">${esc(m.title)}</h1></div></div>
         <div class="iqt-mat-by">Attached by ${esc(m.by)}</div>
+        ${/* WHAT THIS IS FILED AS, AND THE OFFER TO SAY OTHERWISE — on the material itself.
+
+              This offer used to live only in the seconds after an upload, rendered by the
+              page-level picker the founder retired (findings R1 #30). Removing that control would
+              have taken a governed act with it, which is not what was asked for and would have
+              been the worse half of the trade.
+
+              It belongs here anyway. Saying what a document IS — background reading, or evidence
+              about this organisation — is a judgement somebody makes after READING it, not in the
+              second it lands; and reachable from the material means reachable whenever they
+              change their mind, rather than once, from a moment that has passed. */''}
+        <div class="iqt-mat-state" id="iqt-mat-state"></div>
         <div class="iqt-mat-note">${esc(j.note)}</div>
+        ${this._sourceStrip(materialId, m, j.sourceMedia)}
         ${(j.sections || []).map(s => `
           <div class="iqt-sec" id="sec-${esc(s.id)}">
             <div class="iqt-sec-h">${esc(s.heading)}</div>
@@ -11945,7 +14033,73 @@ const MemberApp = {
           </div>`).join('')}
         <div class="iqt-mat-report" id="iqt-mat-report"></div>
       </div>`;
+    /* AND THE OFFER IS DRAWN, now that its container exists.  writes into
+       #iqt-mat-state, which this screen now carries. */
+    this._offerClassification(materialId, m.attachTo.kind, m.attachTo.id, _cls);
     this._renderMaterialReport(materialId);
+  },
+
+  /* ── THE ORIGINAL, AND WHAT IS SAID WHERE IT USED TO BE ────────────────────────────────────
+     A description is a reading. Somebody reading it is entitled to open the thing it is a reading
+     of — and, when it is gone, to be told it was deleted rather than to find nothing and wonder.
+     The three states are different sentences on purpose: KEPT offers the original, DELETED says
+     so in words, and NEVER HELD explains why there is nothing to offer instead of staying silent
+     and looking broken. */
+  _sourceStrip(materialId, m, src) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const s = src || { retained: false, because: 'never_held' };
+    if (s.retained) {
+      const mine = String(m.byId || '') === String(Auth.currentUser?.id || '');
+      return `<div class="iqt-mat-src">
+        <button type="button" class="iqt-src-open" onclick="MemberApp.openSource('${esc(materialId)}')">Open the original</button>
+        ${mine ? `<button type="button" class="iqt-src-del" onclick="MemberApp.deleteSource('${esc(materialId)}')">Delete the original</button>` : ''}
+        <div class="iqt-mat-src-note">${esc(s.note || '')}</div>
+      </div>`;
+    }
+    if (s.because === 'deleted') {
+      return `<div class="iqt-mat-src iqt-mat-src-gone">
+        <div class="iqt-src-tomb">${esc(s.label || 'Source attachment deleted')}</div>
+        <div class="iqt-mat-src-note">${esc(s.note || '')}</div>
+      </div>`;
+    }
+    return `<div class="iqt-mat-src"><div class="iqt-mat-src-note">${esc(s.note || '')}</div></div>`;
+  },
+
+  /* THE REQUEST CARRIES THE SESSION, which is the whole point: the URL on its own opens nothing.
+     So the file cannot be an <img src> or a plain link — it is fetched with the person's own
+     credentials and handed to the browser as a blob it already holds. */
+  async openSource(materialId) {
+    let r = null;
+    try {
+      r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/source`,
+        { headers: this._authHeaders() });
+    } catch (_) { showToast('Could not open that just now.', 'warning'); return; }
+    if (!r.ok) {
+      // 410 is the deletion, and it has its own sentence. Anything else is a refusal or an
+      // outage, and saying "deleted" for those would be a lie about what happened.
+      showToast(r.status === 410
+        ? 'The original was deleted.' : 'That original is not available to you.', 'warning');
+      if (r.status === 410) this.openMaterial(materialId);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    // Revoked once the browser has had it; a blob URL left alive is a copy nobody asked for.
+    setTimeout(() => URL.revokeObjectURL(url), w ? 60000 : 1000);
+  },
+
+  /* DELETION IS NOT UNDOABLE AND IS NOT ASKED FOR TWICE, so it is confirmed once, in words that
+     say what survives it. The record is not being deleted; the file is. */
+  async deleteSource(materialId) {
+    if (!window.confirm('Delete the original file? What IntelliQ read from it stays, and so does '
+      + 'anything that referred to it — only the file goes, and it cannot be brought back.')) return;
+    try {
+      const r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/source`,
+        { method: 'DELETE', headers: this._authHeaders() }).then(x => x.json());
+      if (!r || !r.ok) { showToast('That could not be deleted.', 'warning'); return; }
+    } catch (_) { showToast('That could not be deleted.', 'warning'); return; }
+    this.openMaterial(materialId);
   },
 
   /* DECLARED, NEVER INFERRED. "Not yet" opens a box for their own words, and the box is optional
@@ -12091,16 +14245,49 @@ const MemberApp = {
      The two have different membership rules and so different routes, but a person opening a
      discussion should never have to know which kind they are in — so the difference lives in
      one line here and nowhere else in the client. */
-  _forumURL(ctx) {
-    return ctx.room === 'focus'
-      ? `/api/forum/focus/${encodeURIComponent(ctx.objectId)}`
-      : `/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.objectId)}`;
+  /* ONE OWNER FOR "WHERE IS THIS ROOM", AND BOTH ADDRESSES WRITTEN OUT.
+
+     The room kind is checked ONCE, here, which is what makes the live iPhone failure structurally
+     impossible rather than merely fixed: `forumAsk` used to build its own path with the group
+     route hard-coded, so a Focus room — which has no node — produced `/api/group//forum/foc_xxx/ask`
+     and the founder was shown "Unknown API endpoint". Two places that must agree about how to
+     address a room is one place too many.
+
+     THE PATHS ARE SPELLED OUT RATHER THAN CONCATENATED, deliberately. `reachability-smoke` reads
+     the front end for the literal tail after the prefix, because a route nobody can grep is a
+     route nobody can find — and `${this._forumURL(ctx)}/ask` hides `/ask` behind a backtick where
+     neither the gate nor a person looking for it can see it. */
+  _forumURL(ctx, action = '') {
+    const id = encodeURIComponent(ctx.objectId);
+    if (ctx.room === 'focus') {
+      return action === 'ask' ? `/api/forum/focus/${id}/ask` : `/api/forum/focus/${id}`;
+    }
+    const node = encodeURIComponent(ctx.nodeId);
+    return action === 'ask'
+      ? `/api/group/${node}/forum/${id}/ask`
+      : `/api/group/${node}/forum/${id}`;
   },
 
   async openForum(nodeId, objectId, room = 'group', backKind = 'inquiry') {
-    const box = document.getElementById('iq-inquiries-page');
+    /* NAVIGATE FIRST, THE WAY `openObjectThread` ALREADY DOES. The room draws into the Inquiries
+       page's container, and this is reached from Home too: confirming a share returns `forum:{…}`
+       and the client opens the room. Rendering into a page that is not on screen is, to the
+       person, the app doing nothing — a second after they deliberately put their words in front
+       of the group, which is the worst possible moment for the screen not to move. The sibling
+       function carries a comment saying this exact bug shipped once; this one had never been
+       walked from Home.
+
+       The shell heading goes with it: it belongs to the bucket, not to one room, and leaving it
+       stacks "Inquiries" above "Forum". */
+    let box = document.getElementById('iq-inquiries-page');
+    if (!box || !box.offsetParent) {
+      try { navigate('inquiry'); } catch (_) {}
+      box = document.getElementById('iq-inquiries-page');
+    }
     if (!box) return;
     if (room !== 'focus' && !nodeId) return;
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.setAttribute('hidden', '');
     const esc = s => this._escape(String(s == null ? '' : s));
     this._forumCtx = { nodeId, objectId, room, backKind };
     box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
@@ -12118,16 +14305,102 @@ const MemberApp = {
           </button>
         </div>
         <h1 class="iqt-title">Forum</h1>
-        <p class="iqt-p">Everyone here is anonymous, including to coaches. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
+        <p class="iqt-p">Everyone here is anonymous, including to coaches. Only you can see which of these are yours — to everybody else your messages are unsigned like the rest. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
         ${j.people && j.people <= 3 ? `<p class="iqt-p iqt-small-room">There are only ${j.people} people in here, so names being hidden will not stop anyone working out who said what. Say it as though they will.</p>` : ''}
+        ${/* ── "YOU" IS SELF-RECOGNITION, AND THE PAGE HAS TO SAY SO ───────────────────────
+              Live finding #20: the room promised anonymity in one paragraph and then wrote YOU
+              beside a message in the next, so the screen appeared to contradict itself. Both
+              halves were true — the server's read projection (ai/forum.js visibleThread) sets
+              `mine` from the VIEWER's own id and sends `authorId: null` to everyone, leader
+              included — but a reader cannot see a projection. They can only see the screen.
+
+              So the screen now carries the whole fact rather than half of it: the lede says the
+              marker is visible to you alone, and every message another person wrote is labelled
+              Anonymous rather than left bare. Unlabelled messages made anonymity look like an
+              absence of information, which is indistinguishable from a bug. Labelled, it reads
+              as the deliberate property it is.
+
+              Nothing about authorship changed here, and nothing should: the kernel still keeps
+              `authorId` on the stored message so five posts by one person cannot look like five
+              origins (scripts/forum-anonymity-smoke.js A6-A10). This is rendering. */''}
         <div class="iqt-turns">${msgs.length
           ? msgs.map(m => m.status === 'removed'
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
-              : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
+              : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine
+                  ? `<span class="iqf-you">You</span> `
+                  : `<span class="iqf-you iqf-anon">Anonymous</span> `}${esc(m.text)}</div>`).join('')
           : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
-        ${this._composerHTML({ id: 'iq-forum-input', placeholder: 'Say something…',
+        ${/* ── ASK INTELLIQ, AND WHY IT IS A BUTTON RATHER THAN A SECOND BOX ────────────────
+              Founder ruling: answer the asker privately from the object's governed projection,
+              never publish it to the room, and leave sharing to the deliberate path.
+
+              A BUTTON, DELIBERATELY. The comment below this block records why there is one
+              composer here: two text boxes on this screen would be the costliest ambiguity in
+              the product, because the difference between them is who reads what you type. A
+              second box labelled "ask IntelliQ" would reintroduce exactly that, one careless
+              tap from putting a private question into a room. It would also promise free-form
+              answering that the deterministic path does not have — the server says so itself,
+              `answers: 'current_object_read'`, because with no model the reply is this object's
+              current read and does not vary with phrasing. Offering a box would be a capability
+              claim; offering a button is the truth. */''}
+        <div class="iqf-ask-row">
+          <button type="button" class="iqf-ask" onclick="MemberApp.forumAsk()">Ask IntelliQ about this</button>
+          <span class="iqf-ask-n">Only you see the answer</span>
+        </div>
+        <div class="iqf-answer" id="iqf-answer"></div>
+        ${this._composerHTML({ id: 'iq-forum-input', placeholder: this._PLACEHOLDER.forum,
           send: 'MemberApp.forumSend()', mic: 'iqf-mic', state: 'iqf-voice-state', attach: false })}
       </div>`;
+    /* The room has its own composer, and it sends to the room. The shell one is private to
+       IntelliQ — two boxes on this screen would be the single most costly ambiguity in the
+       product, because the difference between them is who reads what you type. */
+    this._renderShellComposer();
+    this._watchComposerHeight('.iq-object-thread .iq-composer-wrap');
+    /* THE BAR FOLLOWS THE ROOM. Opening a Forum from an inquiry left it reading "Inquiries". */
+    try { setScreenTitle('Forum'); } catch (_) {}
+  },
+
+  /* ── ASK INTELLIQ FROM INSIDE THE ROOM, PRIVATELY ─────────────────────────────────────────
+     The answer is rendered where only this reader can see it and is never sent to the room. The
+     server refuses to post it and says so (`posted:false`); this shows that fact rather than
+     asking anybody to take it on trust, because "who is going to read this" is the one question a
+     person in a Forum must never have to guess about. */
+  async forumAsk() {
+    const ctx = this._forumCtx;
+    const box = document.getElementById('iqf-answer');
+    if (!ctx || !box) return;
+    box.innerHTML = `<div class="iqf-answer-w">Reading what this room can see…</div>`;
+    try {
+      /* THE ROUTE COMES FROM THE OWNER THAT OPENED THE ROOM, never from guessed UI state. This
+         built its own path with the group route hard-coded, so a Focus room — which has no node —
+         produced `/api/group//forum/foc_xxx/ask`, and the founder saw "Unknown API endpoint" on a
+         live iPhone. `_forumURL` beside it has addressed both room kinds since focus rooms
+         existed; the ask is simply the same address with `/ask` on the end. */
+      const r = await fetch(this._forumURL(ctx, 'ask'),
+        { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({}) });
+      const d = await r.json().catch(() => null);
+      /* AND A FAILURE DOES NOT HAND THE PERSON THE ROUTE. The live screen read "Unknown API
+         endpoint: POST /group//forum/foc_rkvv6fnb/ask" — a method and a path, to somebody who
+         wanted an answer about their focus. The detail goes to the console for whoever is
+         debugging; what is shown says what happened and repeats the one guarantee that still
+         holds, which is that nothing was posted. */
+      if (!r.ok || !d || !d.ok) {
+        try { console.warn('[forum-ask] failed', r.status, (d && d.error) || ''); } catch (_) {}
+        throw new Error('IntelliQ could not answer this just now. Nothing was posted.');
+      }
+      const esc = s => this._escape(String(s == null ? '' : s));
+      /* THE BANNER IS NOT DECORATION. It is the difference between this and the room. */
+      box.innerHTML = `
+        <div class="iqf-answer-w">
+          <div class="iqf-answer-h">Only you can see this</div>
+          <p class="iqt-p">${esc(d.answer)}</p>
+          ${(d.limitations || []).length
+            ? `<ul class="iqf-answer-l">${(d.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+          <p class="iqf-answer-n">${esc(d.note || '')}</p>
+        </div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="iqf-answer-w">${this._escape(err.message)}</div>`;
+    }
   },
 
   async forumSend() {
@@ -12135,28 +14408,46 @@ const MemberApp = {
     const ctx = this._forumCtx;
     const text = String(input && input.value || '').trim();
     if (!text || !ctx) return;
-    input.value = '';
+    /* THE TEXT IS NOT CLEARED UNTIL IT IS SENT. This cleared the box first, fired the POST, and
+       swallowed every outcome in `catch (_) {}` — no status check at all. So a refusal, an ended
+       session or a dropped connection lost what somebody had just written, silently, with the
+       room re-rendering as though nothing had happened. Message loss is worse than a visible
+       failure, and it was invisible by construction. */
+    const sendBtn = document.querySelector('#iq-forum-input ~ .iq-send, .iq-composer .iq-send');
+    if (sendBtn) sendBtn.disabled = true;
+    let res = null;
     try {
-      await fetch(this._forumURL(ctx), {
+      res = await fetch(this._forumURL(ctx), {
         method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ text }),
       });
-    } catch (_) {}
+    } catch (_) { res = null; }
+    if (sendBtn) sendBtn.disabled = false;
+    const c = this._classifyWrite(res);
+    if (!c.ok) {
+      // Give them their words back, and say why. `_classifyWrite` has already ended the session
+      // app-wide if that is what happened, so the composer will be disabled underneath this.
+      input.value = text;
+      const state = document.getElementById('iqf-voice-state');
+      if (state) {
+        state.textContent = c.reason === 'auth' ? 'Your session has ended — this was not posted.'
+          : c.reason === 'forbidden' ? 'You are no longer part of this discussion — this was not posted.'
+          : 'That did not post. Your message is still here — try again.';
+      }
+      return;
+    }
+    input.value = '';
     this.openForum(ctx.nodeId, ctx.objectId, ctx.room, ctx.backKind);
   },
 
 
-  /* WHO THIS IS FOR, decided before it is said. The choice lives next to the composer so it is
-     visible while a person types, rather than arriving as a confirmation card after the words
-     are already out. Private is the default and stays the default — the toggle can only ever be
-     an explicit act, never a state something else left behind. */
-  toggleVisibility() {
-    this._wsShare = !this._wsShare;
-    const b = document.getElementById('iq-vis');
-    if (!b) return;
-    b.textContent = this._wsShare ? 'Public' : 'Private';
-    b.setAttribute('aria-pressed', this._wsShare ? 'true' : 'false');
-    b.classList.toggle('is-shared', this._wsShare);
-  },
+  /* `toggleVisibility` AND `_wsShare` ARE GONE, and this note is here so nobody reinstates them.
+     The comment that used to sit above them said the choice was "visible while a person types,
+     rather than arriving as a confirmation card after the words are already out" — and a
+     confirmation card naming the audience, after the words exist and while they can still be
+     edited, is exactly what the product should do instead. `share_to_forum` already does it.
+
+     The toggle also never reached the server. It set a flag nothing read, which made it a promise
+     about privacy that the product had no way to keep. See the note in _renderShellComposer. */
 
   /* ONE COMPOSER. Founder: "make sure all chats look the same as the composer one — I don't
      want the inquiry one looking different. Uniformity. Typography the same."
@@ -12165,29 +14456,293 @@ const MemberApp = {
      (.iqt-composer), so it inherited none of the composer's behaviour and diverged from it
      visually at the same time. One function, three surfaces — Home, an object thread, and a
      forum — so they cannot drift again. */
+  /* ── WHAT A BLANK COMPOSER SAYS ───────────────────────────────────────────────────────────
+     One table, beside the one function that renders every composer, because these are states of
+     a single surface rather than four independent boxes. A contextual line is used ONLY where the
+     context is unambiguous — the thread for a specific object, or a Forum room. Everywhere else
+     the universal one is right, and guessing would be worse than asking plainly.
+
+     `focus` asks how it is going because a Focus is a commitment somebody made and the useful
+     thing to say about one is what happened. `inquiry`, `high` and `low` ask what they are
+     thinking, because those are questions the product is still working out and the person may
+     know something it does not. */
+  /* \u2500\u2500 THE INVITATION IS AN URGE TO START TALKING, NOT AN INPUT SCHEMA \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+     The page a person is on gives the Composer useful context \u2014 it is how "this", "that" and
+     "the thing we were discussing" get resolved. It must not narrow what they are allowed to
+     SAY. Somebody on Focuses can still ask why the last one failed; somebody on Highs can still
+     disagree with one; somebody on Home can still say "we won 3-0".
+
+     TWO TABLES, BECAUSE A BUCKET AND ONE OF ITS OBJECTS ARE DIFFERENT ROOMS. `_PLACEHOLDER.high`
+     used to serve both the Highs page and the inside of a single High, which is why the page
+     asked "What are you thinking?" \u2014 a question that belongs to a thread about one thing, on a
+     screen that is a list of many.
+
+     NOT "What do you want to know?" ANYWHERE. Founder: that turns IntelliQ into a search box.
+     It was the prompt shown after an attachment, which is the exact moment the product should
+     look least like a search engine \u2014 attaching is another way of speaking. */
+  /* \u2500\u2500 AND THEY ARE THIS SHORT BECAUSE A PHONE MEASURED THEM \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+     LIVE iPHONE BLOCKER, findings R1 #12: four of these were cut off mid-word on a real device.
+     The layout gave way first \u2014 an empty composer no longer shows a send button, and the bar's
+     gutters narrow below 440px, which together returned about sixty pixels to the text field.
+     These four were still over by 4 to 21 pixels at 390px, so the copy came the rest of the way.
+
+     Measured, not guessed: `scripts/composer-fit-browser-check.js` renders every one of them at
+     390px and 430px and compares the drawn text width against the field's own content box. It is
+     a gate rather than a note, because copy is the easiest thing in a product to lengthen by one
+     kind word and the defect it causes is invisible to whoever writes it.
+
+     The trims also made them consistent: all four are now questions, which is what the other two
+     already were. */
+  _PLACEHOLDER: {
+    home:    'What\u2019s on your mind?',
+    high:    'What have you noticed?',
+    low:     'What have you noticed?',
+    inquiry: 'What are you wondering?',
+    focus:   'What are you working on?',
+    notes:   'Ask about what you kept\u2026',
+    forum:   'Add to the conversation',
+  },
+
+  /* INSIDE an existing High, Low, Inquiry, Focus or other conversational object. One line for all
+     of them, deliberately: the founder's law is one intelligence in several human-facing forms,
+     and four different invitations would make them read as four applications. */
+  _OBJECT_PLACEHOLDER: 'Talk to IntelliQ about this\u2026',
+
+  /* An object thread asks about the thing it is about, whatever kind it is. The `kind` argument
+     is kept because every call site passes one and a future form may want to vary — but it does
+     not vary today, and pretending otherwise with four identical strings would be a lie about how
+     much the product distinguishes them. */
+  _placeholderFor() { return this._OBJECT_PLACEHOLDER; },
+
+  /* WHICH INVITATION THIS SCREEN SHOWS. Asked of the route rather than stored, so the shell
+     composer cannot drift out of step with the page under it, and an unknown route falls back to
+     the universal line rather than to a guess. */
+  _placeholderForRoute(route) {
+    return this._PLACEHOLDER[String(route || '')] || this._PLACEHOLDER.home;
+  },
+
+  /* Retarget whichever composer is on screen. There is one at a time, and it is whichever of the
+     three ids exists — so this asks rather than being told, and a screen with none is a no-op
+     rather than an error. `aria-label` moves with it, because a placeholder a screen reader does
+     not get is a placeholder half the people using this never see. */
+  _composerAsk(text) {
+    for (const id of ['iq-object-input', 'iq-forum-input', 'iq-composer-input']) {
+      const el = document.getElementById(id);
+      if (el) { el.placeholder = text; el.setAttribute('aria-label', text); return; }
+    }
+  },
+
+  /* ── THE COMPOSER THAT NAVIGATION CANNOT TAKE AWAY ──────────────────────────────────────────
+     Founder's law: ever-present, not ever-dominant. Driven as a new member at 390px it was
+     neither — it was rendered inside #page-home's template, so it was the main event on Home and
+     did not exist on the other seven pages. Nothing was broken; the bar simply belonged to a page
+     instead of to the product, and leaving a page took it with you.
+
+     It renders into #iq-shell-composer, a sibling of <main>, so it survives navigation. Two rules
+     decide whether it is on screen, and both are about not asking a question twice:
+
+       · a page that brought its OWN composer wins. An object thread and the Forum each render one
+         (iq-object-input, iq-forum-input) and each sends somewhere different, so two inputs on one
+         screen is a genuine question about which is listening. The shell one stands down.
+       · a session that has ended stands it down, because _sessionEnded's job is to stop a person
+         writing something nothing will carry.
+
+     SIGNED OUT IS NOT CHECKED HERE, deliberately. The first version of this asked
+     `Auth.currentUser` and the composer then failed to render on every page including Home —
+     that property is falsy in the ordinary signed-in case, so the guard was simply wrong. It was
+     also unnecessary: the sign-in screen hides #app outright, and this lives inside it.
+
+     It ASKS the DOM rather than being told the route, the same way _composerAsk does. A new page
+     with its own composer is handled without anybody remembering to update a list here. */
+  _OWN_COMPOSER_IDS: ['iq-object-input', 'iq-forum-input'],
+
+  /* `route` IS PASSED IN by navigate, which is the only caller that knows where we have just
+     arrived. The first version read `window.AppState.currentPage` and silently got undefined on
+     every page: AppState is declared at the top level of js/data.js, which makes it script-scoped
+     rather than a property of window — the same thing that made an earlier assertion read
+     undefined and fail against a correct product. Falling back to the bare identifier, which IS
+     in scope here, so a caller that does not know the route still gets the right answer. */
+  _currentRoute(route) {
+    if (route) return route;
+    try { return (typeof AppState !== 'undefined' && AppState.currentPage) || 'home'; }
+    catch (_) { return 'home'; }
+  },
+
+  _renderShellComposer(route) {
+    const host = document.getElementById('iq-shell-composer');
+    if (!host) return;
+    const yielded = this._OWN_COMPOSER_IDS.some(id => {
+      const el = document.getElementById(id);
+      return !!(el && el.offsetParent !== null);
+    });
+    if (yielded || this._sessionOver) { host.innerHTML = ''; return; }
+    /* Already up: re-rendering would throw away whatever is half-typed in it. But the composer
+       used to be rebuilt by every navigation, and one thing depended on that — the voice status
+       line, which describes a MICROPHONE SESSION rather than the page. Navigation cancels every
+       live session (see navigate step 3b), so the sentence about it has to go at the same moment.
+
+       Caught by PC-O2 measuring 31px where an empty line should reserve nothing: "Microphone
+       access was declined. You can allow it in your browser settings, or just type." was still
+       sitting under the composer several pages later. Not a test artifact — a person who declines
+       the microphone prompt once would have carried that line on every screen for the rest of the
+       session, and there is no _sessionEnded case to protect here because that hides the whole
+       composer above. */
+    const standing = document.getElementById('iq-composer-input');
+    if (standing) {
+      const st = host.querySelector('.iq-voice-state');
+      if (st && st.textContent) { st.textContent = ''; st.className = 'iq-voice-state'; }
+      /* AND THE INVITATION FOLLOWS THE PAGE. The bar is deliberately not rebuilt on navigation —
+         that is what protects a half-typed sentence — but the consequence was that the placeholder
+         was whatever the FIRST page to render it had asked for. Driven at 390px: Highs, Lows,
+         Inquiries, Focuses and Library all still read "What's on your mind?", because Home had
+         rendered the bar and nothing ever changed the word. Retargeted rather than re-rendered, so
+         the draft survives. */
+      const want = this._placeholderForRoute(this._currentRoute(route));
+      if (standing.placeholder !== want) {
+        standing.placeholder = want;
+        standing.setAttribute('aria-label', want);
+      }
+      return;
+    }
+    /* There is no visibility flag to reset here any more. A rebuilt composer used to need
+       `_wsShare = false` so the button and the state behind it agreed; with the mode gone there is
+       no state, which is the point — nothing about this composer can be left in a condition that
+       changes who reads the next thing somebody types. */
+    host.innerHTML = this._composerHTML({ id: 'iq-composer-input',
+      /* ── ONE COMPOSER, SEVERAL PRESENTATION STATES ────────────────────────────────────────
+         "Type anything" describes the INPUT rather than inviting the person to use it, and an
+         instruction about a text box is the least interesting thing a blank composer could say.
+         The placeholders are held together in `_PLACEHOLDER` so the screens that offer a composer
+         read as one product asking in different rooms rather than boxes labelled by different
+         people. Short, because on a phone a long one truncates and an instruction cut off halfway
+         is worse than no instruction at all. */
+      /* THE PAGE UNDER IT CHOOSES THE WORDS. The shell composer was hard-wired to Home's
+         invitation, so Library, Focuses, Highs, Lows and Inquiries all asked "What's on your
+         mind?" — true, but it wastes the one line on each page that could say what this room is
+         for. The intelligence is identical on all of them; only the invitation changes. */
+      placeholder: this._placeholderForRoute(this._currentRoute(route)),
+      /* ── NO PRIVATE/PUBLIC MODE HERE, BY LAW ──────────────────────────────────────────────
+         A "Private | Public" toggle used to sit on this row. It set `_wsShare`, which reached
+         nothing: it was not in the turn body and no other code read it. A control that appears to
+         choose who can see what you say, and does not, is the worst kind of privacy defect —
+         somebody trusts it and says something they would not otherwise have said.
+
+         It was removed rather than wired up, and the founder's reason is the product law rather
+         than the bug: TALKING TO INTELLIQ IS NOT CONTRIBUTING TO THE ORGANISATION. This composer
+         is the person's own conversation — asking, exploring, attaching a photo, thinking aloud —
+         and that is private under the existing privacy rules, always, with no mode to get wrong.
+
+         Wiring it up would have been worse than leaving it dead. A global public MODE means
+         somebody who shares one sentence has silently changed the audience of every sentence
+         after it, and the moment they forget is the moment it matters.
+
+         Contributing is a separate deliberate act, and the machinery for it already exists: the
+         `share_to_forum` action names the audience, shows the exact words, lets them be edited,
+         and requires confirmation; a High, Low, Inquiry or Focus has its own audience control on
+         its own thread. Those are untouched. What is gone is only the mode that pretended to be
+         one of them. */
+      send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
+        <span class="iq-hint-note">Private to you</span>
+        <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
+      </div>` });
+    this._watchShellComposerHeight();
+  },
+
+  /* THE ROOM BELOW THE PAGE IS WHATEVER THE BAR ACTUALLY TAKES. The reservation started as a flat
+     104px against a bar that measures about 148px at rest, so it reserved less than it covered.
+     A constant cannot be right in any case: the bar grows as somebody types and when the voice
+     status line fills, and a page that reserved a fixed amount would have content slide under it
+     exactly when there is most to read.
+
+     One observer for the life of the bar, not one per render. If ResizeObserver is missing the
+     CSS fallback stands, which is why that fallback is a height the bar does not exceed at rest
+     rather than a tidy-looking number. */
+  /* ── AND IT IS NOT ONLY THE SHELL BAR THAT NEEDS THIS ─────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #22: "the Focus conversation composer is effectively
+     off-screen after long responses". Driven at 390x844 against a real Focus with two dozen
+     turns, the thread's composer measured `top: 7203` in an 844px viewport, with the page 7431px
+     tall. Not buried — absent. A person would have to scroll seven thousand pixels to reach the
+     box that is the whole point of the screen.
+
+     WHY, AND IT IS NOT A MISSING RULE. The composer already carried `position: sticky; bottom:0`.
+     Sticky resolves against the nearest ANCESTOR SCROLL CONTAINER, and `main.page-content` has
+     `overflow:auto` — so it is that container — while its height grows with its content and the
+     document scrolls on `body` instead. A scrollport with no scroll range never engages a sticky
+     element, so the rule was inert everywhere it was used: on the object thread and in the Forum
+     room, which share this markup.
+
+     The shell bar met the same scroll model and was already solved, by being `position: fixed`
+     with the page reserving its measured height underneath. The note beside that fix says why it
+     did not restructure the scroll model to make sticky work: "giving `.main-wrap` a fixed height
+     would change how every page in the app scrolls, which is not a change to make for a bar".
+     That reasoning has not changed, so the in-page composers use the mechanism that works rather
+     than a second attempt at the one that does not.
+
+     ONE VARIABLE, because exactly one composer bar is on screen at a time — the object thread and
+     the Forum room each stand the shell one down as they render. So the reservation under
+     `.page-content` is always the height of the bar that is actually there. */
+  _watchShellComposerHeight() { this._watchComposerHeight('#iq-shell-composer .iq-composer-wrap'); },
+
+  _watchComposerHeight(selector) {
+    const wrap = document.querySelector(selector);
+    if (!wrap) return;
+    const set = h => document.documentElement.style.setProperty(
+      '--iq-shell-composer-h', Math.round(h) + 'px');
+    set(wrap.getBoundingClientRect().height);
+    if (typeof ResizeObserver !== 'function') return;
+    try {
+      if (this._shellComposerRO) this._shellComposerRO.disconnect();
+      this._shellComposerRO = new ResizeObserver(es => {
+        for (const e of es) set(e.contentRect.height + 16);   // + the wrap's own vertical padding
+      });
+      this._shellComposerRO.observe(wrap);
+    } catch (_) { /* the fallback height stands */ }
+  },
+
+  /* `_placeholderFor` LIVES BESIDE THE TABLES, above. A second copy stood here, and because a
+     later key wins in an object literal it was the one that ran — so an object thread would have
+     been given the BUCKET PAGE's invitation ("Tell me what you've noticed…") the moment those
+     keys changed meaning. Two owners for one answer is the shape this file keeps folding away. */
+
   _composerHTML({ id, placeholder, send, mic, state, attach = true, hint = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
+    /* A composer rendered AFTER the session ended must come out disabled. `_sessionEnded` reaches
+       every composer on the page when the 401 arrives, but a page rendered a moment later would
+       otherwise put a fresh, fully usable one back — which is how the founder ended up typing into
+       a composer that had no session to send it with. Disabled here, at the one owner. */
+    const off = this._sessionOver;
+    const dis = off ? ' disabled' : '';
     return `
       <div class="iq-composer-wrap">
-        <div class="iq-composer">
-          ${attach ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
+        <div class="iq-composer${off ? ' iq-composer-off' : ''}">
+          ${attach && !off ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
-            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
+            <!-- WHAT THIS PICKER OFFERS IS DERIVED, never typed here. It used to be a third
+                 hand-written list that agreed with neither of the two real ones: it offered .json
+                 and .markdown, which the parser has no entry for; .doc, which routes to the docx
+                 processor and throws because a legacy binary is not a zip; and NOT .pptx or .xlsx,
+                 which are the formats the whole material feature was built for. This composer
+                 sends TEXT to the server, so the list it may offer is the Material list, and the
+                 one owner beside the processors is the only place it is written down. -->
+            <!-- The COMPOSER list, which is the Material list plus the image types the server
+                 will actually read. Named types rather than image/*, so an iPhone cannot offer a
+                 HEIC the upload would then refuse. -->
+            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.composerAcceptAttr() : '')}" onchange="MemberApp.wsAttach(this)">
           </label>` : ''}
-          <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"
+          <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"${dis}
             placeholder="${esc(placeholder)}"
             oninput="MemberApp._wsGrow(this)"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();${send}}"></textarea>
-          <button class="iq-mic" id="${esc(mic)}" type="button" aria-label="Speak instead of typing"
+          <button class="iq-mic" id="${esc(mic)}" type="button"${dis} aria-label="Speak instead of typing"
             title="Speak instead of typing" aria-pressed="false" onclick="MemberApp._micFor('${esc(id)}','${esc(mic)}','${esc(state)}')">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
           </button>
-          <button class="iq-send" type="button" aria-label="Send" title="Send" onclick="${send}">
+          <button class="iq-send" type="button"${dis} aria-label="Send" title="Send" onclick="${send}">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
           </button>
         </div>
         ${hint}
-        <div class="iq-voice-state" id="${esc(state)}" role="status" aria-live="assertive"></div>
+        <div class="iq-voice-state" id="${esc(state)}" role="status" aria-live="assertive">${off ? 'Your session has ended. Sign in again to carry on.' : ''}</div>
       </div>`;
   },
 
@@ -12236,7 +14791,7 @@ const MemberApp = {
     if (mine) return `<div class="iq-msg iq-msg-user">${esc(text)}</div>`;
     return `<div class="iq-msg iq-msg-iq">${esc(text)}
       ${this._sourcesHTML(m.sources)}
-      ${this._msgActions(text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources })}</div>`;
+      ${this._msgActions(text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech })}</div>`;
   },
 
   /* ── WHAT INTELLIQ SAID, AND WHAT YOU CAN DO WITH IT ───────────────────────────────────
@@ -12254,7 +14809,7 @@ const MemberApp = {
      The row is deliberately quiet — small, low-contrast, no colour on the rating (D14b: no
      red/amber/green anywhere a judgement could be read off a face). It appears on assistant
      messages only. */
-  _msgActions(text, { messageId = null, at = null, rating = null, sources = null, conversationId = null } = {}) {
+  _msgActions(text, { messageId = null, at = null, rating = null, sources = null, conversationId = null, speech = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const j = v => this._escape(JSON.stringify(JSON.stringify(v == null ? '' : v)));
     const has = Array.isArray(sources) && sources.length;
@@ -12273,10 +14828,10 @@ const MemberApp = {
         onclick="MemberApp._rateMsg(this,'down')">
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1z"/><path d="M17 14l-4.2 7.1a1.7 1.7 0 0 1-3.1-1.2L10.8 15H5.5a2 2 0 0 1-1.95-2.45l1.4-6A2 2 0 0 1 6.9 5H17"/></svg>
       </button>
-      <button type="button" class="iq-act" aria-label="Read this aloud" title="Read aloud"
-        onclick="MemberApp._speak(${j(text)})">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
-      </button>
+      <!-- READ ALOUD speaks the SERVER'S approved rendering of this answer, handed in here and
+           never assembled from the row. A control that cannot work is not drawn: an unsupported
+           browser gets the reason in its place rather than a button that does nothing. -->
+      ${this._voiceControl(speech, rid)}
       ${has ? `<button type="button" class="iq-act iq-act-src" aria-expanded="false"
         onclick="MemberApp._toggleSources(this)">${sources.length} source${sources.length === 1 ? '' : 's'}</button>` : ''}
       <span class="iq-act-said" role="status" aria-live="polite"></span>
@@ -12289,7 +14844,16 @@ const MemberApp = {
   _sourcesHTML(sources) {
     if (!Array.isArray(sources) || !sources.length) return '';
     const esc = s => this._escape(String(s == null ? '' : s));
-    const word = { record: 'From your records', belief: 'Working picture', work: 'Your work', web: 'From the web' };
+    /* FOUR KINDS OF THING A SENTENCE CAN REST ON, and they are not interchangeable — findings R1
+       #41. What the record holds, what IntelliQ is working out from it, the person's own assigned
+       work, a document they attached, and something read on the web are five different claims
+       about where an answer came from, and a reader deciding whether to trust it is deciding
+       between them. `material` was missing entirely: a document handed to the model was cited by
+       nothing, so "2 sources" listed the record and omitted the deck the person had just
+       uploaded. An unknown kind still falls through to the honest "Source" rather than being
+       dressed as one of these. */
+    const word = { record: 'From your records', belief: 'Working picture', work: 'Your work',
+      material: 'Something you attached', web: 'From the web' };
     return `<div class="iq-srcs" hidden>
       ${sources.map(s => `<div class="iq-src">
         <div class="iq-src-top"><span class="iq-src-kind">${esc(word[s.kind] || 'Source')}</span><span class="iq-src-label">${esc(s.label)}</span></div>
@@ -12359,21 +14923,48 @@ const MemberApp = {
     if (btn) btn.textContent = show ? 'Hide' : 'See what I think so far';
   },
 
-  /* Read aloud, on request only. Browser speech synthesis — no vendor, no upload, no audio
-     leaving the device. If the browser cannot do it, the button simply does nothing rather
-     than promising something that will not happen. */
-  _speak(textJson) {
-    let text = ''; try { text = JSON.parse(textJson); } catch (_) { return; }
-    const synth = window.speechSynthesis;
-    if (!synth || !window.SpeechSynthesisUtterance || !text) return;
-    try {
-      synth.cancel();                       // one voice at a time; tapping again stops the last
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.0; u.lang = document.documentElement.lang || 'en-GB';
-      synth.speak(u);
-    } catch (_) {}
+  /* ── READ ALOUD ──────────────────────────────────────────────────────────────────────────
+     BROWSER speech synthesis, on request only. No vendor, no upload, no audio leaving the
+     device — and it is a COMPLETELY SEPARATE CAPABILITY from the server-side transcription in
+     ai/gateway.js. They share the word "voice" and nothing else: one is the browser reading text
+     out on this device, the other is an OpenAI key turning an audio file into text on a server.
+     Conflating them would have Settings promise a microphone because a key exists somewhere, or
+     promise reading-aloud because a browser has a microphone.
+
+     TWO THINGS WERE WRONG HERE.
+
+     IT FAILED SILENTLY. "If the browser cannot do it, the button simply does nothing" — which is
+     the defect class this entire engagement exists to remove. A person taps Read aloud, nothing
+     happens, and there is no way to tell a browser that cannot speak from a phone on silent from
+     a product that is broken. Every exit now SAYS something, in the live region the row already
+     carries for exactly this purpose.
+
+     IT SPOKE LESS THAN THE SCREEN SHOWED. A reply on screen sits above its sources and, where
+     there is one, its standing — and somebody listening rather than reading got the claim with
+     neither. Reading a claim aloud and leaving its uncertainty behind is the one asymmetry
+     between the two channels that actually matters, because a spoken sentence carries more
+     confidence than a written one, not less. So what is spoken is what is VISIBLE: the same
+     words, then how many sources it rests on. Nothing is added that is not on the screen, and
+     nothing on the screen that qualifies the claim is dropped. */
+  /* ── READING ALOUD LIVES IN ONE PLACE, AND IT IS NOT THIS FILE ───────────────────────────
+     js/voice-output.js (window.IQVoiceOut) owns the whole state machine: whether this browser can
+     speak, whether there is an approved rendering to speak, what is drawn when there is not, and
+     every state in between. It used to live here, beside the row that renders the button, which
+     is how it came to COMPOSE the spoken sentence out of the message text and a source count it
+     counted for itself — a second author for one answer, on the channel where drift costs most.
+
+     What is left here is delegation and nothing else. If a voice rule appears below this comment
+     again, it is a second implementation and it is the bug. */
+  _voiceControl(speech, rid) {
+    if (typeof IQVoiceOut === 'undefined') return '';
+    return IQVoiceOut.control(speech, rid);
   },
 
+  /* Stop anything being read aloud. Navigation and a newly arrived answer both call this: a
+     reading belongs to the answer it came from, and both of those replace it. */
+  _voiceStop(why) {
+    try { if (typeof IQVoiceOut !== 'undefined') IQVoiceOut.stop(why || 'stopped'); } catch (_) {}
+  },
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
@@ -12401,6 +14992,68 @@ const MemberApp = {
       : type === 'unprioritise_object' ? 'Take this off my priorities.'
       : type === 'discuss_with_group' ? 'I would like to discuss this with the group.' : 'Open this.';
     await this.inquirySend();
+  },
+
+  /* ── HOW IT WENT, IN THE WORDS ITS OWN OWNER ACCEPTS ──────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #14. Two things have to be true at once and they pull
+     against each other, which is why this is a picker and not a text box.
+
+     THE OUTCOME WORD IS A CLOSED VOCABULARY. A personal focus records helped / no / mixed; a
+     group focus records better / no_change / worse / unclear. They were separated deliberately
+     and the canonical writer refuses a word from the other grain, so free text cannot become an
+     outcome — a person typing "it was alright" has said nothing the record can hold.
+
+     AND THE WORD MUST BE THEIR OWN. A model may never decide for somebody how their commitment
+     went. Tapping one of the words the product itself offers is a declaration at least as
+     deliberate as typing it, and more exact; `ai/composer-actions.js` honours it only for a word
+     in the vocabulary for THIS focus's grain, and only when the person pressed a control.
+
+     WHICH VOCABULARY IS ASKED OF THE OBJECT, not guessed here. A focus that belongs to a node is
+     a group focus, which is the same thing every other reader in the product keys on. Asking a
+     coach "did it help, not help, or was it mixed?" about their squad's focus invites an answer
+     the canonical route would then refuse — the exact failure the grounding layer's own note
+     records. */
+  beginFocusOutcome() {
+    const t = this._inquiryThread;
+    if (!t || t.kind !== 'focus') return;
+    const host = document.querySelector('.iqt-verdicts');
+    if (!host) return;
+    const open = document.getElementById('iqt-outcome');
+    if (open) { open.remove(); return; }              // idempotent: a second tap closes it
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const group = !!(t.scope && String(t.scope).startsWith('group:'));
+    const WORDS = group
+      ? [['better', 'It got better'], ['no_change', 'Nothing changed'], ['worse', 'It got worse'], ['unclear', 'Too tangled to tell']]
+      : [['helped', 'It helped'], ['no', 'It did not help'], ['mixed', 'Mixed']];
+    const row = document.createElement('div');
+    row.className = 'iqt-outcome';
+    row.id = 'iqt-outcome';
+    row.innerHTML = `<span class="iqt-outcome-q">What happened after this?</span>
+      <span class="iqt-outcome-btns">${WORDS.map(([w, label]) =>
+        `<button type="button" class="iqt-verdict" onclick="MemberApp.beginFocusOutcomeWord('${esc(w)}')">${esc(label)}</button>`).join('')}</span>
+      <span class="iqt-outcome-n">Nothing is recorded until you confirm it.</span>`;
+    host.insertAdjacentElement('afterend', row);
+  },
+
+  /* THE WORD IS CHOSEN, THE SENTENCE IS THEIRS. What was tried is the other half of #14 — "it
+     did not help" is a verdict on nothing until the record says what it is about — and the
+     outcome record has carried a `note` field since it was written. So the word is staged and
+     the composer asks for the tactic in their own words; that sentence becomes the turn AND the
+     note, and the governed proposal is what actually writes, after they confirm it. */
+  beginFocusOutcomeWord(word) {
+    const t = this._inquiryThread;
+    const input = document.getElementById('iq-object-input');
+    if (!t || !input) return;
+    const row = document.getElementById('iqt-outcome');
+    if (row) row.remove();
+    this._pendingComposerAction = { type: 'record_focus_outcome', arguments: { outcome: String(word) } };
+    this._composerAbout = { kind: t.kind, id: t.objectId };
+    input.value = '';
+    input.placeholder = 'What did you try, and what happened?';
+    this._wsGrow(input);
+    input.focus();
+    const state = document.getElementById('iqt-voice-state');
+    if (state) state.textContent = 'Say what you tried. Nothing is recorded until you confirm it.';
   },
 
   /* The three things a person can do to a belief. Each prefills the composer rather than firing
@@ -12488,10 +15141,32 @@ const MemberApp = {
         this._pendingComposerAction.arguments = { ...(this._pendingComposerAction.arguments || {}),
           ...(this._pendingComposerAction.type === 'create_focus' ? { text } : { because: text }) };
       }
-      const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
-        text, conversationId: thread.conversationId || undefined, about: thread.about,
-        surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
-      }) });
+      /* ONE ID FOR ONE SEND. If this request is retried — a dropped connection, a second tap on a
+         slow network — the server recognises its own message rather than recording the sentence
+         twice, which is what the founder saw on a live iPhone around a degraded response. Minted
+         per send, not per keystroke: a genuinely new message gets a genuinely new id. */
+      const clientTurnId = 'ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      /* AND THE SAME BOUNDED RETRY THE MAIN COMPOSER HAS, findings R1 #28. This surface had the
+         id and no retry at all, so a dropped connection on a phone put the person's sentence back
+         in the box and made them press send again — with the reply quite possibly already
+         composed on the server. The id makes a re-send the same turn, and the server replays the
+         answer it already gave, so trying again costs nothing and risks nothing. A response that
+         ARRIVES is never retried, however unwelcome: retrying a judgement is how a product argues
+         with its own server. */
+      const _send = async (attempt = 0) => {
+        try {
+          return await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
+            text, conversationId: thread.conversationId || undefined, about: thread.about,
+            surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
+            clientTurnId,
+          }) });
+        } catch (netErr) {
+          if (attempt >= 2) throw netErr;
+          await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt)));
+          return _send(attempt + 1);
+        }
+      };
+      const response = await _send();
       const data = await response.json().catch(() => null);
       if (!response.ok || !data || !data.ok) {
         throw new Error((data && data.error) || `server said ${response.status}`);
@@ -12547,19 +15222,9 @@ const MemberApp = {
     if (btn) { btn.setAttribute('aria-expanded', open ? 'true' : 'false'); btn.textContent = open ? 'Hide' : 'Why I think this'; }
   },
 
-  /* Provenance in one plain sentence rather than four counted fields. "4 things you've told me,
-     from 2 separate occasions" is the same information as evidenceCount/independentOrigins and
-     is the difference between a record and a reason. */
-  _provenanceLine(d) {
-    const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
-    if (!n) return 'Nothing recorded under this yet.';
-    const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
-    if (o > 1) bits.push(`from ${o} separate occasions`);
-    else if (o === 1) bits.push('all from one telling');
-    if (c) bits.push(`${c} since corrected`);
-    if (d.contested) bits.push('and accounts disagree');
-    return bits.join(', ') + '.';
-  },
+  /* `_provenanceLine` used to live here. It moved to the server (see server.js) when the opening
+     card gained a spoken channel: the same counts are now both shown and said, and a figure
+     computed in the browser and again on the server is two figures waiting to disagree. */
 
   /* Open the assistant ALREADY POINTED AT this object, through the existing `about` binding —
      no new route, no floating chatbot with no context. */
@@ -12575,8 +15240,35 @@ const MemberApp = {
      there the ordinary wsSend() path — the same turn, the same governance. Voice reaches
      nothing typing does not. */
 
-  /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
-  _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },
+  /* Auto-grow the composer up to a calm maximum; keeps the hero compact.
+
+     ── AND ONE CONTROL ON THE RIGHT AT A TIME ───────────────────────────────────────────────
+     LIVE iPHONE BLOCKER, findings R1 #12: the composer placeholder was cut off on Highs, Lows,
+     the Library and a Focuses surface. Measured at 390px, the cause is not the copy: the row is
+     342px wide and the text field gets 176px of it, because attach, mic and send are three 44px
+     tap targets and 44px is the floor a thumb needs. Barely twenty characters fit, so every
+     invitation longer than "What's on your mind?" was clipped mid-word.
+
+     The founder's note offered shorter copy as a way out. Twenty characters is not enough for a
+     human invitation, and cutting these to fit would have traded a visible defect for a cryptic
+     product — the opposite of the simplicity the same brief asks for.
+
+     SO THE LAYOUT GIVES WAY INSTEAD, on a rule that is simply true: AN EMPTY COMPOSER HAS
+     NOTHING TO SEND. With no text there is a microphone and no send button; the moment there is
+     text they swap. One control on the right either way, ~52px back to the text field, and no
+     capability moves — the send button is there whenever there is something to send, and Enter
+     has always worked regardless.
+
+     This function is the one owner of "the composer's content changed" — every clear, prefill,
+     transcript and keystroke comes through it — so the class is set here rather than at each of
+     the eight call sites. */
+  _wsGrow(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+    const row = el.closest ? el.closest('.iq-composer') : null;
+    if (row) row.classList.toggle('has-text', String(el.value || '').trim().length > 0);
+  },
 
   /* Empty-state chips prefill the ONE composer with a gentle starter and focus it — no new
      capability, just a faster way into the same assistant turn. */
@@ -12729,21 +15421,31 @@ const MemberApp = {
     if (ta && !isOpening) { ta.value = ''; this._wsGrow(ta); }
 
     this._cardThreads = this._cardThreads || this._cardThreadsLoad();
-    let j = null;
+    let j = null, cls = null;
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         body: JSON.stringify({ text, conversationId: this._cardThreads[dedupeKey] || undefined,
           about: { headline: info.headline, body: info.body } }) });
-      j = await r.json();
+      // The card thread is a write surface like any other, and its 401 is the same fact as every
+      // other 401. It used to report "I couldn't reach IntelliQ" — a connection problem — for a
+      // session that had simply ended, and left this textarea usable for the next attempt.
+      cls = this._classifyWrite(r);
+      j = cls.ok ? await r.json() : null;
       if (j && j.conversationId) { this._cardThreads[dedupeKey] = j.conversationId; this._cardThreadsSave(); }
-    } catch (_) { j = null; }
+    } catch (_) { j = null; cls = { ok: false, reason: 'offline' }; }
 
     const pend = msgs && msgs.querySelector('[data-pending="1"]');
     if (pend) {
       pend.removeAttribute('data-pending');
       if (j && j.ok) pend.innerHTML = this._renderAssistant(j);
-      else { pend.classList.add('iq-msg-error'); pend.innerHTML = `<div class="iq-error-text">I couldn't reach IntelliQ just now.</div>`; }
+      else {
+        pend.classList.add('iq-msg-error');
+        const why = cls && cls.reason === 'auth' ? 'Your session has ended. Sign in again to carry on.'
+          : cls && cls.reason === 'forbidden' ? 'You do not have access to this any more.'
+          : "I couldn't reach IntelliQ just now.";
+        pend.innerHTML = `<div class="iq-error-text">${this._escape(why)}</div>`;
+      }
     }
     this._cardSending = false;
   },
@@ -12782,6 +15484,22 @@ const MemberApp = {
     const isRetry = retryText != null;
     const text = isRetry ? String(retryText) : (input?.value || '').trim();
     if (!text || this._wsSending) return;                 // guard: no empty send, no double-submit
+
+    /* THE ANSWER HAS TO LAND WHERE THEY CAN SEE IT. The composer is in the shell now, so it can be
+       used from Library, Settings, the Org Tree or any bucket page — but the conversation it
+       writes into (#iq-conversation) lives on Home. Driven from Library: the turn reached the
+       server, the reply rendered correctly, and the person saw nothing at all, because it was
+       rendered into a page that was not on screen. A send that appears to do nothing is worse
+       than a composer that was never offered.
+
+       So asking takes you to the conversation. Only when it is actually off screen — on Home this
+       is a no-op — and only for a real send, never a retry, which is already in the thread. */
+    if (!isRetry) {
+      const convo = document.getElementById('iq-conversation');
+      if (!convo || convo.offsetParent === null) {
+        try { navigate('home'); } catch (_) {}
+      }
+    }
     this._wsSending = true;
     const sendBtn = document.getElementById('iq-send');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('is-loading'); }
@@ -12903,7 +15621,7 @@ const MemberApp = {
       thread.innerHTML = (j.messages || []).map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
         : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
-            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: j.conversation.id })}</div>`).join('');
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech, conversationId: j.conversation.id })}</div>`).join('');
       thread.scrollTop = thread.scrollHeight;
     } catch (e) { thread.innerHTML = `<div class="iq-msg iq-msg-iq">Couldn't open that conversation.</div>`; }
   },
@@ -12936,6 +15654,12 @@ const MemberApp = {
   async wsAttach(fileInput) {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (!file) return;
+    const objectThread = this._inquiryThread;
+    const retryContext = fileInput && fileInput.retryContext;
+    const about = retryContext ? retryContext.about : (objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null));
+    // Never borrow the plain private chat's conversation ID for a scoped object.
+    // Retrying after navigation keeps the original object and conversation binding.
+    const conversationId = retryContext ? retryContext.conversationId : (about ? (objectThread?.conversationId || undefined) : (this._chatConvId || undefined));
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
     if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
@@ -12943,33 +15667,177 @@ const MemberApp = {
     if (thread) thread.scrollTop = thread.scrollHeight;
     fileInput.value = '';
     const done = (html) => { const p = document.getElementById('iq-attach-pending'); if (p) { p.removeAttribute('id'); p.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
+    /* ── AND ON SUCCESS, NOTHING IS SAID AT ALL ────────────────────────────────────────────────
+       The file is already in the thread as the PERSON'S OWN message, which is what attaching is:
+       another way of speaking. A second bubble from IntelliQ announcing that the file arrived is
+       the product narrating its own plumbing — first as "Read 10 parts from IMG_1918.png", then,
+       after that was cut back, as "I can see IMG_1918.png". Both are the same shape: a receipt.
+
+       Somebody who attaches a screenshot and writes "look at all those draws" should get an answer
+       about the draws, not an acknowledgement followed by an answer.
+
+       The waiting bubble stays while the upload is in flight, because a phone on a stadium
+       connection needs to see that something is happening — and it stays on FAILURE, where the
+       error and its retry are the only way back. It is removed only when there is nothing left to
+       say. */
+    const quietly = () => {
+      const p = document.getElementById('iq-attach-pending');
+      if (p) p.remove();
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    };
     try {
       if (typeof AttachmentHandler === 'undefined') throw new Error('The uploader isn’t available right now.');
-      const parsed = await AttachmentHandler.process(file);
-      const content = parsed.content || parsed.summary || '';
-      if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
-      const objectThread = this._inquiryThread;
-      const about = objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null);
-      const r = await fetch('/api/assistant/attachments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
-          conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
-      });
-      const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      /* ── A WORD, EXCEL OR POWERPOINT FILE GOES UP WHOLE ──────────────────────────────────────
+         FOUNDER DECISION, September 2026: Office parsing belongs server-side. This browser used to
+         open those three formats itself with JSZip and SheetJS — two CDN script tags — and post
+         the extracted text. When those scripts did not arrive, and round 5 measured that they
+         often do not, the capability silently was not there.
+
+         So the browser now does what a browser should: select, upload, show the attachment, and
+         let the conversation carry on. `lib/office.js` on the server reads it with Node's own
+         zlib and no dependency at all. The picture path was already this shape, which is why
+         there is one branch here and not two. */
+      const officeKind = AttachmentHandler.serverReadKind
+        ? AttachmentHandler.serverReadKind(file) : null;
+      const parsed = officeKind ? null : await AttachmentHandler.process(file);
+      /* A PICTURE HAS NO TEXT TO EXTRACT, AND THAT IS NOT A FAILURE. Everything else this handler
+         produces is words pulled out in the browser; an image produces BYTES, and the reading is
+         done by the server through the vision gateway. So the "no text in that file" refusal below
+         is right for a document and would be wrong here -- an image with no `content` is the
+         ordinary case, not a broken upload. */
+      const isImage = parsed && parsed.kind === 'image' && parsed.data;
+      /* A DOCUMENT THE SERVER WILL READ has no text here either, for the same reason: what goes
+         up is the file. The "no text in that file" refusal below belongs to the browser-parsed
+         shapes only — csv, txt, md — and applying it to the other two would refuse every upload
+         that is working correctly. */
+      const officeBytes = officeKind ? await AttachmentHandler.fileToBase64(file) : null;
+      const content = (isImage || officeKind) ? '' : (parsed.content || parsed.summary || '');
+      if (!isImage && !officeKind && !String(content).trim()) throw new Error('I couldn’t read any text from that file.');
+
+      /* BOUNDED, like every other write in this file. An upload with no ceiling leaves
+         "Reading that file…" on the screen for as long as the person is willing to wait, which
+         is the same defect the bounded reader was built to remove — and the mobile case it
+         matters most for is the one where the connection drops mid-transfer, which resolves the
+         headers and then stalls. Cleared in `finally`, never on the headers. */
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
+      let r, raw;
+      try {
+        r = await fetch('/api/assistant/attachments', {
+          method: 'POST', signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+          /* ONE DOOR, THREE SHAPES. A picture sends bytes for the vision gateway; a Word,
+             Excel or PowerPoint file sends bytes for `lib/office.js`; everything else sends the
+             text the browser could read on its own. Same route, same conversation binding, same
+             material laws afterwards — which is the whole point of not building a second path. */
+          body: JSON.stringify(isImage
+            ? { image: { data: parsed.data, mimetype: parsed.mediaType, name: file.name },
+                title: file.name, filename: file.name, conversationId, about }
+            : officeKind
+            ? { file: { data: officeBytes, kind: officeKind, name: file.name },
+                title: file.name, filename: file.name, conversationId, about }
+            : { kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
+                conversationId, about }),
+        });
+        raw = await r.text();
+      } catch (err) {
+        /* WHAT THIS CARD MAY AND MAY NOT CLAIM. It said "Nothing was saved", and it could not
+           know that: an aborted fetch says nothing whatever about what the server did with the
+           bytes it already had. The material may be committed and the thread may exist; the only
+           thing that certainly failed is the journey home. Telling somebody their work was lost
+           when it was not is worse than telling them nothing, because it is the sentence that
+           makes them do it over.
+
+           So the card says what is true — it could not be confirmed — and then says the thing
+           that makes Try again safe to press, which is now a property of the server rather than a
+           hope: the same document sent twice reconciles to one material and one thread. */
+        throw new Error(String(err && err.name) === 'AbortError' || String(err) === 'timeout'
+          ? 'That took too long to confirm, so I cannot tell you whether it saved. Try again — the same file will not be added twice.'
+          : 'I could not reach IntelliQ to save that.');
+      } finally { clearTimeout(timer); }
+      let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      /* An upload that discovers the session has ended is the SAME fact as a read discovering it,
+         and it used to become a local "I couldn't save that" inside this one card — leaving the
+         composer, the microphone and the paperclip live for the next attempt, which could not
+         work either. Through the one classifier, so the whole app learns it once. */
+      if (r.status === 401) {
+        this._classifyWrite(r);
+        throw new Error('Your session has ended. Sign in again to carry on.');
+      }
       if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || 'I couldn’t save that.');
-      if (d.conversationId && !objectThread) this._rememberChat(d.conversationId);
-      if (objectThread && d.conversationId) objectThread.conversationId = d.conversationId;
+      if (d.conversationId && !about) this._rememberChat(d.conversationId);
+      if (objectThread && d.conversationId && JSON.stringify(objectThread.about || null) === JSON.stringify(about)) objectThread.conversationId = d.conversationId;
       this._pendingAttachment = { id: d.materialId, name: file.name };
-      done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
+      /* ATTACHING IS ANOTHER WAY OF SPEAKING, so the composer keeps inviting them to speak. It
+         used to switch to "What do you want to know?", which is the moment the product should
+         look LEAST like a search box: they have just shown IntelliQ something. */
+      this._composerAsk(this._OBJECT_PLACEHOLDER);
+      /* AND THE RECEIPT GOES. It read:
+             "Read 10 parts from IMG_1918.png. It is context for this conversation, not evidence
+              about you or your organisation."
+         Two things wrong with it, both named by the founder from a real phone.
+
+         "Read 10 parts" is the parser talking. How a file was segmented is machinery; a person
+         who attaches a screenshot wants to know it arrived and then wants to talk about it.
+
+         And "not evidence" had quietly become FALSE as a flat claim. It is not evidence YET —
+         but the person may say "use this as evidence", and the governed path for that exists.
+         A sentence that forecloses something the product supports teaches people not to ask.
+
+         The law itself is untouched and is not weakened by removing a sentence about it: material
+         still never reaches applyProposals, which is asserted behaviourally in
+         attachment-boundary-http-smoke rather than claimed in a receipt. */
+      quietly();
     } catch (e) {
-      done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`);
+      /* AND A WAY BACK. An error card with no control is a dead end on the one surface where a
+         person has already done the work of finding the file — the picker has been cleared, so
+         without this they have to go and find it again to learn whether it was the file or the
+         connection. The File object is held for exactly one retry and dropped after it. */
+      this._retryAttach = { file, about, conversationId };
+      done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`
+        + ` <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.wsAttachRetry(this)">Try again</button>`);
     }
+  },
+
+  /* The same file, the same path, once. Not a loop: a control that retries forever teaches
+     somebody to keep pressing it while nothing changes. */
+  wsAttachRetry(btn) {
+    const retry = this._retryAttach;
+    this._retryAttach = null;
+    if (btn) btn.remove();
+    if (!retry) return;
+    return this.wsAttach({ files: [retry.file], value: '', retryContext: retry });
   },
 
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
      hint. Returns { ok, j } or { ok:false, reason } so the caller can recover gracefully. A
      30s timeout prevents a hung request leaving "thinking…" forever. */
-  async assistantTurn(text, targetEl) {
+  /* ── ONE SEND, ONE ID, AND A WEAK LINK IS NOT A FAILURE ───────────────────────────────────
+     LIVE iPHONE, findings R1 #28. The founder's phone had Wi-Fi and cellular and a brief patch of
+     weakness, and the product answered from the deterministic path with the full degradation
+     banner. Driven from the real path, two things were true here and neither was the provider.
+
+     THIS SURFACE HAD NO CLIENT TURN ID AT ALL. The object thread's composer mints one — that is
+     what makes a re-send the same turn rather than a second one — and the MAIN conversation, the
+     surface a person uses most, did not. So the durable-turn guarantee stopped at the object page.
+
+     AND ONE DROPPED REQUEST WAS THE WHOLE ANSWER. There was no retry: an aborted fetch on a train
+     or in a lift produced "I couldn't reach IntelliQ just now" and a button, with the reply that
+     may well have been composed on the server thrown away. What the brief asks for is a bounded
+     retry that preserves the pending turn, and that is only safe once a re-send cannot produce two
+     of anything — which is exactly what the id and the server's replay of it now guarantee.
+
+     WHAT IS NOT DONE HERE, deliberately. Nothing is queued for later, and a send is never retried
+     after a response arrives. A 4xx, a 401 and a refusal are ANSWERS: they are returned as they
+     are, because retrying a judgement is how a product argues with its own server. Only a turn
+     that never got an answer at all is sent again.
+
+     `attempts` is three and the waits are short, because a person is holding a phone waiting for
+     a reply. A longer budget would be a worse product than an honest failure. */
+  async assistantTurn(text, targetEl, opts = {}) {
+    const clientTurnId = opts.clientTurnId
+      || ('ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+    const attempt = Number(opts.attempt) || 0;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
     // Thread the plain personal chat like the leader's (same runtime, same endpoints). A
@@ -12987,9 +15855,13 @@ const MemberApp = {
           lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined,
           subjectMemberId: this._wsSubjectMemberId || undefined, about: this._composerAbout || undefined,
           surface: this._composerAbout?.kind || 'home', requestedAction: this._pendingComposerAction || undefined,
+          clientTurnId,
           attachment: this._pendingAttachment || undefined }) });
       clearTimeout(timer);
-      if (r.status === 401) return { ok: false, reason: 'auth' };
+      // Through the one classifier: a composer POST discovering an ended session must end it for
+      // the whole app, not only for this turn. This used to return locally and leave every other
+      // surface believing it was still signed in.
+      if (r.status === 401) return this._classifyWrite(r);
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, reason: 'server' };
       this._pendingComposerAction = null;
@@ -12997,14 +15869,48 @@ const MemberApp = {
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
       return { ok: true, j };
-    } catch (e) { clearTimeout(timer); return { ok: false, reason: (e && e.name === 'AbortError') ? 'timeout' : 'network' }; }
+    } catch (e) {
+      clearTimeout(timer);
+      const reason = (e && e.name === 'AbortError') ? 'timeout' : 'network';
+      /* NOTHING CAME BACK, so this turn has no answer — not a bad one. Send it again under the
+         same id, which the server recognises as this send rather than a new one, and wait a
+         little longer each time. After three there is no more waiting worth doing and the honest
+         failure is shown, with the person's words still in hand. */
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 600 * Math.pow(2, attempt)));
+        return this.assistantTurn(text, targetEl, { clientTurnId, attempt: attempt + 1 });
+      }
+      return { ok: false, reason };
+    }
   },
 
   // One IntelliQ voice. Distinguishes grounded vs suggested; shows privacy clearly; renders a
   // SMALL prioritised proposal set (primary + "More options"); confirm / correct / dismiss.
   _renderAssistant(j) {
+    /* A NEW ANSWER STOPS THE OLD ONE BEING READ. Without this a person asks a second question
+       while the first reply is still being spoken and hears the OLD answer finish over the new
+       one on screen — two answers at once, and the one they are looking at is not the one they
+       can hear. The row that was reading is told it was interrupted rather than left announcing
+       that it is still going. */
+    this._voiceStop('interrupted');
     const esc = s => this._escape(String(s == null ? '' : s));
     const r = j.response || {};
+    /* ── THEY SAID YES IN WORDS ────────────────────────────────────────────────────────────────
+       The server resolved which pending proposal a spoken "yeah" referred to. It executed nothing:
+       the confirmation still goes through the one governed route, which is the call below — the
+       same one the Confirm button makes, with the same frozen payload and the same re-checked
+       authority. Nothing here is a second way to write.
+
+       `ask` is the honest branch. When several things were offered, the server declines to guess
+       and says which it cannot tell apart; that sentence is the whole reply, because asking and
+       then doing something anyway would be worse than not asking. */
+    if (r.acceptance && r.acceptance.resolves) {
+      setTimeout(() => {
+        try { todayTurnConfirm(r.acceptance.turnId, r.acceptance.resolves, null); } catch (_) {}
+      }, 0);
+    } else if (r.acceptance && r.acceptance.ask) {
+      return `<div class="iq-msg-body">${esc(r.acceptance.ask)}</div>`;
+    }
     const priv = v => v === 'only_me'
       ? '<span class="iq-badge iq-badge-private">Private</span>'
       : '<span class="iq-badge iq-badge-share">Confirm to share</span>';
@@ -13022,14 +15928,25 @@ const MemberApp = {
         e.target ? `<div><strong>Target:</strong> ${esc(e.target)}</div>` : '',
         e.reviewOn ? `<div><strong>Review:</strong> ${esc(e.reviewOn)}</div>` : '',
         e.outcome ? `<div><strong>Outcome:</strong> ${esc(e.outcome)}</div>` : '',
-        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}</div>` : '',
+        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}${p.actionType === 'share_to_forum' ? ` (${esc(e.audience.readable)} current readers)` : ''}</div>` : '',
+        /* ── CONNECTING SOMETHING IS NOT SHARING IT ───────────────────────────────────────
+           Founder decision, September 2026: connecting private material to a shared object does
+           not share the original source. The behaviour was always this; the CARD did not say so,
+           and "Attach this material — board.png" reads to a coach as having handed the photograph
+           to the squad. Two sentences, shown only when there is really a gap between where the
+           file lives and where it is going: what stays private, and that sharing it is a separate
+           thing they have not just done. */
         e.material ? `<div><strong>Material:</strong> ${esc(e.material.name)}</div>` : '',
+        e.material && e.material.widerAudience
+          ? `<div class="iq-eff-note">The file itself stays private to you. Connecting it here does
+             not give anyone else the original — sharing that is a separate choice.</div>` : '',
         e.disclosure ? `<div>${esc(e.disclosure)}</div>` : '',
       ].filter(Boolean).join('');
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
         <div class="iq-proposal-why">${esc(p.why)}</div>
         ${exact ? `<div class="iq-submit-effect">${exact}</div>` : ''}
+        ${p.actionType === 'share_to_forum' ? `<label class="iq-field">Words to share<textarea class="iq-field-input iq-share-edit" aria-label="Words to share">${esc(e.text || '')}</textarea></label>` : ''}
         <div class="iq-proposal-actions">
           <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
           <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
@@ -13064,7 +15981,7 @@ const MemberApp = {
       <p class="iq-response-text">${esc(r.responseText)}</p>
       ${iqDegradedNote(r.composer)}
       ${this._sourcesHTML(srcs)}
-      ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, conversationId: j.conversationId || this._chatConvId || null })}
+      ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, speech: r.speech, conversationId: j.conversationId || this._chatConvId || null })}
       ${(() => {
         // The deterministic path pushes groundedClaims[0].text into the reply itself, so this
         // block was repeating the sentence directly underneath it with a GROUNDED tag on it —
@@ -13142,10 +16059,13 @@ const MemberApp = {
       messageIds: [j.messageId].filter(Boolean),
       turnId: j.turnId || null,
     };
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = { kind: 'self' };
+    setTimeout(() => this._renderAudiences(id), 0);
     return `<div class="iq-proposal iq-focusprop" data-proposal="${esc(p.id)}" id="${esc(id)}">
       <div class="iq-proposal-top">
         <span class="iq-proposal-label">Would you like to keep working on this?</span>
-        <span class="iq-badge iq-badge-private">Private</span>
+        <span class="iq-badge iq-badge-private" id="${esc(id)}-badge">Only me</span>
       </div>
       <div class="iq-field"><textarea id="${esc(id)}-t" class="iq-field-input" rows="2"
         aria-label="What you want to keep working on">${esc(suggested)}</textarea></div>
@@ -13158,6 +16078,9 @@ const MemberApp = {
         <label class="iq-focus-label" for="${esc(id)}-d">When should we look at it?</label>
         <input type="date" id="${esc(id)}-d" class="iq-field-date">
       </div>
+      <div class="iq-fp-aud" id="${esc(id)}-aud"></div>
+      <div class="iq-focus-people" id="${esc(id)}-people" hidden></div>
+      <div class="iq-focus-who" id="${esc(id)}-who">Only you can see this.</div>
       <div class="iq-proposal-actions">
         <button class="btn-primary btn-sm" id="${esc(id)}-go"
           onclick="MemberApp.startFocusFromChat('${esc(id)}')">Start this focus</button>
@@ -13197,16 +16120,17 @@ const MemberApp = {
     const text = String((t && t.value) || '').trim();
     if (!text) { tell('Say what you want to keep working on.'); if (t) t.focus(); return; }
     if (go && go.disabled) return;                    // a second tap while the first is in flight
-    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
     const src = (this._focusProposals || {})[id] || {};
-    /* THE AUDIENCE THE PERSON CHOSE, sent as the server's own vocabulary. `private` is the
-       default and stays the default: a card that arrives with something else pre-selected is a
-       card that shares by accident. */
     /* The chosen audience, mapped to what the focus route enforces. `self` is the default and
        stays the default — a card that arrives with anything else selected shares by accident. */
     const chosen = (this._focusMode || {})[id];
     const kind = (chosen && chosen.kind) || 'self';
-    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    const picked = kind === 'named_people'
+      ? [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid) : [];
+    if (kind === 'named_people' && !picked.length) {
+      tell('Choose at least one person, or switch back to Only me.'); return;
+    }
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
     const body = {
       text,
       target: String((document.getElementById(id + '-g') || {}).value || '').trim(),
@@ -13422,6 +16346,12 @@ const MemberApp = {
     this._confirming = this._confirming || new Set();
     if (this._confirming.has(proposalId)) return;
     this._confirming.add(proposalId);
+    const edited = cardEl && cardEl.querySelector('.iq-share-edit');
+    if (edited && !edited.value.trim()) { cardEl.querySelector('.iq-inline-error')?.remove();
+      const error = document.createElement('div'); error.className = 'iq-inline-error';
+      error.textContent = 'Enter the words to share, or dismiss this proposal.'; cardEl.appendChild(error);
+      this._confirming.delete(proposalId); return null; }
+    const approvedOverrides = edited ? { ...(overrides || {}), text: edited.value } : overrides;
     const btns = cardEl ? Array.from(cardEl.querySelectorAll('button')) : [];
     const primary = cardEl ? cardEl.querySelector('.btn-primary') : null;
     const primaryText = primary ? primary.textContent : '';
@@ -13431,7 +16361,7 @@ const MemberApp = {
     let r, j;
     try {
       r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: approvedOverrides || {} }) });
       j = await r.json();
     } catch (_) { reset(); inlineError('Couldn’t reach the server — please try again.'); return null; }
     if (r.status === 409 && /visibility_increase/.test(j.error || '')) {
@@ -13441,14 +16371,26 @@ const MemberApp = {
         return this.confirmProposal(turnId, proposalId, { ...(overrides || {}), confirmVisibilityIncrease: true });
       return j;
     }
+    if (r.status === 409 && j && j.error === 'forum_audience_changed') {
+      this._confirming.delete(proposalId);
+      btns.forEach(b => { if (b !== primary) b.disabled = false; });
+      if (primary) primary.textContent = 'Preview required';
+      inlineError(j.note || 'The people who can read this room changed. Preview and confirm a fresh share.');
+      return j;
+    }
     if (!j || !j.ok) { reset(); inlineError(j && /already/.test(j.error || '') ? 'This was already done.' : 'Couldn’t complete that — please try again.'); return j; }
     if (cardEl && j.ok) {
       if (j.confirmed === 'checkin_log') {
         // The ONE post-confirm outcome (acknowledgement + what IntelliQ noticed) returns into the thread.
         const o = j.outcome || {};
         const noticed = (o.noticed && o.noticed.length) ? `<div class="iq-checkin-noticed">${o.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : '';
+        /* AND WHETHER IntelliQ ACTUALLY READ IT. The acknowledgement falls back to a stock warm
+           sentence when the model is unavailable, and a person who has just said something
+           difficult cannot tell the two apart — which is the one place that substitution costs
+           something real. The same one sentence as everywhere else; no second wording. */
         cardEl.innerHTML = `<div class="iq-confirmed">Logged as today's check-in — kept private.</div>` +
-          (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '');
+          (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '')
+          + iqDegradedNote(o.composer);
       } else if (j.confirmed === 'submit_work') {
         this._wsWorkItemId = null;  // clear the focused work context after submitting
         const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = '';
@@ -13503,7 +16445,9 @@ const MemberApp = {
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
     const j = await r.json();
     const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
-    if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
+    if (cardEl && j.ok && (j.applied || []).includes('withdrew public share')) {
+      cardEl.innerHTML = '<div class="iq-confirmed">Public share withdrawn. Nothing was posted.</div>';
+    } else if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
     return j;
   },
   /* Reads the inline field and hands the text to the one correction path. Split out so the

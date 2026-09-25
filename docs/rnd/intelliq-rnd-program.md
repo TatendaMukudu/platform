@@ -712,3 +712,67 @@ Deliberately absent, because they are **queued work** and belong in
 This register is reviewed **only** when a founder decision promotes something out of it, or when a
 pilot observation answers a WATCH item. It is not reviewed on a schedule, and it is not expanded as a
 by-product of other work. **A register that grows is a register that is being used as a queue.**
+
+
+---
+
+## R&D addition — organization-wide and ad-hoc cohort intelligence
+
+**Status: OPEN R&D. Not a pilot implementation instruction.**
+
+### 1. Whole-organization High / Low / Inquiry as a canonical subject
+
+Current four-object truth is strong at `member:<userId>` and `group:<nodeId>` grains, while organization-level intelligence exists through adjacent memory/reasoner/learning surfaces. Investigate whether the organization itself should become a first-class epistemic subject — e.g. an `org:<orgCode>` Inquiry/High/Low grain — so organization-wide understanding is produced through the same governed object system rather than merely summarized from neighboring systems.
+
+Questions to settle before implementation:
+- What evidence is admissible to an organization-wide subject?
+- Does a root node already mean the organization, or are those semantically different?
+- Who may see, challenge, contribute to and settle an organization-wide Inquiry?
+- What disclosure floors are required?
+- How do subsidiary/node findings roll upward without double-counting origins?
+- Can an organization-wide High/Low exist without exposing which node/person caused it?
+- How should whole-org Focuses relate to organization-wide Inquiries?
+
+Do not emulate this by silently treating a root node as `org:` until the ontology is explicitly settled.
+
+### 2. Ad-hoc selected-cohort intelligence as a truth subject
+
+Current selected-person audiences are **readership/collaboration audiences**, not distinct empirical subjects. A personal High shared with two teammates remains the owner's High; a participant-scoped Focus is a shared commitment, but its participant list is not automatically a new evidence grain.
+
+Investigate whether temporary cohorts such as “right back + right wing + assistant coach” should be able to become first-class subjects with their own governed evidence -> Inquiry -> High/Low lifecycle without requiring a permanent org-tree node.
+
+Questions to settle:
+- When does a participant list become a subject rather than merely an audience?
+- Who can create/dissolve the cohort?
+- Does membership consent matter before private experience can contribute to cohort evidence?
+- How are origins counted when members also belong to one or more org nodes?
+- What happens to the cohort's learning after it dissolves?
+- Can a cohort have its own Forum, Focuses and outcomes while predecessor private conversations remain private?
+- How does a temporary cohort avoid becoming a shadow org tree?
+
+The governing law remains: **readership is not subjecthood, relevance is not authorization, and selected people are not collective evidence merely because they were selected.**
+
+
+---
+
+## R&D addition — generated contextual imagery
+
+**Status: DEFERRED / POST-PILOT R&D.**
+
+Do not generate contextual imagery for Highs, Lows, Inquiries, Focuses, Home priority cards, Forum objects or conversation surfaces during the pilot.
+
+Reason: generated imagery adds avoidable inference/serving cost without improving the core pilot thesis enough to justify that budget. The product should remain text-first, simple, insightful and fast.
+
+Revisit only after the pilot and once there is enough budget to justify experimentation.
+
+Future R&D questions:
+- when an image materially improves recognition, comprehension or motivation rather than decorating the interface;
+- whether approved organization-owned media should be preferred over generated imagery;
+- explicit permission/provenance rules for organization media;
+- whether generated imagery should be clearly treated as illustrative rather than evidence;
+- caching/reuse policy so the same object does not repeatedly regenerate visuals;
+- cost ceilings and generation triggers;
+- accessibility and text-only fallbacks;
+- interaction with light and navy/dark IntelliQ themes.
+
+**Pilot law:** no automatic contextual image generation. Preserve the current product budget for conversation, reasoning, evidence, persistence and pilot reliability.

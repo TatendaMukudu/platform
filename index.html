@@ -1,7 +1,24 @@
 ﻿<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8"/>
+<!-- THEME, BEFORE ANYTHING PAINTS. Light is the pilot default and it is in the markup above, so
+     the ordinary case needs no script at all and cannot flash. This only reads a choice somebody
+     made deliberately in Settings, and it runs here — ahead of the stylesheet — because doing it
+     after paint is how a person who chose navy sees a white screen blink at them on every load.
+
+     DELIBERATELY NOT `prefers-color-scheme`. "Light mode as the default pilot experience" is a
+     decision about what the product IS during the pilot, and honouring the OS would mean a coach
+     whose phone is in dark mode sees a different product from the one the founder demonstrated,
+     with no way to tell why. The device preference is one line away when that is wanted. -->
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem('iq_theme');
+    if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+  }catch(e){}
+})();
+</script>
 <!-- BOOT SELF-HEAL — runs before any external script and cannot itself be separately
      cached. A stale or truncated cached script can crash the app with a SyntaxError
      ("Unexpected token") before app.js even runs; this catches that, clears the caches +
@@ -46,14 +63,15 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260910m"/>
-<link rel="stylesheet" href="css/member.css?v=20260910m"/>
+<link rel="stylesheet" href="css/styles.css?v=20260925b"/>
+<link rel="stylesheet" href="css/member.css?v=20260925b"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<!-- SheetJS — for parsing .xlsx spreadsheets -->
-<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<!-- JSZip and SheetJS are DELIBERATELY GONE. Founder decision, September 2026: Office parsing
+     belongs server-side, because core document understanding must not depend on a runtime browser
+     CDN. .docx, .xlsx and .pptx are read by lib/office.js with Node's own zlib and no dependency;
+     the browser selects the file and uploads it. Do not add these tags back to make something
+     green — that would move the capability back behind a network request nobody checks. -->
 <!-- Inter font -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -157,14 +175,6 @@
         <textarea class="form-control" id="setup-org-description" rows="3" style="resize:vertical"
           placeholder="e.g. We're a professional development programme for emerging leaders in the financial sector. Our members are high-potential individuals at mid-career stage. We want to accelerate their growth, build accountability habits, and prepare them for senior roles within two years. Success looks like measurable growth in decision-making and consistent engagement."></textarea>
         <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">Be honest and specific — the more you tell it, the better IntelliQ adapts.</div>
-      </div>
-      <div class="form-group">
-        <label>PLATFORM GRADE</label>
-        <select class="form-control" id="setup-grade">
-          <option value="A">A-Grade — Full IntelliQ + AI + Real-time Monitoring</option>
-          <option value="B">B-Grade — Performance Tracking + Basic IntelliQ</option>
-          <option value="C">C-Grade — Simple Monitoring + Basic Evaluation</option>
-        </select>
       </div>
       <div id="setup-error" style="color:#f74f4f;font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" onclick="handleSetup()">Create Organisation →</button>
@@ -298,8 +308,8 @@
       <section class="page" id="page-people">
         <div class="section-header">
           <div>
-            <div class="section-title">Members</div>
-            <div class="section-sub" id="people-sub">Org structure, onboarding, and groups</div>
+            <div class="section-title">Org tree</div>
+            <div class="section-sub" id="people-sub">Who is here, and who sits under whom</div>
           </div>
           <!-- Both onboarding controls are hidden for anyone without edit_members, by
                _applyOnboardAuthority(), which reads the same permission the routes enforce.
@@ -307,9 +317,11 @@
           <button class="btn btn-accent btn-sm" id="people-add-member" hidden onclick="switchPeopleTab('onboard')">+ Add Member</button>
         </div>
 
-        <!-- Sub-tabs -->
-        <div class="tabs" style="margin-bottom:1rem">
-          <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Org Tree</button>
+        <!-- Sub-tabs. HIDDEN WHEN THERE IS ONLY ONE, by _applyOnboardAuthority: a tab strip with
+             a single tab in it is a control that cannot do anything, and it reads as though a
+             second thing exists somewhere the person cannot find. -->
+        <div class="tabs" id="people-tabs" style="margin-bottom:1rem">
+          <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Tree</button>
           <button class="tab-btn" data-tab="onboard" id="people-tabbtn-onboard" hidden onclick="switchPeopleTab('onboard')">＋ Onboard</button>
         </div>
 
@@ -366,54 +378,109 @@
            ════════════════════════════ -->
       <section class="page" id="page-settings">
         <div class="section-header">
-          <div class="section-title">Platform Settings</div>
+          <div class="section-title">Settings</div>
         </div>
 
-        <!-- Settings tabs -->
-        <div class="tabs" style="margin-bottom:1.5rem">
-          <button class="tab-btn active" data-tab="org"         onclick="switchSettingsTab('org')">Organisation</button>
-          <button class="tab-btn"         data-tab="metrics"    onclick="switchSettingsTab('metrics')">Metrics</button>
-          <button class="tab-btn"         data-tab="values"     onclick="switchSettingsTab('values')">Values</button>
-          <button class="tab-btn"         data-tab="goals"      onclick="switchSettingsTab('goals')">Org Goals</button>
-          <button class="tab-btn"         data-tab="grade"      onclick="switchSettingsTab('grade')">Platform Grade</button>
+        <!-- THREE TIERS, THREE AUDIENCES (founder decision, September 2026).
+
+             YOU          every authenticated person. Their device, their build, what is held
+                          about them and who can see it. No permission required, because none of
+                          it is anybody else's business to grant.
+             ORGANISATION an authorised administrator. What the org is, what it measures, what
+                          IntelliQ may do on its behalf, what it is connected to.
+             PLATFORM     a superadmin. Diagnostics about the HOST, which belong to whoever runs
+                          the instance rather than to whoever runs the club.
+
+             The tabs a person may not use are REMOVED, not disabled: "Settings exists but most
+             of it is greyed out" teaches somebody that the product is not for them. Which tabs
+             appear is decided in renderSettings() from the same permissions the server enforces,
+             so this is a courtesy and never a gate -- every route behind these controls checks
+             for itself. -->
+        <div class="tabs" style="margin-bottom:1.5rem" id="settings-tabs">
+          <button class="tab-btn active" data-tab="you"      onclick="switchSettingsTab('you')">You</button>
+          <button class="tab-btn"         data-tab="org"      onclick="switchSettingsTab('org')">Organisation</button>
+          <button class="tab-btn"         data-tab="metrics"  onclick="switchSettingsTab('metrics')">Metrics</button>
+          <button class="tab-btn"         data-tab="values"   onclick="switchSettingsTab('values')">Values</button>
+          <button class="tab-btn"         data-tab="goals"    onclick="switchSettingsTab('goals')">Org Goals</button>
+          <button class="tab-btn"         data-tab="platform" onclick="switchSettingsTab('platform')">Platform</button>
         </div>
 
-        <!-- Organisation tab -->
-        <div id="settings-tab-org">
+        <!-- ══ YOU ══ Every authenticated person, no permission required. -->
+        <div id="settings-tab-you">
           <div class="grid-2">
+            <!-- APPEARANCE. Light is the pilot default and is set in the markup on <html>, so this
+                 control exists to offer the navy alternative rather than to establish a default.
+                 Per device, not per account: the choice belongs to the screen you are looking at,
+                 and syncing it would mean a coach's phone changing because they opened a laptop. -->
             <div class="card">
-              <div class="card-header"><div class="card-title">Organisation Details</div></div>
+              <div class="card-header"><div class="card-title">Appearance</div></div>
               <div class="card-body">
-                <div style="margin-bottom:0.8rem">
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
-                  <div style="font-weight:600" id="settings-org-name">—</div>
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  Light is the default. Navy is the same product with the same layout — only the
+                  colours change. This is remembered on this device.
                 </div>
-                <div style="margin-bottom:0.8rem">
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
-                  <div style="font-weight:600" id="settings-mode">—</div>
-                </div>
-                <div style="margin-bottom:0.8rem">
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">PLATFORM GRADE</div>
-                  <div id="settings-grade"></div>
-                </div>
-                <div>
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
-                  <div style="font-weight:600" id="settings-admin">—</div>
+                <div class="iq-theme-pick" role="group" aria-label="Appearance">
+                  <button type="button" class="iq-theme-opt" data-theme-set="light"
+                          onclick="setTheme('light')">Light</button>
+                  <button type="button" class="iq-theme-opt" data-theme-set="dark"
+                          onclick="setTheme('dark')">Navy</button>
                 </div>
               </div>
             </div>
             <div class="card">
-              <div class="card-header"><div class="card-title">Active Features</div></div>
-              <div class="card-body" id="settings-features"></div>
+              <div class="card-header"><div class="card-title">This device</div></div>
+              <div class="card-body" id="settings-you-device"></div>
             </div>
             <div class="card">
-              <div class="card-header"><div class="card-title">Display language</div></div>
+              <div class="card-header"><div class="card-title">Which version you are running</div></div>
+              <div class="card-body">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.6rem;line-height:1.5">
+                  The question "is this phone running the build that was just deployed?" has to be
+                  answerable while you are standing in front of the phone.
+                </div>
+                <div id="iq-build-line" style="font-size:var(--fs-sm);color:var(--text-muted)">Checking which version you are running…</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">What IntelliQ holds about you</div></div>
               <div class="card-body">
                 <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This only changes the <strong>words</strong> it shows your people. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
+                  Everything held about you, who has looked at it, and exactly who can see each
+                  record. Yours to read whenever you want it, without asking anybody.
                 </div>
-                <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
-                <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
+                <button class="btn btn-outline btn-sm" onclick="navigate('my-data')">Open my record</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ PLATFORM ══ Superadmin only. Diagnostics about the HOST, which belong to whoever
+             runs the instance rather than to whoever runs the club. These were mixed in with the
+             organisation's own settings, so a coach's configuration screen carried a button that
+             deletes an organisation and another that reseeds the demo. -->
+        <div id="settings-tab-platform" style="display:none">
+          <div class="grid-2">
+            <div class="card">
+              <!-- WHAT IS ACTUALLY SWITCHED ON, read from the server at render time. This panel
+                   used to list nine tier "features" from a client-side constant - including
+                   "Complete security" - under green ticks, with none of them corresponding to
+                   anything the server does. It now shows capabilities the server reports, and says
+                   plainly when one is off. -->
+              <div class="card-header"><div class="card-title">What is switched on</div></div>
+              <div class="card-body" id="settings-features"></div>
+            </div>
+            <!-- THE HOST'S OWN KEY. The controls below act on the whole instance rather than on
+                 one organisation, and being an organisation's superadmin is not the same authority
+                 as running the machine they are on. One field, used by every host control here, so
+                 there is one place to type it rather than one per button. -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Platform key</div></div>
+              <div class="card-body">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  The controls on this tab act on the whole instance, not on one organisation, so they ask for the key held by whoever runs it. It is never stored and never leaves this page except on the request you make.
+                </div>
+                <input type="password" id="platform-key" class="input" placeholder="Platform key" autocomplete="off"
+                  style="width:100%">
               </div>
             </div>
             <div class="card">
@@ -464,6 +531,51 @@
                 </details>
               </div>
             </div>
+          </div>
+        </div>
+
+
+        <!-- Organisation tab -->
+        <div id="settings-tab-org">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header"><div class="card-title">Organisation Details</div></div>
+              <div class="card-body">
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
+                  <div style="font-weight:600" id="settings-org-name">—</div>
+                </div>
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
+                  <div style="font-weight:600" id="settings-mode">—</div>
+                </div>
+                <div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
+                  <div style="font-weight:600" id="settings-admin">—</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="card">
+              <!-- NOT "Display language". It does not change the LANGUAGE — ai/language.js does that,
+                   from what the person writes in, and a Spanish speaker is answered in Spanish
+                   whatever is picked here. This picks the TERMINOLOGY PACK: whether IntelliQ says
+                   player/team/match, student/class/lesson or team member/department/meeting. An
+                   admin looking for "answer my players in Spanish" would have found this, changed
+                   it, and got a different set of English nouns. -->
+              <div class="card-header"><div class="card-title">Words IntelliQ uses</div></div>
+              <div class="card-body">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This picks the <strong>words</strong> it uses for the things in your organisation. It is not the language it replies in: IntelliQ answers each person in the language they write to it in. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
+                </div>
+                <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
+                <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
+              </div>
+            </div>
+            
+            
+            
+            
             <div class="card">
               <div class="card-header"><div class="card-title">Connect any app (API)</div></div>
               <div class="card-body">
@@ -474,7 +586,21 @@
                 <button class="btn btn-outline btn-sm" id="ingest-token-btn" onclick="loadIngestToken()">Show connection details</button>
               </div>
             </div>
-            <div class="card">
+            <!-- ── ENGINEERING, BEHIND A DOOR ────────────────────────────────────────────────────────
+                 Both cards below are one-time setup somebody does once and never opens again: a
+                 data URL, an auth header, a JSON path, an OAuth client ID and secret, a redirect
+                 URL to paste into a developer console. They sat open in the tab an administrator
+                 goes to in order to change the organisation's NAME, which is why that tab
+                 rendered twenty-four input fields on a phone.
+
+                 Nothing is removed and no id moves -- every handler, every control and every
+                 route is exactly where it was. They are collapsed, so the tab opens as what it
+                 says it is (details, language, and what IntelliQ may do) and the wiring is one
+                 tap away for the person who actually came to do it. -->
+            <details class="iq-adv-block">
+              <summary class="iq-adv-summary">Connections and apps &mdash; one-time technical setup</summary>
+              <div class="iq-adv-body">
+<div class="card">
               <div class="card-header"><div class="card-title">Connect anything (auto-sync)</div></div>
               <div class="card-body">
                 <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
@@ -510,6 +636,8 @@
                 <div id="oauth-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
               </div>
             </div>
+              </div>
+            </details>
             <div class="card">
               <div class="card-header"><div class="card-title">What IntelliQ may do (policies)</div></div>
               <div class="card-body">
@@ -541,9 +669,9 @@
                 <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6">
                   Your AI reasons from <strong>your organisation's values</strong> — the ones set here.
                   The Advisor, Group Copilot, briefings and check-in responses all take on that perspective,
-                  without ever quoting or lecturing. Edit them in the <strong>Values</strong> tab.
+                  without ever quoting or lecturing. An authorised values editor can change them in the <strong>Values</strong> tab.
                 </div>
-                <button class="btn btn-outline btn-sm" style="margin-top:0.7rem" onclick="switchSettingsTab('values')">Edit values →</button>
+                <button id="settings-org-values-shortcut" class="btn btn-outline btn-sm" style="margin-top:0.7rem" onclick="switchSettingsTab('values')">Edit values →</button>
               </div>
             </div>
           </div>
@@ -603,50 +731,6 @@
             </div>
           </div>
           <div id="settings-goal-form" style="margin-top:1rem"></div>
-        </div>
-
-        <!-- Platform Grade tab -->
-        <div id="settings-tab-grade" style="display:none">
-          <div class="card" style="max-width:480px">
-            <div class="card-header"><div class="card-title">Platform Grade</div></div>
-            <div class="card-body">
-              <div style="display:flex;flex-direction:column;gap:0.6rem">
-                <div class="card" style="cursor:pointer" onclick="switchGrade('A')">
-                  <div class="card-body" style="padding:0.8rem">
-                    <div style="display:flex;align-items:center;justify-content:space-between">
-                      <div>
-                        <div style="font-weight:600;margin-bottom:2px">A-Grade Platform</div>
-                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
-                      </div>
-                      <span class="grade-badge grade-A">● A</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="card" style="cursor:pointer" onclick="switchGrade('B')">
-                  <div class="card-body" style="padding:0.8rem">
-                    <div style="display:flex;align-items:center;justify-content:space-between">
-                      <div>
-                        <div style="font-weight:600;margin-bottom:2px">B-Grade Platform</div>
-                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Performance + Basic IntelliQ</div>
-                      </div>
-                      <span class="grade-badge grade-B">● B</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="card" style="cursor:pointer" onclick="switchGrade('C')">
-                  <div class="card-body" style="padding:0.8rem">
-                    <div style="display:flex;align-items:center;justify-content:space-between">
-                      <div>
-                        <div style="font-weight:600;margin-bottom:2px">C-Grade Platform</div>
-                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Simple monitoring only</div>
-                      </div>
-                      <span class="grade-badge grade-C">● C</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
       </section>
@@ -777,6 +861,13 @@
              Wired to POST /api/assistant/turn. One continuous conversation; confirmable
              proposals; private by default. Rendered by MemberApp._renderMyWorkspace(). ── -->
         <div id="iq-myworkspace"></div>
+
+        <!-- THE GROUPS THIS PERSON IS IN — High, Low, Inquiry, Focus at the group's own grain,
+             and the door onto the group's half of the A -> B loop. Rendered by the SAME
+             _renderTeamState as the leader home and the team briefing, into its own container
+             because an id can only live in one place. It was on neither surface a coach reliably
+             opens, so the group loop had no first-screen doorway at all. -->
+        <div id="home-team-state"></div>
 
         <!-- Proactive open-state: "I've already done the work." -->
         <div id="me-briefing"></div>
@@ -1002,6 +1093,21 @@
       </section>
 
     </main><!-- /page-content -->
+
+    <!-- ── THE COMPOSER, OUTSIDE EVERY PAGE ────────────────────────────────────────────────
+         It used to be rendered inside #page-home, so it was hidden with that page. Driven as a
+         new member at 390px: the bar was on Home and nowhere else — Focus, Inquiries, Highs,
+         Lows, Library, People and Settings all offered no way to say anything, and the way back
+         to IntelliQ was to notice the menu and navigate Home.
+
+         Founder's law for this surface is "ever-present, not ever-dominant". It was neither: it
+         dominated the one screen it was on and was absent from the other seven.
+
+         It sits here, a sibling of <main> rather than a child of any page, so navigation cannot
+         take it away. It still yields to a page that brought its own composer — an object thread
+         or the Forum — because two inputs on one screen is a question about which one is
+         listening. MemberApp._renderShellComposer() owns both halves. -->
+    <div id="iq-shell-composer"></div>
   </div><!-- /main-wrap -->
 
   <!-- ── NOTIFICATION PANEL ──────────────────────────────── -->
@@ -1577,8 +1683,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260910m"></script>
-<script src="js/auth.js?v=20260910m"></script>
+<script src="js/data.js?v=20260925b"></script>
+<script src="js/auth.js?v=20260925b"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1646,14 +1752,15 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260910m"></script>
-<script src="js/ui.js?v=20260910m"></script>
-<script src="js/attachments.js?v=20260910m"></script>
-<script src="js/scenarios.js?v=20260910m"></script>
-<script src="js/chat.js?v=20260910m"></script>
-<script src="js/tree.js?v=20260910m"></script>
-<script src="js/voice.js?v=20260910m"></script>
-<script src="js/app.js?v=20260910m"></script>
+<script src="js/charts.js?v=20260925b"></script>
+<script src="js/ui.js?v=20260925b"></script>
+<script src="js/attachments.js?v=20260925b"></script>
+<script src="js/scenarios.js?v=20260925b"></script>
+<script src="js/chat.js?v=20260925b"></script>
+<script src="js/tree.js?v=20260925b"></script>
+<script src="js/voice.js?v=20260925b"></script>
+<script src="js/voice-output.js?v=20260925b"></script>
+<script src="js/app.js?v=20260925b"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
@@ -1663,15 +1770,6 @@
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     });
   }
-</script>
-
-<script>
-function switchGrade(g){
-  AppState.grade = g;
-  renderSettings();
-  renderSidebar();
-  showToast('Switched to ' + g + '-Grade Platform', 'success');
-}
 </script>
 
 </body>
