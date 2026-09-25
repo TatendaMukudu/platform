@@ -810,3 +810,41 @@ Required direction:
 - preserve the underlying primitive/data; this is presentation cleanup only.
 
 Classification: **PILOT UX CLEANUP — legacy label still visible.**
+### 49. Focus suggestion path lets attachment extraction dominate the answer
+
+Live iPhone Focus test:
+- user asked `What could we try next?`;
+- response opened with a long raw visual/material extraction from `IMG_1918.png` (`Team header section`, logo, table position, fixture text, etc.) before addressing the Focus;
+- the answer then fell back to asking what the user is actually worried about losing.
+
+Required fix:
+- attachment/material context should inform the answer, not be dumped verbatim into the answer unless the user asks to inspect/summarise the material;
+- Focus suggestion responses should lead with the Focus-specific answer/question;
+- keep source provenance inspectable at the bottom rather than narrating the whole extraction;
+- do not let OCR/vision description crowd out the governed object context.
+
+Classification: **PILOT UX/REASONING BUG — material extraction is leaking into final prose and overwhelming the Focus.**
+
+### 50. Provider fallback occurs on strong local connectivity
+
+Founder reproduced `IntelliQ's normal response isn't available right now...` while connected to Alma WiFi with usable cellular backup. This means the fallback cannot be assumed to be caused by weak client connectivity.
+
+Required investigation:
+- distinguish client network reachability from provider/backend failure, timeout, rate limit, cold start and upstream error;
+- retry/backoff should be based on the actual failure class, not generic `network weak` assumptions;
+- preserve one durable user turn and one response path;
+- if deterministic fallback is used, the UI should not imply the person's network is at fault;
+- log/trace the exact degraded reason internally so live pilot failures can be diagnosed.
+
+Classification: **PILOT RELIABILITY BUG — degraded-mode trigger is too coarse / provider failure not distinguished from network.**
+
+### 51. High/Low live tests currently unavailable because no canonical High/Low exists
+
+Founder currently has no canonical Highs or Lows on the live account, so High/Low object-conversation rehearsal cannot be honestly performed without manufacturing state.
+
+Decision:
+- do not fabricate a High/Low solely to satisfy the test;
+- rely on the existing canonical standing/browser proofs for merge readiness;
+- if a real High/Low emerges before pilot, run the same object-bound questions (`why`, `what supports this`, `what remains uncertain`, `what could we try/do`) on it.
+
+Classification: **NO DEFECT — live test unavailable due to truthful empty state.**
