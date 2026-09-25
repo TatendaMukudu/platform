@@ -2780,12 +2780,19 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
 
      The MAIN GOAL is treated differently: it is not an account of the person, it is a thing they
      want to do — so it becomes a real focus, which is the object built for exactly that. */
+  /* ── AND THE LABEL IS ADDRESSED TO WHOEVER OWNS THE RECORD, WHICH IS THEM ──────────────────
+     LIVE iPHONE (findings R1 #48). These five were written in the third person, for a leader
+     reading somebody's file, and then printed on that somebody's own screen: the founder's own
+     Inquiry list read "Where they are trying to get to" about the founder. These are the
+     product's words for the person's own account, and a `member:<id>` inquiry has exactly one
+     subject. `ai/present.js LEGACY_SELF_LABELS` carries the old five forward for every account
+     created before this line changed, so nobody's record has to be rewritten to read correctly. */
   const ONBOARDING_ACCOUNTS = [
-    { field: baseline,         concept: 'self_account.baseline',    label: 'What it looks like when they are not at their best' },
-    { field: strengths,        concept: 'self_account.strengths',   label: 'What they say they bring' },
-    { field: improvementAreas, concept: 'self_account.improvement', label: 'Where they want to get better' },
-    { field: longTermGoals,    concept: 'self_account.long_term',   label: 'Where they are trying to get to' },
-    { field: freeText,         concept: 'self_account.context',     label: 'What else they wanted known' },
+    { field: baseline,         concept: 'self_account.baseline',    label: 'What it looks like when you are not at your best' },
+    { field: strengths,        concept: 'self_account.strengths',   label: 'What you say you bring' },
+    { field: improvementAreas, concept: 'self_account.improvement', label: 'Where you want to get better' },
+    { field: longTermGoals,    concept: 'self_account.long_term',   label: 'Where you are trying to get to' },
+    { field: freeText,         concept: 'self_account.context',     label: 'What else you wanted known' },
   ];
   const MIN_ACCOUNT = 12;
   const evidenced = [];
@@ -11679,7 +11686,35 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
 
     // maxTokens is a hard ceiling behind the prompt's word budget — a reply nobody scrolls to the
     // end of is not a better reply, and this is read on a phone.
-    const reply = await ai.complete({ org: code, taskType: 'compose_turn', tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
+    let reply = await ai.complete({ org: code, taskType: 'compose_turn', tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
+    /* ── ASK AGAIN ONCE BEFORE SETTLING FOR LESS THAN AN ANSWER ────────────────────────────
+       Findings R1 #47 asks for a retry OR an explicit recovery state, in that order, and a retry
+       is the better outcome for the person: a reply cut off by a dropped stream is not a reply
+       the model could not write, it is one that did not arrive. So it is asked once more, with
+       room to land — 320 is a ceiling chosen for what a person will read on a phone, not a limit
+       on what can be said, and a second attempt that stops at the same place has told us the
+       ceiling was the cause rather than the connection.
+
+       ONCE, AND ONLY WHEN IT DID NOT FINISH. Not a loop, not a backoff, and never on a reply that
+       ended its sentence: a turn is a person waiting, and a second call is the most this can
+       spend on their behalf without making the silence worse than the fragment. If the second
+       reply is also unfinished the code below keeps whatever complete sentences it holds and says
+       plainly that it stopped — the recovery state, which is the other half of the finding. */
+    const _unfinished = r => !!String(r || '') && ((ai.isTruncated && ai.isTruncated(r)) || /[\p{L}\p{N}]$/u.test(String(r).trim()));
+    if (_unfinished(reply)) {
+      console.log('[composer] the first reply did not finish — asking once more');
+      _metric(code, 'composer_retry_unfinished');
+      try {
+        const _second = await ai.complete({ org: code, taskType: 'compose_turn', tier: 'reason',
+          system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 480, temperature: 0.4 });
+        /* THE BETTER OF THE TWO, NOT SIMPLY THE LATER ONE. A second attempt that finished wins;
+           one that also stopped short is kept only if it got further, so a retry can never leave
+           the person with less than the first attempt already had. */
+        if (_second && (!_unfinished(_second) || String(_second).length > String(reply).length)) reply = _second;
+      } catch (e) {
+        console.log('[composer] the second attempt failed too:', e && e.message);
+      }
+    }
     /* ── A FRAGMENT IS NOT AN ANSWER ────────────────────────────────────────────────────────
        LIVE iPHONE BLOCKER, findings R1 #34: an assistant card rendered as a visibly incomplete
        sentence, with the source control sitting beside it as though the answer were finished.
@@ -11700,16 +11735,41 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
        rather than left for the reader to notice. If nothing survives that cut there is no answer
        to show, and the ordinary degraded path is the truthful outcome. The stated line and the
        machine-readable limitation are both set, because they reach two different readers. */
+    /* ── AND THE MARKER IS NOT THE ONLY WAY A REPLY STOPS MID-WORD ─────────────────────────
+       LIVE iPHONE (findings R1 #47): a turn ending "Or are you ready to c" was still being
+       rendered as a finished answer with controls beneath it, on a build that already carried the
+       #34 repair. Reproduced on the real route in three shapes, and the third explained the other
+       two: `__iqTruncated` is set from `stop_reason === 'max_tokens'`, and a reply that stops
+       because the STREAM stopped — an upstream error, a dropped connection, a proxy cutting the
+       response, which is the same event the founder reports in #50 — carries no such reason. So
+       `_cutShort` was false, the trim never ran, and the fragment was polished, grounded, given a
+       source list and committed.
+
+       SO UNFINISHEDNESS IS ALSO READ FROM THE TEXT, as a SECOND signal rather than a replacement
+       for the marker. The gateway's own note argues against a punctuation heuristic and is right
+       about what it was arguing against: inferring truncation from the last character alone would
+       call an honest answer ending in a list item cut off. This asks a narrower question — does
+       the reply end in the MIDDLE OF A WORD — which a finished sentence never does, in any
+       language that ends its sentences with punctuation, and which no complete list item does
+       either. A reply ending in a letter has not finished its sentence.
+
+       `'?\n'` AND `'!\n'` JOIN THE BOUNDARY SET. They were missing, so a model that ended a
+       question on its own line and then started another sentence had its question thrown away
+       along with the fragment — the founder's own reproduction shape, and a real loss rather than
+       a cosmetic one. */
+    const _endsMidWord = (t) => /[\p{L}\p{N}]$/u.test(String(t || '').trim());
     let _cutShort = false;
     let _usable = reply;
-    if (ai.isTruncated && ai.isTruncated(reply)) {
+    const _looksCut = (ai.isTruncated && ai.isTruncated(reply)) || _endsMidWord(reply);
+    if (_looksCut) {
       const _whole = String(reply || '');
       const _end = Math.max(_whole.lastIndexOf('. '), _whole.lastIndexOf('.\n'),
-        _whole.lastIndexOf('? '), _whole.lastIndexOf('! '),
+        _whole.lastIndexOf('? '), _whole.lastIndexOf('?\n'),
+        _whole.lastIndexOf('! '), _whole.lastIndexOf('!\n'),
         /[.?!]$/.test(_whole.trim()) ? _whole.trim().length - 1 : -1);
       _usable = _end > 0 ? _whole.slice(0, _end + 1) : '';
       _cutShort = true;
-      console.log(`[composer] the reply hit the token ceiling — kept ${_usable.length} of ${_whole.length} chars`);
+      console.log(`[composer] the reply did not finish (${ai.isTruncated && ai.isTruncated(reply) ? 'provider reported the ceiling' : 'it stops mid-word and the provider said nothing'}) — kept ${_usable.length} of ${_whole.length} chars`);
       _metric(code, 'composer_truncated');
     }
     /* AND THE READER IS TOLD, IN THE PROSE THEY ARE READING. The limitation below reaches the
@@ -11722,8 +11782,17 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       _metric(code, 'composer_empty');
       return _degraded(_cutShort ? 'cut_short' : 'empty');
     }
+    /* ── A RECOVERY STATE, NOT A COMPLAINT ABOUT THE MACHINE ───────────────────────────────
+       This read "That is as far as I got before I ran out of room in one answer." Findings R1 #46
+       is explicit that a person must never be shown an internal answer-length limit as the reason
+       for what they did or did not get — the founder met that sentence as the explanation for why
+       no options were offered, which made a reasoning gap look like a plumbing one.
+
+       What replaces it says only what is true FOR THE READER: the answer stopped early, what they
+       are looking at is whole, and there is a way to get the rest. No ceiling, no token, no
+       mechanism. */
     const written = _cutShort
-      ? `${_polished}\n\nThat is as far as I got before I ran out of room in one answer.`
+      ? `${_polished}\n\nThat answer stopped before it was finished. What is above it is complete — ask me to carry on and I will pick up from there.`
       : _polished;
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
@@ -11788,7 +11857,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       /* AND IF IT WAS CUT OFF, THAT IS A LIMIT OF THIS ANSWER. It rides on the manifest with the
          others so every channel is measured against it — the prose, the spoken rendering and the
          machine-readable list — rather than each deciding for itself whether to mention it. */
-      ...(_cutShort ? ['This answer ran out of room before it finished, so it stops earlier than it meant to.'] : []),
+      ...(_cutShort ? ['This answer stopped before it was finished, so it ends earlier than it meant to.'] : []),
     ];
     const _mf = manifest.manifest({
       subject: `member:${userId}`,
@@ -11843,6 +11912,54 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       return _degraded('unverified');
     }
 
+    /* ── A HIGH IS NOT SOMETHING A PERSON MAKES, AND THE REPLY MAY NOT ASK THEM TO ────────
+       LIVE iPHONE (findings R1 #45). A model turn asked the founder whether they were
+       "interested in recording some Highs or Lows to give me actual evidence". Three of the
+       product's laws broken in one clause: High and Low are GOVERNED STANDINGS the canonical
+       owner produces when the record crosses a threshold, a person contributes an observation
+       rather than a standing, and what somebody says is not evidence until it is deliberately
+       admitted through the evidence path.
+
+       THE DETERMINISTIC PATH ALREADY REFUSES IT — ask directly and it answers "a high is not
+       something I create". The prompt carries the rule now as well. Neither is an implementation
+       on its own: a prompt reaches nobody when the model ignores it, which is exactly what
+       happened, so the refusal is here, in code, beside the grounding cage and the manifest.
+
+       IT DEGRADES RATHER THAN EDITING. Cutting the sentence out would leave an answer whose shape
+       assumed it, and the deterministic reply for this question is a good one — it says what a
+       High actually is. `ai/language-guard.js` owns the predicate, next to the prediction and
+       diagnosis rules, because it is the same job: a thing the product does not say, checked at
+       the model edge. */
+    /* ── AND THE DOCUMENT THEY ATTACHED IS NOT THE ANSWER TO THEIR QUESTION ────────────────
+       LIVE iPHONE (findings R1 #49). "What could we try next?" on a Focus came back opening with
+       a read-back of IMG_1918.png — the header, the crest, the league position, the fixture list,
+       the share icon — before the Focus was addressed at all.
+
+       REPRODUCED, AND THE DETERMINISTIC PATH WAS ALREADY RIGHT: with models off the same question
+       leads with the Focus and cites the picture underneath as a source, which is exactly the
+       shape the finding asks for. So the honest repair is to hold the model to the answer the
+       product already gives, and `material.recitationOf` is the measurement — the longest
+       unbroken run of the document's own words, and where in the reply it starts. A reply that
+       recites is refused; a reply that USES the document ("the table has you fourth on 24 points")
+       has no run at all and passes untouched.
+
+       ONLY WHEN THE PERSON DID NOT ASK TO READ IT. "What does that picture say?" is a request to
+       be shown the material, and quoting it back is then the whole point. The founder's case is
+       the other one — a question about the object, answered with the attachment. */
+    if (_material && !_ASK_MATERIAL.test(String(question || ''))) {
+      const _recite = material.recitationOf(written, _material.text || '');
+      if (_recite.recites) {
+        console.log(`[composer] refused — recited ${_recite.longest} consecutive words of the attachment${_recite.opens ? ', starting in the opening' : ''}`);
+        _metric(code, 'composer_refused');
+        return _degraded('unverified');
+      }
+    }
+    if (languageGuard.invitesGovernedCreation(written)) {
+      console.log('[composer] refused — invited the person to create a High or a Low');
+      _metric(code, 'composer_refused');
+      return _degraded('unverified');
+    }
+
     const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
     if (!check.ok) {
       // The violations are the interesting part: they say WHAT the model invented, which is the
@@ -11871,8 +11988,30 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
     // the product quietly reverts to templates with nothing anywhere saying why.
-    console.log('[composer] threw:', e && e.message);
+    /* ── WHICH FAILURE, RECORDED WHERE A PILOT CAN BE DIAGNOSED FROM IT ────────────────────
+       LIVE iPHONE (findings R1 #50). The founder met the degraded banner on college WiFi with
+       cellular in reserve, which rules out the assumption the copy and the metric were both
+       resting on. The comment above already named every cause this line was flattening — a
+       rejected model id, an auth failure, a rate limit — and then flattened them anyway into one
+       metric and one message in a log nobody counts.
+
+       THE CLASS IS THE GATEWAY'S, because the error object only exists at the provider boundary
+       and a second reading of it here would be a second answer to one question. What it says is
+       always about the link between THIS SERVER and the PROVIDER: if the person's own connection
+       were the problem their request would never have arrived, which is the client's own retry
+       (findings R1 #28) and a different event entirely.
+
+       IT NEVER REACHES THE PERSON. The degraded reason they are shown stays `error` and the note
+       they read stays the same neutral sentence — "IntelliQ's normal response isn't available
+       right now" — because "the provider rate-limited us" is our problem to fix rather than a
+       sentence to put in front of somebody, and above all it must never read as a remark about
+       their network. The class rides in the log and the metric, which is where the founder asked
+       for it. */
+    const _cls = (ai.failureClass ? ai.failureClass(e) : 'unknown');
+    console.log(`[composer] provider failed (${_cls}) — this is between IntelliQ and the model, not the reader's network:`, e && e.message);
     _metric(code, 'composer_error');
+    _metric(code, `composer_error_${_cls}`);
+    _captureError(e instanceof Error ? e : new Error(String(e)), { route: '/api/assistant/turn', method: 'POST', status: 200, orgCode: code, note: `composer provider failure: ${_cls}` });
     return _degraded('error');
   }
 }
@@ -12645,6 +12784,227 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
      AND NO EVIDENCE CROSSES. The shape of what the question rests on may be reported; not one
      word anybody contributed is. That is the rule `_objectSelfRead`'s own deeper layer already
      follows for an Inquiry read directly, and reading it across a link does not relax it. */
+/* ── IS THAT SUPPORTED, OR IS IT SOMEBODY'S THEORY? ANSWER THE QUESTION THAT WAS ASKED ───────
+   LIVE iPHONE (findings R1 #44). Asked "Does the record actually support that, or is that just a
+   hypothesis?", the product returned the same description it had just given and then, on the
+   repeat, navigation copy: "That is the same part of the record I just showed you — ask about
+   something else in it." A binary epistemic question met with a suggestion to ask a different
+   question.
+
+   Reproduced on the real route across three records — one with an admitted read, one carrying an
+   unsupported candidate, one with no explanation at all — and all three returned the identical
+   paragraph. The product HELD the answer in every case and had no way to say it.
+
+   THIS IS THE ONE QUESTION THE PRODUCT EXISTS TO ANSWER, so it is answered in the founder's own
+   order: the classification first, in one word a person can act on, then why, then what it rests
+   on. Nothing here is computed: `hypothesisHasStanding` decides what counts as an admitted read,
+   the band is the kernel's, `supportedBy` counts the refs the kernel attached, and `contested` is
+   the kernel's own flag. Four states, and "we do not know" is one of them rather than a gap.
+
+   WHY A LANGUAGE CUE IS JUSTIFIED HERE, when this file argues against them everywhere else. The
+   other cue routers decide WHICH SUBJECT to answer about, and that is what makes them wrong — the
+   subject is already known from the object the person is standing in. This decides which QUESTION
+   ABOUT THAT SUBJECT is being asked, and there is no non-linguistic way to tell "what is going on
+   here?" from "is that actually supported?". It fires only on a bound object, so it can never
+   redirect a conversation the way findings R1 #43 describes. */
+/* A REQUEST TO BE SHOWN THE DOCUMENT, rather than a question the document might help answer.
+   Findings R1 #49 draws exactly this line: the extraction may not be dumped into an answer
+   "unless the user asks to inspect/summarise the material". */
+const _ASK_MATERIAL = /\b(?:what does (?:it|that|this|the (?:file|image|picture|photo|document|deck|screenshot|attachment|pdf))\b|read (?:it|that|the)\b|what(?:'s| is) (?:in|on) (?:it|that|the)\b|summari[sz]e|quote|transcribe|show me (?:the|what)\b|say about)/i;
+
+/* ── AND IT ASKS FOR A VERDICT, NOT FOR THE EVIDENCE ─────────────────────────────────────────
+   The first version matched the bare word "support", which also matches "walk me through
+   everything that supports it" — a request for DEPTH, answered by the second layer of the object
+   read, and one this branch would have swallowed. `answer-depth-http-smoke` caught it, which is
+   what that file is for. What this has to recognise is the question the founder actually asked:
+   one that wants a classification back. */
+const _SUPPORT_Q = new RegExp([
+  '\\b(?:is|are|was|were)\\s+(?:that|this|it|the\\s+\\w+)\\s+(?:actually\\s+|really\\s+|genuinely\\s+)?'
+    + '(?:supported|proven|established|confirmed|settled|a\\s+fact|true|just\\s+a\\s+(?:hypothesis|theory|guess|hunch|feeling))\\b',
+  '\\bdoes\\s+(?:the\\s+record|the\\s+evidence|anything|any\\s+of\\s+(?:this|that|it))\\s+(?:actually\\s+|really\\s+)?(?:support|back)\\b',
+  '\\bor\\s+is\\s+(?:that|this|it)\\s+(?:just\\s+)?an?\\s+(?:hypothesis|theory|guess|hunch|feeling|assumption)\\b',
+  '\\bdo\\s+we\\s+(?:actually\\s+|really\\s+)?know\\s+(?:that|this|it)\\b',
+  '\\b(?:hypothesis|theory|guess)\\s+or\\s+(?:a\\s+)?(?:fact|finding|evidence|something\\s+supported)\\b',
+].join('|'), 'i');
+
+function _supportClassification(authorised, object) {
+  try {
+    if (!object || !object.kind) return null;
+    const live = (authorised || [])
+      .find(o => o && o.kind === object.kind && String(o.id) === String(object.id));
+    if (!live) return null;
+    const card = live.present || {};
+    const summary = card.summary || {};
+    const detail = card.detail || {};
+    const title = String(summary.full || summary.title || (live.explained || {}).headline || '').trim();
+    if (!title) return null;
+
+    /* A FOCUS IS A COMMITMENT, NOT A CLAIM, so "is that supported?" is not a question about it.
+       Saying so is the honest answer, and it points at the thing the question IS about — the
+       question the focus was started from, which the reader may already open. */
+    if (object.kind === 'focus') {
+      const _origin = (live.raw || {}).origin;
+      const rel = (live.raw || {}).addresses
+        || (_origin && _origin.inquiryId ? { kind: 'inquiry', id: String(_origin.inquiryId) } : null);
+      const across = rel ? _supportClassification(authorised, rel) : null;
+      return { verdict: 'not_a_claim', title,
+        text: across
+          ? `A focus is something you decided to do, so there is nothing in it to support or refute. `
+            + `The question it came from is a different matter: ${across.text}`
+          : `A focus is something you decided to do, so there is nothing in it to support or refute. `
+            + `It is not linked to a question on the record either, so there is nothing to measure it against.`,
+        limitations: ['a focus is a commitment; what can be supported or refuted is the question it addresses'] };
+    }
+
+    const open = (detail.stillUnknown || []).filter(Boolean).map(String);
+    const because = (detail.because || []).filter(Boolean);
+    const origins = Number(detail.independentOrigins) || 0;
+    const people = Number(detail.contributors) || 0;
+    const shape = [
+      origins ? `${origins} separate ${origins === 1 ? 'account' : 'accounts'}` : null,
+      people ? `from ${people} ${people === 1 ? 'person' : 'people'}` : null,
+    ].filter(Boolean).join(', ');
+    const admitted = String(summary.thinking || '').trim();
+    const cand = summary.possibleExplanation || null;
+    const tail = open.length ? ` Still open on it: ${open[0].replace(/[.?!]$/, '')}${/\?$/.test(open[0]) ? '?' : '.'}` : '';
+
+    /* CONTESTED OUTRANKS EVERYTHING. If people described the same thing in opposite directions,
+       no reading of it is settled, and answering "supported" would settle on their behalf a
+       disagreement they are the ones who should see. */
+    if (detail.contested === true) {
+      return { verdict: 'contested', title,
+        text: `Not settled — accounts of this disagree. ${shape ? `There ${shape.startsWith('1 ') ? 'is' : 'are'} ${shape}, and they do not point the same way, ` : 'The accounts do not point the same way, '}`
+          + `so nothing here is established either way.${tail}`,
+        limitations: ['accounts of this do not agree, and that disagreement is part of the finding'] };
+    }
+    if (admitted) {
+      return { verdict: 'supported', title,
+        text: `Supported, as far as the record goes: ${admitted.replace(/\.$/, '')}. `
+          + `${because.length ? `That rests on ${because.slice(0, 3).join(', ')}` : 'That is what the kernel has admitted'}`
+          + `${shape ? `, built from ${shape}` : ''}. `
+          + `It is the best reading of what was recorded, not proof.${tail}`,
+        limitations: ['a supported reading is the best account of what was recorded, not proof of it'] };
+    }
+    if (cand && cand.statement) {
+      const backed = Number(cand.supportedBy) || 0;
+      return { verdict: backed ? 'hypothesis_partly_backed' : 'hypothesis', title,
+        text: backed
+          ? `A hypothesis, not an established read. Somebody offered "${String(cand.statement).replace(/\.$/, '')}", `
+            + `and ${backed} ${backed === 1 ? 'record points' : 'records point'} at it — not enough for IntelliQ to stand behind it. `
+            + `${shape ? `What people described rests on ${shape}; ` : ''}the explanation for it is still the open part.${tail}`
+          : `Just a hypothesis. Somebody offered "${String(cand.statement).replace(/\.$/, '')}" and nothing on the record supports it yet. `
+            + `${shape ? `What people described rests on ${shape}, which is a different claim — the accounts are there, the explanation for them is not.` : 'The accounts are there; the explanation for them is not.'}${tail}`,
+        limitations: ['this is somebody\'s candidate explanation, at its own standing, and IntelliQ does not hold it'] };
+    }
+    return { verdict: 'unknown', title,
+      text: `Neither — nobody has offered an explanation for this yet, so there is nothing to support or rule out. `
+        + `${shape ? `What is on the record is ${shape} of what people saw.` : 'What is on the record is what people described.'}${tail}`,
+      limitations: ['no explanation has been offered, so there is nothing here to support or refute'] };
+  } catch (_) { return null; }
+}
+
+/* ── WHAT COULD WE TRY, ASKED OF THE QUESTION ITSELF ─────────────────────────────────────────
+   LIVE iPHONE (findings R1 #46). "What could we try?" on an Inquiry declined to offer anything,
+   said it had "run out of room in one answer", and then asked broad follow-up questions. Two
+   defects in one reply: the suggestion path was not reached at all, and an internal answer-length
+   limit was offered to a coach as the reason.
+
+   Reproduced on the real route against three records — one at `worth_testing`, one carrying an
+   unsupported candidate, one with no explanation — and all three returned the object's
+   description. The governed option set lives at this grain and no question ever reached it.
+
+   NOTHING NEW IS BUILT. `_inquiryFrontier` and `_inquiryOptions` are the owners; the previous
+   round already taught `_relatedQuestionRead` to reach them for a question read ACROSS a relation,
+   and this reads the same owners for the question somebody is standing in. One option set, one
+   readiness gate, one refusal to rank.
+
+   AND THE TWO HONEST ANSWERS ARE DIFFERENT ANSWERS. With enough behind it, a small unranked set
+   with what each would teach and what it does not settle. Without, the founder's own instruction:
+   name the fact that is blocking and ask the single highest-information question — which the
+   kernel already computed as `wouldHelp`, and which is a better question than any this could
+   invent. */
+/* THE VERB MATTERS, NOT JUST THE SHAPE OF THE QUESTION. This began as
+   `what (?:could|should|can|might) (?:we|i|you)` and swallowed "What should I focus on?" — which
+   is the attention question, not the suggestion one, and in this product "focus" is the name of
+   an object as well. A question about what to TRY has to say so. */
+const _TRY_Q = /\b(what (?:could|should|can|might) (?:we|i|you) (?:try|do|test|change|run|attempt|go with)|what (?:are|would be) (?:our|the|my) options?|what (?:do|should) we do (?:about|with|next)|what next|suggest(?:ion|ions)?|what options|any options|any ideas|recommend|try (?:next|now|instead|anything)|where do (?:we|i) (?:start|go from here))\b/i;
+
+function _optionsAnswer(authorised, object) {
+  try {
+    if (!object || !['inquiry', 'high', 'low'].includes(object.kind)) return null;
+    /* WHAT HAS ALREADY BEEN TRIED ABOUT THIS QUESTION, so the option set can apply the founder's
+       experiment law rather than re-offering a family that already failed. Same resolution both
+       spellings of the link use everywhere else in this file. */
+    const _srcOf = (o) => {
+      const a = (o.raw || {}).addresses;
+      if (a && a.kind && a.id) return `${a.kind}:${a.id}`;
+      const g = (o.raw || {}).origin;
+      return g && g.inquiryId ? `inquiry:${g.inquiryId}` : null;
+    };
+    const _here = `${object.kind}:${object.id}`;
+    const _alsoInquiry = `inquiry:${object.id}`;   // a High and a Low carry their inquiry's id
+    const tried = (authorised || [])
+      .filter(o => o.kind === 'focus' && [_here, _alsoInquiry].includes(_srcOf(o)))
+      .map(o => ({ focusId: String(o.id),
+        text: String(((o.present || {}).summary || {}).title || (o.explained || {}).headline || '').replace(/\.$/, '').slice(0, 160),
+        outcome: (((o.present || {}).detail || {}).outcome || {}).result || null }))
+      .filter(x => x.text && x.outcome)
+      .slice(0, 3);
+
+    const live_ = (authorised || []).find(o => o && o.kind === object.kind && String(o.id) === String(object.id));
+    const read = _relatedQuestionRead(authorised, object, tried);
+    if (!read) return null;
+    const state = (read.readiness || {}).state || null;
+    if (!state) return null;
+    const why = String((read.optionSet || {}).because || (read.readiness || {}).because || '');
+    const opts = ((read.optionSet || {}).options || []).slice(0, 3);
+    const parts = [];
+    const limitations = [];
+
+    /* THE QUESTION IS NAMED. Findings R1 #43 is the reason: an answer on a bound thread has to be
+       readable as an answer about THAT thread, and a list of options with no subject on it reads
+       as advice about everything. */
+    const _title = String(((live_ || {}).present || {}).summary
+      ? (((live_ || {}).present || {}).summary.full || ((live_ || {}).present || {}).summary.title) : '').trim()
+      || String(((live_ || {}).explained || {}).headline || '').replace(/\.$/, '');
+    const _on = _title ? ` on "${_title}"` : '';
+    if (opts.length) {
+      parts.push(`There is enough${_on} for something to be worth trying${why ? ` — ${why.charAt(0).toLowerCase()}${why.slice(1)}` : '.'}`);
+      parts.push(`In no order: ${opts.map(o => `"${String(o.text || '').slice(0, 160)}" — it would tell you ${
+        String(o.wouldTeach || '').replace(/^[A-Z]/, c => c.toLowerCase()).replace(/\.$/, '')}${
+        o.uncertainty ? `, though ${String(o.uncertainty).replace(/^[A-Z]/, c => c.toLowerCase()).replace(/\.$/, '')}` : ''}`).join('; ')}.`);
+      parts.push('Nothing here picks one, and none of this starts anything — that stays yours.');
+      limitations.push('these options are what the record supports trying, not a recommendation, and they are not in any order');
+      for (const c of ((read.optionSet || {}).cautions || []).slice(0, 2)) {
+        parts.push(`Already tried about this: "${String(c.text || '').slice(0, 160)}", and nothing recorded says it helped.`);
+      }
+    } else {
+      /* NO OPTIONS IS AN ANSWER, AND IT HAS TO SAY WHAT IS BLOCKING. "I cannot suggest anything"
+         on its own is the shape the founder met; naming the missing fact is what makes it usable. */
+      parts.push(state === 'gather_information'
+        ? `Not yet${_on} — it is worth learning more before trying anything${why ? `, because ${why.charAt(0).toLowerCase()}${why.slice(1)}` : '.'}`
+        : `Nothing worth trying yet${_on}${why ? `, and the reason is specific: ${why.charAt(0).toLowerCase()}${why.slice(1)}` : '.'}`);
+      /* ONE QUESTION, NOT A LIST. The founder asked for the single highest-information question,
+         and the kernel already ranked them: `wouldHelp` is what it judged worth asking, and an
+         open unknown is the fallback. A list of six here is the questionnaire this product keeps
+         being told not to be. */
+      const _ask = ((read.readiness || {}).wouldHelp || [])[0] || (read.wouldHelp || [])[0] || read.open[0] || null;
+      const _askText = _ask && typeof _ask === 'object' ? (_ask.statement || _ask.question || '') : String(_ask || '');
+      if (_askText) {
+        parts.push(`The one thing that would move this on: ${String(_askText).replace(/[.?!]$/, '')}?`);
+      } else {
+        /* NOTHING RECORDED AS OPEN EITHER. Saying only "there is nothing worth trying" leaves a
+           person with no move at all, which is the shape the founder met. What is missing here is
+           not a fact somebody could look up — it is an explanation somebody is willing to put
+           forward, and naming that is the honest next step rather than an invented question. */
+        parts.push('What is missing is an explanation somebody is willing to put forward — offer one and it goes on the record as a candidate, at its own standing, for the record to support or not.');
+      }
+      limitations.push('with nothing established, a suggestion would be invention rather than a reading of the record');
+    }
+    return { text: parts.join(' '), limitations };
+  } catch (_) { return null; }
+}
+
 function _relatedQuestionRead(authorised, rel, triedBefore) {
   try {
     if (!rel || !rel.kind || !rel.id) return null;
@@ -12854,8 +13214,24 @@ function _objectSelfRead(code, userId, object, depth = 0) {
       parts.push(`On "${title}": ${claim}`);
       const because = (detail.because || []).filter(Boolean);
       const unknowns = (detail.stillUnknown || []).filter(Boolean);
+      /* ── A BASIS BELONGS TO A CLAIM, AND WITH NO CLAIM THERE IS NOTHING FOR IT TO REST ON ──
+         LIVE, reproduced while driving findings R1 #44: an inquiry whose kernel had admitted no
+         read answered "I don't have a read on this yet. That rests on two independent accounts."
+         Two sentences, one of them denying the other, on the same screen — findings R1 #37 in its
+         third renderer.
+
+         `because` IS THE OBSERVATION'S, not the claim's. `confidence.because` explains how well
+         established what people DESCRIBED is; `thinking` is the explanation IntelliQ has admitted
+         for it. When there is no admitted read, "that rests on" attaches the wrong noun to the
+         wrong sentence — so the same facts are said the other way round, which is both true and
+         more useful: the accounts are there, the explanation is not. */
+      const _admitted = !!String(((live.present || {}).summary || {}).thinking || '').trim();
       if (!depth) {
-        if (because.length) parts.push(`That rests on ${because.slice(0, 2).join(', ')}.`);
+        if (because.length) {
+          parts.push(_admitted
+            ? `That rests on ${because.slice(0, 2).join(', ')}.`
+            : `What people described rests on ${because.slice(0, 2).join(', ')} — the explanation for it is what is missing.`);
+        }
         if (unknowns[0]) parts.push(`Still open: ${unknowns[0]}`);
       } else {
         /* ── THE SECOND LAYER: WHAT THE RECORD HOLDS BEYOND THE HEADLINE ───────────────────
@@ -12867,8 +13243,12 @@ function _objectSelfRead(code, userId, object, depth = 0) {
            accounts, how many people, how many were later corrected — and not one word anybody
            contributed. The alternatives and the falsifier are the inquiry's OWN computed
            statements, not somebody's account of anything. */
-        if (because.length > 2) parts.push(`That rests on ${because.slice(0, 6).join(', ')}.`);
-        else if (because.length) parts.push(`That rests on ${because.join(', ')}.`);
+        const _rests = because.length > 2 ? because.slice(0, 6) : because;
+        if (_rests.length) {
+          parts.push(_admitted
+            ? `That rests on ${_rests.join(', ')}.`
+            : `What people described rests on ${_rests.join(', ')} — the explanation for it is what is missing.`);
+        }
         if (unknowns.length) parts.push(`Still open: ${unknowns.slice(0, 3).join('; ')}.`);
         const alts = (detail.alternatives || []).filter(a => a && a.statement).slice(0, 2);
         if (alts.length) {
@@ -12906,7 +13286,12 @@ function _objectSelfRead(code, userId, object, depth = 0) {
        been applying, a line that reads as a safeguard while changing nothing is worse than its
        absence, because the next person to read it will believe it is load-bearing. */
     parts.push('That is what is on the record here, not a fresh reading of it.');
-    return { text: parts.join(' '), limitations, depth: depth && added ? 1 : 0 };
+    /* THE TITLE TRAVELS WITH THE READ. Findings R1 #43 needs to name the conversation somebody is
+       in when an answer steps outside it, and this function already resolved that name through the
+       authorised bucket. Resolving it a second time at the call site would be a second answer to
+       "what is this object called", which is how two surfaces come to print different names for
+       one thing. */
+    return { text: parts.join(' '), title, limitations, depth: depth && added ? 1 : 0 };
   } catch (_) { return null; }
 }
 
@@ -13086,8 +13471,65 @@ function _assistantAnswer(code, userId, question, opts = {}) {
   const personHit = personCue ? _resolvePersonQuery(code, q) : null;
 
   let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null, standingRead = false;
+  /* ── THE OBJECT YOU ARE STANDING IN IS THE SUBJECT OF THE CONVERSATION ────────────────────
+     LIVE iPHONE (findings R1 #43). On Titi's own Inquiry — "Where they are trying to get to" —
+     the thread answered about the squad's draws and then asked whether they were analysing it
+     with the First Team group. Reproduced on the real route, twice over and from two different
+     branches: "How is the team doing?" returned the SQUAD's open question, and "What should I
+     focus on?" returned the attention digest, "First Team is working out many draws this season".
+     Neither answer mentioned the object the person was standing in.
+
+     THE CAUSE IS STRUCTURAL, NOT A BAD SENTENCE. Everything below this line is an English-cue
+     router — thirteen branches, not one of which looks at `opts.object` — and the bound object is
+     consulted LAST, after free-text retrieval has already dead-ended. So any question whose words
+     happen to match a digest cue is answered about something else, on a thread whose whole
+     purpose is one subject.
+
+     THE FOUNDER'S RULING IS THREE SENTENCES AND THIS IMPLEMENTS ALL THREE: the current object is
+     the PRIMARY subject; related context may be consulted but must not SILENTLY replace it; a
+     topic switch needs an explicit transition or a clearly signposted branch. So:
+
+       they named no other subject   the object answers, and the wider reading is OFFERED
+       they named another subject    that answer stands, and it SAYS it is stepping outside
+
+     `_namesOther` is not a new vocabulary. It is `workScoped` — the same team/org/everyone words
+     the retrieval purpose is already chosen by — plus a resolved person. Writing a second list
+     here is how two lists come to disagree about what counts as naming the team.
+
+     BOUND ONLY WHEN THE OBJECT IS ONE OF THE FOUR. `_objectSelfRead` returns null for a
+     conversation, a material, and anything the reader cannot open, so a material-bound thread and
+     an unauthorised reference both fall through to the branches that serve them. */
+  const _boundRead = opts.object ? _objectSelfRead(code, userId, opts.object, 0) : null;
+  const _namesOther = workScoped || !!personHit;
+  let _onSubject = !opts.object;   // an unbound turn is never off-subject
+  /* THE ONE QUESTION ANSWERED BEFORE THE ROUTER GETS A SAY (findings R1 #44). It is about the
+     object in front of them, so no branch below can answer it better, and every one of them
+     answered it worse — with the object's description, and then with navigation copy. */
+  const _authorisedNow = opts.object ? _allObjectsFor(code, userId) : null;
+  const _support = (opts.object && _SUPPORT_Q.test(q))
+    ? _supportClassification(_authorisedNow, opts.object) : null;
+  /* AND "WHAT COULD WE TRY?" REACHES THE OPTION SET (findings R1 #46), for the same reason: it is
+     a question about the object in front of them, and every branch below answered it with the
+     object's description or an internal limit. */
+  const _options = (!_support && opts.object && _TRY_Q.test(q))
+    ? _optionsAnswer(_authorisedNow, opts.object) : null;
   const priv = ev.filter(e => e.visibility === 'private');
-  if (personHit) {
+  if (_options) {
+    answer = _options.text;
+    confidence = 'confirmed';   // about WHAT THE RECORD SUPPORTS TRYING, which is the only claim
+    limitations = _options.limitations;
+    _onSubject = true;
+  } else if (_support) {
+    /* CLASSIFICATION FIRST, THEN WHY, THEN WHAT IT RESTS ON — the founder's own order, and all
+       three in this one answer: the verdict, the reading it is a verdict about, the shape of what
+       it rests on, and what is still open. Appending the ordinary object read after it was the
+       first version and it said the claim, the basis and the open question a second time in the
+       same breath, which reads as a product that cannot stop talking. */
+    answer = _support.text;
+    confidence = 'confirmed';   // about WHAT STANDING THE RECORD GIVES IT, the only claim made
+    limitations = [..._support.limitations, ...((_boundRead || {}).limitations || [])];
+    _onSubject = true;
+  } else if (personHit) {
     const visible = new Set(getVisibleUserIds(code, userId));
     const first = String(personHit.name).split(/\s+/)[0];
     if (!visible.has(personHit.id)) {
@@ -13423,6 +13865,7 @@ function _assistantAnswer(code, userId, question, opts = {}) {
           : _self.text;
         confidence = 'confirmed';   // about WHAT IS ON THE RECORD, which is the only claim made
         limitations = _self.limitations;
+        _onSubject = true;          // this branch, and only this branch, answered about the object
       }
       /* ── AND WHAT HAS BEEN LEARNED, WHICH IS THE LAST THING TO TRY ───────────────────────
          Round 5 left this dead-ending from Home: bound to a Focus it worked, unbound it did not.
@@ -13468,6 +13911,39 @@ function _assistantAnswer(code, userId, question, opts = {}) {
         confidence = 'none';
         limitations = ['no matching authorised evidence'];
       }
+    }
+  }
+
+  /* ── AND NOW THE BOUND SUBJECT IS ENFORCED, IN ONE PLACE RATHER THAN THIRTEEN ─────────────
+     Findings R1 #43. Doing this per-branch would mean thirteen copies of one rule and a
+     fourteenth branch written later without it; the chain has exactly one exit, so the rule lives
+     here and cannot be missed by anything that answers above.
+
+     TWO OUTCOMES, AND NEITHER OF THEM IS SILENCE ABOUT THE SWITCH.
+
+       THEY NAMED NO OTHER SUBJECT. The digest answered a question the person asked inside one
+       object, about everything else they own. The object answers instead — and the wider reading
+       is OFFERED rather than withheld, because "what should I focus on" across the whole record
+       is a real question and refusing it would trade one defect for another.
+
+       THEY NAMED ANOTHER SUBJECT. That answer stands, exactly as composed, and gains one sentence
+       saying which conversation it stepped out of. A person who typed "how is the team doing?"
+       into their own Inquiry should get the team — and should not have to work out, from an
+       answer about a squad's open question, that it was not about the thing on their screen.
+
+     NOTHING IS RE-ANSWERED AND NOTHING IS RE-RETRIEVED: `_boundRead` was computed before the
+     chain ran, from the same canonical reader the object branch itself uses. */
+  if (_boundRead && !_onSubject) {
+    const _subject = String(_boundRead.title || '').replace(/\.$/, '');
+    if (!_namesOther) {
+      answer = `${_boundRead.text} If you meant across everything rather than this one, say so and I will look wider.`;
+      confidence = 'confirmed';
+      limitations = _boundRead.limitations;
+      cites = [];
+      groundedClaims = []; citations = []; standingRead = false;
+    } else if (_subject) {
+      answer = `Stepping outside "${_subject}" for that one. ${answer}`;
+      limitations = [...limitations, `that answer is not about "${_subject}", which is the conversation you are in`];
     }
   }
 

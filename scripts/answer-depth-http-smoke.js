@@ -221,8 +221,19 @@ const server = app.listen(0, async () => {
     /* THE NEAREST NEGATIVE, because the fix must not close the org path. Naming the team is not a
        pronoun, so it still reaches the organisation reader from inside an object. */
     const named = await pron('Tell me about the team.', 'f_press', 'focus');
+    /* ── THIS ASSERTION USED THE TITLE'S ABSENCE AS ITS PROXY, AND THE PROXY WENT STALE ──────
+       It read `!/Press from the first touch/`, meaning "the Focus did not answer this". Findings
+       R1 #43 then required the opposite of what that proxy assumes: an answer on a bound thread
+       that is about something else must SAY which conversation it stepped out of, and saying so
+       means naming it. The law here has not changed — naming the team still reaches the
+       organisation reader from inside an object, and the fix must not close that path — so it is
+       asserted directly instead of through a title that now legitimately appears. */
     ok('DP-H3 …while naming the team still reaches the organisation reader from inside it',
-      !/Press from the first touch/i.test(named) && named.length > 0);
+      /First Team/i.test(named)
+      && !/That is what is on the record here/i.test(named)
+      && named.length > 0);
+    ok('DP-H3b …and the step away from the Focus is signposted rather than silent',
+      /Stepping outside "Press from the first touch"/i.test(named));
     /* AND THE SAME PRONOUN WITH NOTHING BOUND IS UNCHANGED. This is the behaviour that shipped
        before the fix, and narrowing a branch must not quietly close it: asked from nowhere in
        particular, "it" has nothing else to refer to and the organisation reader is the right

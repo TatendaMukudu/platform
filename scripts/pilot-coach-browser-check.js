@@ -519,6 +519,53 @@ _rebuildEmailIndex();
         return !!t && !t.disabled && !t.readOnly;
       }));
 
+    /* ══ J2 — THE THREAD YOU ARE IN IS THE SUBJECT, ON THE RENDERED SCREEN ═══════════════════
+       LIVE iPHONE (findings R1 #43), which asks for this proof by name: "add browser proof that
+       unrelated recent/team topics cannot hijack a personal Inquiry thread."
+
+       The HTTP suite proves the route. This is the half that decides whether a person believes
+       it, and it is the half the finding is written from: they are standing inside ONE question,
+       on a 390px screen, with three other live questions in the same squad — and they type six
+       words. What comes back has to be about the thing whose name is at the top of the screen.
+
+       DRIVEN THROUGH THE REAL COMPOSER, not a fetch: the founder's own rule for this pass is that
+       a bug survived once because the tests called the route correctly while the UI sent something
+       else, and the subject of a turn is carried by the UI. */
+    posts.length = 0;
+    await coach.page.evaluate(() => MemberApp.openObjectThread('inquiry', 'inq_comms', 'group:first'));
+    await coach.page.waitForTimeout(1400);
+    /* THE THREAD GROWS ITS OWN COMPOSER — `iq-object-input`, sending through `inquirySend` — and
+       the shell one stands down when it does. That is the whole reason this is a browser gate:
+       the subject of a turn is carried by whichever box the person actually typed into, and there
+       are two of them on this product. */
+    await coach.page.fill('#iq-object-input', 'What should I focus on?');
+    await coach.page.evaluate(() => MemberApp.inquirySend());
+    await coach.page.waitForTimeout(2400);
+    const boundTurn = posts.find(p => /assistant\/turn/.test(p.url));
+    /* THE WIRE FORMAT IS A REF STRING, and pinning it is the point rather than an inconvenience:
+       the server resolves `about` through `_aboutRef`, and an assertion written against a shape
+       the client does not send would pass on a build where the binding was dropped entirely. */
+    ok('PC-J10 the composer sends the turn bound to the question on the screen',
+      !!boundTurn && String(boundTurn.body.about) === 'inquiry:inq_comms'
+      && boundTurn.body.surface === 'inquiry');
+    const boundSaid = await coach.page.evaluate(() => {
+      const t = [...document.querySelectorAll('.iqt-turns .iq-msg-iq, .iq-msg-iq')];
+      return t.length ? t[t.length - 1].textContent : '';
+    });
+    /* THE TITLE ALONE IS NOT ENOUGH: the attention digest LISTS this squad's questions, so it
+       names this one while being an answer about all four. A mutation proved it. What has to be
+       on the screen is the object's OWN read — the sentence only that reader writes. */
+    ok('PC-J11 …and the answer on the screen is about THAT question',
+      /Communication after results/i.test(boundSaid)
+      && /on the record here, not a fresh reading of it/i.test(boundSaid));
+    /* THE THREE OTHER LIVE QUESTIONS IN THE SAME SQUAD. Each is a real object with a real title,
+       which is what makes this a hijack test rather than a spelling test: the attention digest
+       lists them, and on the live build one of them answered a question asked inside this one. */
+    ok('PC-J12 …and not about the squad\'s other live questions',
+      !/last twenty minutes|Set-piece marking|attendance/i.test(boundSaid));
+    ok('PC-J13 …with the wider reading offered rather than silently dropped',
+      /across everything rather than this one/i.test(boundSaid));
+
     /* ══ K — SAYING IT, ON THE PHONE, WITH NO MODEL ═════════════════════════════════════════
        The founder's rule for this pass, applied to the newest path in the product:
 

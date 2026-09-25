@@ -133,11 +133,22 @@ const server = app.listen(0, async () => {
        the manifest, the spoken rendering and anything that reads the turn programmatically.
        Asserted separately, because an earlier round of this work found a machine-readable
        limitation standing in for words a human never saw. */
+    /* ── THE WORDS CHANGED, AND THE REASON IS FINDINGS R1 #46 ────────────────────────────
+       These two pinned "ran out of room", which was this file's own copy and read well enough
+       until the founder met it as the EXPLANATION for why no options had been offered. An
+       internal answer-length ceiling is our problem; a person reading it hears a product
+       apologising for its plumbing, and #46 asks explicitly that it never be shown. The law is
+       unchanged — the loss is stated in both channels — so both assertions stand, against the
+       sentence that says only what is true for the reader. The absence of the old wording is
+       asserted as hard as the presence of the new one, because a repair that leaves the old
+       sentence available beside the new one has not removed anything. */
     ok('TT-C1 the person is told in the prose that the answer stopped early',
-      /ran out of room/i.test(said));
-    ok('TT-C2 …and the machine-readable limitations say it too',
+      /stopped before it was finished/i.test(said) && !/ran out of room/i.test(said));
+    ok('TT-C2 …and the machine-readable limitations say it too, without naming an internal limit',
       (((cut.j || {}).response || {}).limitations || [])
-        .some(l => /ran out of room before it finished/i.test(String(l))));
+        .some(l => /stopped before it was finished/i.test(String(l)))
+      && (((cut.j || {}).response || {}).limitations || [])
+        .every(l => !/ran out of room|token/i.test(String(l))));
     /* AND IT IS NOT DRESSED UP AS A COMPLETE ANSWER ELSEWHERE. A turn that says "cut short" in the
        prose and reports itself as an ordinary composed reply everywhere else is half a fix. */
     ok('TT-C3 …and nothing claims the answer is complete',
@@ -164,10 +175,11 @@ const server = app.listen(0, async () => {
     const fine = await ask('Anything on this one?');
     const fineSaid = String(((fine.j || {}).response || {}).responseText || '');
     ok('TT-E1 a complete reply is delivered as written', /Tell me what happened and I will hold it/.test(fineSaid));
-    ok('TT-E2 …with no cut-short sentence bolted onto it', !/ran out of room/i.test(fineSaid));
+    ok('TT-E2 …with no cut-short sentence bolted onto it',
+      !/stopped before it was finished|ran out of room/i.test(fineSaid));
     ok('TT-E3 …and no cut-short limitation',
       !(((fine.j || {}).response || {}).limitations || [])
-        .some(l => /ran out of room/i.test(String(l))));
+        .some(l => /stopped before it was finished|ran out of room/i.test(String(l))));
     ok('TT-E4 …and it is not reported as degraded at all',
       (((fine.j || {}).response || {}).composer || {}).degraded === false);
 

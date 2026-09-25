@@ -216,6 +216,55 @@ function isTruncated(reply) {
   return !!(reply && typeof reply === 'object' && reply.__iqTruncated === true);
 }
 
+/* ── WHICH FAILURE THIS WAS, IN A CLOSED VOCABULARY ──────────────────────────────────────────
+   LIVE iPHONE (findings R1 #50). The founder met the degraded banner while on college WiFi with
+   cellular in reserve, and the report is precise about why that matters: the fallback cannot be
+   assumed to be the person's connection. It was not. Every provider failure in this file ends at
+   `throw lastErr`, the composer catches it, logs `e.message` and degrades with reason `error` —
+   one bucket for a rate limit, an expired key, a cold start, a 500 and a socket that never
+   opened. A pilot cannot be diagnosed from that, and the founder asked for exactly this: "log and
+   trace the exact degraded reason internally so live pilot failures can be diagnosed".
+
+   THE DISTINCTION THE FINDING LEADS WITH is between the person's network and the provider's
+   failure, and it is worth stating plainly because the answer is structural: if the PERSON's
+   connection is the problem, this code never runs — their request does not reach the server, and
+   the client's own retry handles it (findings R1 #28). Everything classified here happened
+   BETWEEN THIS SERVER AND THE PROVIDER, on a connection the person has no part in. So no class
+   below may ever be shown to them as something about their network, and `unreachable` means this
+   service could not reach the provider, never that they could not reach this service.
+
+   A CLOSED VOCABULARY, for the same reason `COMPOSER_DEGRADED` is one: a free-text reason is a
+   thing nobody can count, and counting is the whole point of recording it. */
+const FAILURE_CLASSES = Object.freeze(['timeout', 'rate_limited', 'over_capacity', 'upstream',
+  'unreachable', 'auth', 'model_unavailable', 'bad_request', 'cancelled', 'unknown']);
+
+function failureClass(err) {
+  if (!err) return 'unknown';
+  const status = err.status || err.statusCode || 0;
+  const code = String(err.code || err.errno || '').toUpperCase();
+  const msg = String(err.message || '').toLowerCase();
+  const name = String(err.name || '').toLowerCase();
+
+  /* THE TRANSPORT FIRST, because a socket that never opened carries no HTTP status and would
+     otherwise fall through to `unknown` — which is the commonest real failure and the one the
+     founder is most likely to be hitting. */
+  if (name === 'aborterror' || code === 'ABORT_ERR' || /\baborted\b/.test(msg)) return 'cancelled';
+  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT'
+      || code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
+      || /timed? ?out|timeout/.test(msg)) return 'timeout';
+  if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'EHOSTUNREACH',
+    'ENETUNREACH', 'EPROTO', 'UND_ERR_SOCKET'].includes(code)
+      || /fetch failed|socket hang up|network error|getaddrinfo/.test(msg)) return 'unreachable';
+
+  if (status === 429) return 'rate_limited';
+  if (status === 529 || /overloaded/.test(msg)) return 'over_capacity';
+  if (status === 401 || status === 403 || /api key|unauthor|forbidden|credential/.test(msg)) return 'auth';
+  if (_isModelUnavailable(err)) return 'model_unavailable';
+  if (status >= 500) return 'upstream';
+  if (status >= 400) return 'bad_request';
+  return 'unknown';
+}
+
 /* A 400 that names a sampling parameter — the shape of "this model dropped that knob". */
 function _isSamplingRejected(err) {
   const msg = (err?.message || '').toLowerCase();
@@ -616,7 +665,7 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
   return resp?.content || [];
 }
 
-module.exports = { complete, completeJSON, isTruncated, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
+module.exports = { complete, completeJSON, isTruncated, failureClass, FAILURE_CLASSES, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
   budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
   providerFault, providerReachability, _resetProviderFault,
   canSearchWeb, searchWeb, WEB_SEARCH_TOOL };

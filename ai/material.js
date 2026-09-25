@@ -441,6 +441,58 @@ function findIn(material = {}, question, { max = 3, cap = CONTEXT_CAP } = {}) {
    `floor` is the verdict from the production cohort rule, handed in. This module does not
    own that arithmetic — a second copy of the floor is how two surfaces end up disagreeing about
    who may be named. */
+/* ── A DOCUMENT INFORMS AN ANSWER; IT IS NOT THE ANSWER ──────────────────────────────────────
+   LIVE iPHONE (findings R1 #49). On a Focus, asked "What could we try next?", the reply opened
+   with a long read-back of IMG_1918.png — team header section, the crest, the league position,
+   the fixture list, the share icon — before it addressed the Focus at all, and then trailed off
+   asking what the founder was actually worried about losing. The attachment had crowded out the
+   governed object.
+
+   THIS IS A MODEL-PATH DEFECT AND THE DETERMINISTIC PATH WAS ALREADY RIGHT: with models off the
+   same question answers from the Focus and cites the picture underneath as a source, which is the
+   shape the finding asks for. The prompt now says not to narrate; this is what makes that a rule
+   rather than a request, because a rule that lives only in a prompt reaches nobody the moment the
+   model ignores it — which is how the founder met it.
+
+   WHAT IS MEASURED, and why a run rather than a ratio. A reply is allowed to quote a document,
+   and should: "the table has them fourth on 24 points" is an answer USING the material. What the
+   founder met was RECITATION — consecutive stretches of the document reproduced in order. So this
+   asks for the longest unbroken run of the document's own words that appears in the reply, and
+   where it starts. A long run is recitation whatever proportion of the reply it occupies; a run
+   in the OPENING is the specific failure the finding names, "lead with the Focus-specific answer".
+
+   PUNCTUATION AND CASE ARE IGNORED and stopwords are kept, deliberately: recitation is a property
+   of word ORDER, and dropping "the" and "of" would let a reply reproduce a passage with the joins
+   removed and pass. `terms` is the tokeniser for topic matching and this is a different question,
+   so it is not reused here — that would make one function answer two questions. */
+const _runWords = t => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+
+function recitationOf(reply, materialText, { run = 9, opening = 40 } = {}) {
+  const a = _runWords(reply);
+  const b = _runWords(materialText);
+  if (a.length < run || b.length < run) return { longest: 0, at: -1, recites: false, opens: false };
+  /* Every window of the document's words, indexed once, so the reply is walked a single time
+     rather than the two texts being compared pairwise. */
+  const seen = new Map();
+  for (let i = 0; i + run <= b.length; i++) {
+    const key = b.slice(i, i + run).join(' ');
+    if (!seen.has(key)) seen.set(key, i);
+  }
+  let longest = 0, at = -1;
+  for (let i = 0; i + run <= a.length; i++) {
+    const key = a.slice(i, i + run).join(' ');
+    const j = seen.get(key);
+    if (j === undefined) continue;
+    /* Extend the match as far as both texts keep agreeing, so the length reported is the real
+       stretch rather than the window size. */
+    let len = run;
+    while (i + len < a.length && j + len < b.length && a[i + len] === b[j + len]) len++;
+    if (len > longest) { longest = len; at = i; }
+    i += len - 1;
+  }
+  return { longest, at, recites: longest >= run, opens: longest >= run && at >= 0 && at < opening };
+}
+
 function understanding(material = {}, engagements = [], { members = 0, floor = null } = {}) {
   const sections = _arr(material.sections);
   const n = _num(members) || 0;
@@ -519,6 +571,7 @@ function landedNote(u = {}) {
 module.exports = {
   TEXT_CAP, SECTION_CAP, SECTION_TEXT, CONTEXT_CAP, MIN_SECTION, ENGAGEMENT, KINDS,
   CLASSES, DEFAULT_CLASS, CLASS_TEXT, classifyRequest, hasReadableText,
+  recitationOf,
   /* `terms` is exported because the learning read was carrying its OWN COPY of this tokeniser —
      the same regex, the same length rule, a slightly different stopword list — so a question in
      Korean or Chinese failed in two places for one reason, and fixing one of them would have left

@@ -66,4 +66,49 @@ function predictsOrDiagnoses(text) {
 /* Convenience: true when the text is SAFE to show (describes, doesn't predict/diagnose). */
 function describesOnly(text) { return !predictsOrDiagnoses(text); }
 
-module.exports = { predictsOrDiagnoses, describesOnly, PREDICTIVE, PERSON_FUTURE, GUARANTEE, DIAGNOSTIC };
+/* ── ASKING SOMEBODY TO RECORD A HIGH OR A LOW ────────────────────────────────────────────────
+   LIVE iPHONE (findings R1 #45). A model reply asked the founder whether they were "interested in
+   recording some Highs or Lows to give me actual evidence". Every clause of that is against the
+   product's own law: a High and a Low are GOVERNED STANDINGS that the canonical owner produces
+   when the record crosses a threshold, not objects a person creates — and what a person
+   contributes is an observation or an account, which is not evidence until it is deliberately
+   admitted through the evidence path.
+
+   THE DETERMINISTIC PATH ALREADY SAYS IT. `server.js` answers "a high is not something I create —
+   it is what appears when…" when asked directly. The prompt now carries the rule too, and this
+   guard is what makes it an implementation rather than a request: a prompt reaches nobody when
+   the model ignores it, and a model that has been told not to say something is exactly the thing
+   this file exists to catch when it says it anyway.
+
+   NARROW ON PURPOSE. It is the pairing of a CREATE verb with a High or a Low as its OBJECT that
+   is wrong, not the words themselves — "a high appeared on your record", "your Lows page", "this
+   is now a Low" are all correct and common, and a guard that rejected them would degrade honest
+   turns into deterministic ones for no reason. So a verb of creation must be followed by a High
+   or a Low within a short span, and the imperative and the invitation are both covered because
+   the founder met the invitation. */
+const CREATE_STANDING = new RegExp(
+  /* NOT PRECEDED BY AN ARTICLE OR A POSSESSIVE, which is what tells the VERB from the NOUN.
+     "record" is a noun all over this product — "on the record", "your record holds", "a record
+     of what happened" — and without this the guard would refuse the product's own commonest
+     sentence the moment a High or a Low appeared within a few words of it. */
+  '(?<!\\b(?:the|a|an|your|our|their|its|this|that|no|any)\\s)'
+  + '\\b(?:record|log|creat|add|make|enter|capture|start|raise|file|register)\\w*\\b'
+  + '(?:\\W+\\w+){0,6}?\\W+'
+  + '(?:a|an|any|some|more|new)?\\s*'
+  /* NOT A HYPHENATED COMPOUND. "high-stakes", "low-key", "high-pressure" are adjectives, and the
+     word boundary alone happily matches the first half of one. */
+  + '\\b(?:high|low)s?\\b(?!-)', 'i');
+
+/* The other half of the same sentence: a High or a Low offered as the way to GIVE evidence.
+   "record some Highs or Lows to give me actual evidence" is two violations, and the second is
+   the more damaging one — it tells a person their account is worth nothing until they file it
+   under a standing they are not entitled to assign. */
+const STANDING_AS_EVIDENCE = /\b(?:high|low)s?\b(?:\W+\w+){0,8}?\W+\b(?:evidence|proof|data|facts?)\b/i;
+
+function invitesGovernedCreation(text) {
+  const t = String(text == null ? '' : text);
+  return CREATE_STANDING.test(t) || STANDING_AS_EVIDENCE.test(t);
+}
+
+module.exports = { predictsOrDiagnoses, describesOnly, invitesGovernedCreation,
+  PREDICTIVE, PERSON_FUTURE, GUARANTEE, DIAGNOSTIC, CREATE_STANDING, STANDING_AS_EVIDENCE };

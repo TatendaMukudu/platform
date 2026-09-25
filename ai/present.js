@@ -67,9 +67,34 @@ function looksLikeKey(s) {
    only source — no lookup table of nice names, because a table would drift out of step with
    the concepts the kernel actually mints and would start lying the first time it did.
    `football.attendance_timing` -> `Attendance timing`. */
+/* ── A PERSON'S OWN RECORD IS NOT WRITTEN ABOUT A THIRD PARTY ─────────────────────────────────
+   LIVE iPHONE (findings R1 #48). The founder's own Inquiry list still read "Where they are trying
+   to get to" — about the founder, on the founder's phone. The five labels were authored for a
+   LEADER reading a member's file and were then used verbatim on the member's own screen.
+
+   THE STORED RECORD IS NOT TOUCHED, and the finding says why: this is presentation cleanup, and
+   the primitive is the person's own words in the signal, which were never third-person. The label
+   is the product's name for the object, so reading it out loud is this function's job and the
+   translation belongs here rather than at each of the surfaces that print it.
+
+   IT IS A MAP, NOT A PRONOUN REWRITER. Swapping "they" for "you" across arbitrary text would
+   reach a member's account of somebody else — "they keep arriving late" — and turn a statement
+   about a third person into a statement about the reader, which is a far worse defect than the one
+   being fixed. These five strings are the complete set the onboarding route ever wrote, and they
+   are matched whole. `complete-profile` writes the second-person forms now; this is what makes
+   every account created before that read correctly without rewriting anybody's record. */
+const LEGACY_SELF_LABELS = Object.freeze({
+  'what it looks like when they are not at their best': 'What it looks like when you are not at your best',
+  'what they say they bring':                           'What you say you bring',
+  'where they want to get better':                      'Where you want to get better',
+  'where they are trying to get to':                    'Where you are trying to get to',
+  'what else they wanted known':                        'What else you wanted known',
+});
+
 function humanTopic(topic = {}) {
   const t = topic && typeof topic === 'object' ? topic : {};
-  const label = String(t.label || '').trim();
+  const label = LEGACY_SELF_LABELS[String(t.label || '').trim().toLowerCase()]
+    || String(t.label || '').trim();
   const key = String(t.canonicalConcept || '').trim();
   const candidate = label && !looksLikeKey(label) ? label : (label || key);
   if (!candidate) return 'Something worth understanding';
@@ -472,4 +497,4 @@ function focusCard(focus = {}, opts = {}) {
 }
 
 module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
-  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, focusLead, hypothesisHasStanding, outcomeText, outcomeHelped };
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, focusLead, hypothesisHasStanding, outcomeText, outcomeHelped, LEGACY_SELF_LABELS };
