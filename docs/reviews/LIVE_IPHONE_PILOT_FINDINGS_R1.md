@@ -848,3 +848,85 @@ Decision:
 - if a real High/Low emerges before pilot, run the same object-bound questions (`why`, `what supports this`, `what remains uncertain`, `what could we try/do`) on it.
 
 Classification: **NO DEFECT — live test unavailable due to truthful empty state.**
+### 52. Live iPhone rehearsal after 672fcc9/Claude closure still shows grounding and completion defects
+
+Founder re-ran the agreed iPhone rehearsal on Titi's account after the latest internal closure. The screenshots expose several remaining live defects.
+
+#### A. "What do you know about me so far?" contradicts the visible governed record
+
+On Home, IntelliQ says variations of:
+- it has no authorised organisational facts about the person;
+- the person has not told it anything specific;
+- it can only build a picture once they share role/work/context.
+
+But the same screen visibly carries an existing Inquiry/working read for that person ("Where they are trying to get to"), and subsequent turns correctly discuss that inquiry.
+
+Required fix:
+- the general self-read must use the same authorised personal/object read already available elsewhere;
+- do not claim "nothing recorded" when governed personal objects/readouts exist;
+- distinguish "no settled High/Low" from "no authorised record at all".
+
+Classification: **PILOT GROUNDING BUG — self-read and object read disagree about what exists.**
+
+#### B. Meta-questions still produce prompt/process narration instead of direct answers
+
+Examples:
+- "Why do you think that?" produces long generic explanation of how the assistant is designed rather than the concrete basis for the current read;
+- "What are you uncertain about?" answers the uncertainty but then appends process narration such as "You're asking me to reflect..." and contradicts itself with "I have no ambiguity...";
+- some turns append an extra classification of the user's intent after already answering.
+
+Required fix:
+- answer the concrete question first from the governed read;
+- avoid exposing prompt/routing/process scaffolding unless explicitly asked how IntelliQ works;
+- do not append contradictory "no ambiguity" language after naming an uncertainty.
+
+Classification: **PILOT RESPONSE-QUALITY BUG — internal routing/process copy leaks into user prose.**
+
+#### C. Inquiry support-vs-hypothesis answer is substantially better, but repeat/depth path can still regress
+
+The direct turn "Does the record support this, or is it still a hypothesis?" correctly answers "Still a hypothesis" and explains why.
+
+However a later support/depth turn returns:
+"That is the same part of the record I just showed you — it is what I have on both. Ask about something else..."
+This is not a useful support verdict and appears to be repeat-suppression taking precedence over the epistemic question.
+
+Required fix:
+- repeat suppression must never replace a requested epistemic verdict (supported / unsupported / still hypothesis);
+- if the evidence is unchanged, say that plainly while still answering the requested question.
+
+Classification: **PILOT REASONING/ROUTING BUG — repeat guard can swallow the actual question.**
+
+#### D. Live truncation still occurs
+
+In the Inquiry response to "What would you want to know next before deciding what to do?", the live iPhone screenshot ends with:
+"And do you want to involve th"
+
+This is a genuine mid-word truncation after the previous #47 closure.
+
+Required fix:
+- re-open #47 against the exact live/provider path;
+- if stream ends without a clean provider stop reason, detect incomplete trailing token/text and repair/retry before committing the turn;
+- do not source or persist a visibly incomplete response.
+
+Classification: **PILOT BLOCKER — live provider path can still commit truncated prose.**
+
+#### E. "What could we try?" remains inconsistent across provider/deterministic paths
+
+Observed live variants include:
+- a good refusal to invent options because no explanation is supported yet;
+- a fallback path that proposes "Show this inquiry" rather than answering the requested decision-support question;
+- a model path that begins "I'm not going to keep repeating that screenshot at you..." then gives a long apology and generic menu of Focus-management actions.
+
+Required fix:
+- both provider and deterministic paths should converge on the same semantic answer;
+- when evidence is insufficient, state the missing fact and offer the smallest useful next inquiry/test;
+- do not substitute UI-management actions (show inquiry, set review date, discuss with group) for substantive options unless the user asked how to manage the Focus;
+- no apology/loop commentary unless needed for a visible failure.
+
+Classification: **PILOT METHODICAL-ASSISTANT BUG — option/suggestion semantics diverge by response path.**
+
+#### F. No Highs/Lows currently exist on the account
+
+No live High/Low object conversation can be rehearsed truthfully yet. Do not fabricate one just to satisfy a test. The empty state remains an acceptable truthful result until real evidence crosses the standing threshold.
+
+Classification: **NO DEFECT / LIVE TEST UNAVAILABLE.**
