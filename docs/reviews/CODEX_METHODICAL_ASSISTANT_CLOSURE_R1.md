@@ -2162,3 +2162,136 @@ the focus read no longer carrying what was already tried (4 red); the "not proof
 it" caveat dropped; and the read no longer naming the question it came from. That last one **survived
 first** — `FS-A5` matched `/Late goals/i`, and the focus is called "Concede fewer late goals", so the
 assertion was satisfied by the title it was meant to look past. It pins the sentence now.
+
+## 15. Claude — live iPhone findings closure, merge readiness — 2026-09-25
+
+**Head:** `a8237ff` on `codex/pilot-recovery-gate-r7`. **Nothing merged. Nothing deployed.**
+
+### The commits in this round
+
+| SHA | Findings | Change |
+|---|---|---|
+| `9155f8c` | #10 | Ask IntelliQ works in a Forum that is not a group |
+| `6851b5b` | #1 | An image the person attached is an image IntelliQ has read |
+| `200a41c` | #2, #3 | What you just told me is something I have, and it is still not evidence |
+| `2d5fe9c` | #16, #6 | The assistant and the Highs/Lows pages read one owner |
+| `1b48ba4` | #32, #13 | One send is one durable human turn |
+| `9470aee` | #8, #30 | One audience editor, one attachment door |
+| `e2d8b96` | #31, #40, #36, #37 | One moment is a readout; the record stops reading as a questionnaire |
+| `7615a7e` | #22, #12 | The box you type in is on the screen, and the invitation in it is whole |
+| `ac5c5a1` | — | Two stale assertions in `live-recovery-repro`, repaired at the law |
+| `da1682f` | #34 | A fragment is not an answer |
+| `62c577e` | #28, #13 | A weak link is not a failure, and a retry is not a second turn |
+| `ca82c15` | #14 | How a Focus went is a thing a person can record |
+| `459907a` | #35, #33 | A group you are in is an audience |
+| `fc3ba0b` | #41 | A source says which kind of thing it is |
+| `027afc1` | #42 | Asking a Focus what to try answers from the Focus |
+| `a8237ff` | #17 | A revision that revises nothing is not a proposal |
+
+### The shape almost every one of these had
+
+**A capability that exists in source, passes a hermetic test, and produces nothing — or something
+false — on a real device.** Said once at the top of §14 and worth repeating at the end, because it
+is the only generalisation this round supports:
+
+- a Forum Ask route that was group-shaped on a room with no node;
+- an image description stored correctly and never read back;
+- `record_focus_outcome` whose only door was a model proposing it;
+- a `groupId` audience the resolver has always accepted and no control could ask for;
+- a material lookup bound to a headline, returning null on every turn for months;
+- a sticky composer in a scroll container that never scrolls.
+
+And the narrower rule underneath it: **a law implemented only in a model prompt is not
+implemented.** With models off — the pilot's own configuration — it reaches nobody. Every fix this
+round is carried on the deterministic path first, with the prompt asserted to agree rather than to
+substitute.
+
+### Which prior ideas were retained, rejected and combined
+
+**Retained, against my own first instinct.** The existing "Someone suggested:" wording for an
+unsupported hypothesis, in place of the founder's suggested "One possibility we're still testing:" —
+the existing line carries the provenance the product law cares about, and the founder's own
+classification of #37 is a *contradiction* bug, not a copy one. The `_inquiryOptions` posture that a
+Focus does not manufacture a menu of tactics. The strict refusal when a person names somebody they
+cannot reach.
+
+**Rejected.** #36's literal instruction to "remove these legacy taxonomy cards" — taken literally it
+deletes real record objects and the kernel's starting point with them. Shortening every composer
+placeholder to twenty characters to fit, which #12 offered as an option — it would have traded a
+visible defect for a cryptic product. Degrading every truncated reply (#34) — it would have replaced
+a visible defect with a silent one.
+
+**Combined.** #12 and #22 are one surface and were fixed together as one: the layout gave way first
+(an empty composer has nothing to send), and the copy came the rest of the way. #14 and #42 compound
+— recording what was tried is what gives the suggestion path something honest to say, and the
+founder's own three phrasings of "what should we try" are what exposed the lens defect.
+
+### Stale tests found and corrected rather than deleted
+
+Nine, all repaired at the law rather than loosened, and each one is worth its line because a green
+gate over a dead feature is the most expensive thing in this repository:
+
+- **`MR9b`** matched the literal `material: _materialContext(code, userId, about)` — *the broken
+  wiring*. It proved the call existed and could not see that it resolved. Green the entire time the
+  feature was dead.
+- **`PC-C11`** asserted the words "Attach material", the picker #30 removed.
+- **`PC-A2`** asserted the no-read sentence on a fixture where it sat above the suggestion.
+- **`CS-*-1..8`** pinned the SVG for the one-moment case #31 ratified away.
+- **`LR-C0`/`LR-C2`** counted panel rows and went stale when "files" was split in two.
+- **`LR-D1..D5`** predated "a badge is a statement about a claim", so no badge rendered at all.
+- **`FP7`** caught a real parity break the moment the composer path gained an outcome note.
+- **`CQ-G1`** caught me removing a ratified answer while fixing a different one.
+- **`FS-A5`**, written this round, matched `/Late goals/i` on a focus called "Concede fewer late
+  goals" — satisfied by the title it was meant to look past, and a mutation walked straight through
+  it.
+
+Two more were **fixture** faults rather than code faults, in `object-audience-http-smoke`: a
+reachability filter that was structurally untestable because every group member is by construction a
+contact, and a membership check that was passing for the object-read's reason. Both now have
+fixtures that separate them.
+
+### Proof
+
+- **Truth Layer: green** — every suite, run after every commit in this round.
+- **Every registered browser gate, real Chromium, re-run at head:** chart-shape 50, composer-fit 33,
+  exhausted-help 26, forum-share 26, group-loop 55, library 33, naming 32, onboard 34, pilot-coach
+  135, priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34,
+  live-recovery-repro 63. **740 assertions, 0 failed.**
+- **Real PostgreSQL, process killed between write and read:** `durable-restart-check` **35 passed, 0
+  failed** — sessions, accounts, the email index, invites, passwords and the concurrent-write
+  conflict path all survive a restart. It is a local PostgreSQL in this container: no pooler, no
+  cold start, no partition. **It is not Neon and it is not Render.**
+- **Nine new suites this round**, all registered in the Truth Layer: `forum-ask-focus-http-smoke`,
+  `image-vision-http-smoke`, `reported-provenance-http-smoke`, `standing-agreement-http-smoke`,
+  `durable-turn-http-smoke`, `onboarding-surface-http-smoke`, `truncated-turn-http-smoke`,
+  `turn-resilience-http-smoke`, `focus-outcome-capture-http-smoke`, `source-provenance-http-smoke`,
+  `focus-suggestion-audit-http-smoke`; plus `composer-fit-browser-check` outside it.
+- **Around fifty mutations**, each required red then restored. Those that survived first are
+  recorded above and in §14 rather than quietly fixed.
+
+### Live findings NOT addressed in this round
+
+Stated plainly, because a closure report that lists only what was done is the thing this brief keeps
+warning about:
+
+| # | What | Why not |
+|---|---|---|
+| #5, #23 | Library copy and product review | Copy and IA judgment; no defect reproduced |
+| #18 | Home cards' legacy wording | Same; not reproduced as a failure |
+| #25 | Repeated cohort-refusal noise | A real UX-noise issue; needs a rule about when a refusal is worth a card, which is a product decision rather than a fix |
+| #26 | A short self-reported run called "real form" | Model-path phrasing; the deterministic path does not say it, and the prompt already forbids upgrading reported figures |
+| #27 | Templated meta phrasing | Model-path phrasing, same |
+| #38 | "Still working out" scoped to the Inquiry | Concept ratified; the surface change was not reached |
+| #39 | Uniform list-card grammar | `_objectCard` is already the single renderer for all four kinds; no divergence reproduced, so nothing was changed on an unverified hunch |
+
+And one thing I chose not to build, recorded so it is a decision rather than an omission: **a Focus
+does not inherit its addressed question's governed option set.** That is a real and defensible next
+step for #42, and it is a canonical-owner change with its own blast radius — not something to do
+quietly at the end of a round.
+
+### External gates — unchanged, and genuinely external
+
+Live Render, live Neon (network, pooler, cold start), real provider quality and latency, real invite
+delivery, and an actual iPhone running Safari. **Everything else in this branch has been driven on a
+real browser at phone width or against a real database.** Do not read a green suite as any of the
+five.
