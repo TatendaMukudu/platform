@@ -425,6 +425,37 @@ function normalize(result, context = {}) {
    named object already present in the server-built context. Suggested Focus/forum
    wording is allowed, but is marked so the confirmation surface can name it as a
    suggestion rather than silently attributing it to the person. */
+/* ── WOULD THIS UPDATE CHANGE THE FOCUS AT ALL ───────────────────────────────────────────────
+   Findings R1 #17. Five fields can be revised and none is required, so an `update_focus` carrying
+   nothing — or carrying only what the Focus already says — is a write proposal for a write that
+   would not happen. Compared field by field against the bound object's own record.
+
+   THE COMPARISONS ARE DELIBERATELY BLUNT. Text is trimmed and case-folded because "Concede fewer
+   late goals" and "concede fewer late goals " are the same commitment and re-proposing one as a
+   revision of the other is the defect. Participants are compared as a SET, because the order a
+   model happened to list people in is not a change to who can see something. Anything this cannot
+   compare — an unknown field, a focus with no record to read — counts as a change, which is the
+   safe direction: a proposal that survives is still confirmed by a person, and one wrongly dropped
+   is a capability silently lost. */
+const _norm = v => String(v == null ? '' : v).trim().toLowerCase();
+function _wouldChangeFocus(args = {}, object = null) {
+  const cur = (object && object.kind === 'focus' && object.raw) ? object.raw : null;
+  if (!cur) return true;                       // nothing to compare against
+  if (args.text != null && _norm(args.text) !== _norm(cur.text)) return true;
+  if (args.target != null && _norm(args.target) !== _norm(cur.target)) return true;
+  if (args.reviewOn != null && _norm(args.reviewOn) !== _norm(cur.reviewOn || cur.reviewAt)) return true;
+  if (args.visibility != null && _norm(args.visibility) !== _norm(cur.visibility)) return true;
+  if (Array.isArray(args.participantIds)) {
+    const want = [...new Set(args.participantIds.map(String))].sort().join(',');
+    const have = [...new Set((cur.participants || []).map(String))].sort().join(',');
+    // The owner is on `participants` and is never proposed as one, so their presence alone is not
+    // a difference. Compared without them on both sides.
+    const strip = s2 => s2.split(',').filter(Boolean).filter(id => id !== String(cur.ownerId || '')).join(',');
+    if (strip(want) !== strip(have)) return true;
+  }
+  return false;
+}
+
 function ground(reading = {}, { text = '', priorMessages = [], context = {}, requested = false } = {}) {
   const current = String(text || '');
   const priorUser = (priorMessages || []).filter(m => m && m.role === 'user')
@@ -754,6 +785,21 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
       : action.type === 'create_library_folder' ? ['folderName']
       : action.type === 'record_focus_outcome' ? ['outcome'] : [];
     if (required.some(k => !args[k])) continue;
+    /* ── A REVISION THAT REVISES NOTHING IS NOT A WEAKER PROPOSAL ──────────────────────────
+       LIVE iPHONE, findings R1 #17: a card offered to revise the Focus while showing the same
+       wording. `update_focus` requires no argument — correctly, since any one of five may be the
+       thing being changed — so an action carrying none, or carrying only values the Focus already
+       holds, reached a confirmation card saying "Revise this focus". Confirming it would have
+       written nothing, and a card whose stated effect is nothing is a lie about what pressing it
+       does. It is the same rule the `required` list above states for a missing argument, asked of
+       the VALUE rather than of its presence: an action that cannot change anything is one that
+       cannot be carried out.
+
+       COMPARED AGAINST THE FOCUS ITSELF, never against what a model said it was. `context.object`
+       is the server-resolved binding; with no bound focus to compare against there is nothing to
+       revise and the proposal goes either way. Interpretation and history are not writes, and this
+       is what stops them masquerading as one. */
+    if (action.type === 'update_focus' && !_wouldChangeFocus(args, context.object)) continue;
     actions.push({ ...action, arguments: args, argumentSources: sources });
   }
   /* THE READING TRAVELS ON, because the sentence was read once and two places need to know what

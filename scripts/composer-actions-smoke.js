@@ -302,6 +302,52 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
     const mobileCss = require('fs').readFileSync(require('path').join(__dirname, '../css/member.css'), 'utf8');
     ok('CA18 the phone composer and proposal controls stay compact rather than consuming the viewport',
       /@media \(max-width:640px\)[\s\S]*?\.iq-composer-input\{max-height:120px\}[\s\S]*?\.iq-proposal-actions/.test(mobileCss));
+
+    /* ── CA19 — A REVISION THAT REVISES NOTHING IS NOT A PROPOSAL ────────────────────────────
+       LIVE iPHONE, findings R1 #17: a card offered to revise the Focus while showing the same
+       wording. `update_focus` requires no argument — correctly, since any one of five fields may
+       be the thing being changed — so an action carrying none of them, or carrying only values
+       the Focus already holds, reached a confirmation card saying "Revise this focus". Confirming
+       it would have written nothing, and a card whose stated effect is nothing is a lie about what
+       pressing it does.
+
+       Driven at the module, because this is a grounding rule and the model-proposed path is where
+       it fires; the HTTP sections above already prove the confirmed write itself. */
+    const actions = require('../ai/composer-actions.js');
+    const boundFocus = { kind: 'focus', id: 'f1', raw: { id: 'f1', ownerId: 'owner',
+      text: 'Concede fewer late goals', target: 'Defend calmly', visibility: 'private',
+      participants: ['owner'] } };
+    const groundOne = (args, text) => actions.ground(
+      actions.normalize({ actions: [{ type: 'update_focus', arguments: args, reason: 'r' }] },
+        { object: boundFocus, groups: [], contacts: [] }),
+      { text, priorMessages: [], context: { object: boundFocus, groups: [], contacts: [] } });
+    ok('CA19 an update carrying the wording the Focus already has is not proposed',
+      !(groundOne({ text: 'Concede fewer late goals' }, 'Revise it to concede fewer late goals.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19b …and neither is one carrying nothing at all to change',
+      !(groundOne({}, 'Revise this focus.').actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19c …nor one whose only difference is spacing and case',
+      !(groundOne({ text: '  concede fewer LATE goals ' }, 'Revise the wording.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    /* THE CONTROL, and without it every assertion above is satisfied by never proposing an update
+       at all — which would be a far worse product than the card the founder photographed. */
+    ok('CA19d while a real revision is still proposed',
+      (groundOne({ text: 'Concede fewer goals in the first ten as well' }, 'Revise it to concede fewer goals in the first ten as well.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    ok('CA19e …and so is a genuine change to the target',
+      (groundOne({ target: 'Defend together' }, 'Set the target to Defend together.')
+        .actions || []).some(x => x.type === 'update_focus'));
+    /* AND WITH NO FOCUS TO COMPARE AGAINST, the proposal survives: dropping it would lose a real
+       capability on the strength of a comparison that could not be made, and a person still has to
+       confirm it. Fail toward the human, not toward silence. */
+    ok('CA19f …and an update with nothing to compare against is left alone',
+      (actions.ground(
+        actions.normalize({ actions: [{ type: 'update_focus', arguments: { text: 'Something else' }, reason: 'r' }] },
+          { object: { kind: 'focus', id: 'f2', raw: null }, groups: [], contacts: [] }),
+        { text: 'Revise it to something else.', priorMessages: [],
+          context: { object: { kind: 'focus', id: 'f2', raw: null }, groups: [], contacts: [] } })
+        .actions || []).some(x => x.type === 'update_focus'));
+
   } catch (e) { fail++; console.error('  FAIL HTTP path threw', e && e.stack); }
   server.close();
   console.log(`\ncomposer-actions-smoke: ${pass} passed, ${fail} failed`);
