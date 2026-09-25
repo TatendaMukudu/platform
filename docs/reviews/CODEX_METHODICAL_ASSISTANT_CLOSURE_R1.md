@@ -2295,3 +2295,198 @@ Live Render, live Neon (network, pooler, cold start), real provider quality and 
 delivery, and an actual iPhone running Safari. **Everything else in this branch has been driven on a
 real browser at phone width or against a real database.** Do not read a green suite as any of the
 five.
+
+## 16. Claude — final merge-readiness audit — 2026-09-25
+
+**Head:** *this commit* on `codex/pilot-recovery-gate-r7`. Everything proven below was run against
+the tree it records: the last commit carrying a product change is `05222c0`, and this one registers
+`pilot-loop-smoke` in the Truth Layer and writes up the round. A commit cannot carry its own hash,
+so read the branch tip rather than a number written inside it. **Nothing merged. Nothing deployed.
+No new feature work.**
+
+Brief: verify that each finding recorded as closed is actually closed on the branch rather than
+only written down; re-run the full Truth Layer, every registered real-Chromium gate and the
+PostgreSQL durability proof from current remote head; close the one architectural seam #42 left
+open; then sweep for stale law, stale tests and accidental complexity.
+
+### What the verification pass found, which is why it was asked for
+
+Two findings recorded as closed were not, and one of my own records was wrong.
+
+**#9 was recorded closed and was not.** `crossEvidence.loop()` emits an `open` list for a Focus
+whose loop is incomplete, and its first line read *"this focus does not say what it was started to
+work on"*. The thing actually missing is the LINK to an originating Inquiry — `addresses`, or a
+group focus's `origin.inquiryId` — and a person looking at the title they typed, in full, reads
+that sentence as the product telling them they declared nothing. It now says where the loop is
+open: *"this focus is not linked to a question on the record, so there is nothing to measure it
+against."*
+
+**Three gates had pinned the defect**, which is why it survived a round that was specifically
+looking for it: `cross-evidence-smoke` CE-I1, `group-focus-loop-http-smoke` GFL-G2 and the
+ab-loop assertion all matched the old sentence. Each asserts BOTH directions now — the true
+sentence present and the false one absent — because an assertion that only requires the new
+wording lets the old one come back beside it.
+
+**#20 was classified NEEDS PROOF and the proof it named did not exist.** The finding asked, by
+name, for *"browser proof [comparing] the same Forum message from author and another reader"*.
+Nothing did that. `ai/forum.js visibleThread` was already correct — `mine` is computed from the
+viewer's own id and `authorId: null` goes to everyone, leaders included — but a reader cannot see
+a projection, only a screen, and the screen promised anonymity in one paragraph and wrote YOU in
+the next. The room now says the marker is visible to the author alone, and a message somebody else
+wrote is labelled Anonymous rather than left bare: an unlabelled message makes anonymity look like
+missing information, which is indistinguishable from a bug. `forum-share-browser-check` opens a
+second authenticated context and reads the same two messages from both sides.
+
+**A numbering error in my own §15 table**, corrected rather than left: `9155f8c` closed #19 and
+#21, not #10. #10 was closed by `e2d8b96` and #11 by `fc3ba0b`. Both re-verified in source rather
+than in the table.
+
+**#15 verified closed on both paths** by `reported-provenance-http-smoke` RP-C1/C2/C3 (no invented
+cause, no time window nobody supplied, no implied weighing) and RP-F3 (the prompt forbids reasoning
+past reported figures into causes or timings). **#24 and #29** are live PASS observations, not
+defects. **#4** re-verified at Home, reading the way Home actually reads — the four kinds at
+`scope=all`, unparked, highest score first — after the first version of that assertion proved
+vacuous under mutation.
+
+### The #42 seam: a Focus reads across its governed relation, and owns nothing it finds there
+
+Founder ruling: *a Focus must not copy or inherit another object's option set or evidence as if it
+owns them, but creating a Focus must not make IntelliQ less intelligent.* Where a Focus is related
+to an Inquiry, IntelliQ may read across that governed relation, subject to the same authorisation
+rules. Cross-object reading, not inheritance. No second option store, no second evidence store, no
+parallel Focus intelligence model.
+
+**Reproduced on the real turn route, models off, before anything was written.** A personal Focus
+addressing a question whose kernel readiness was `worth_testing`, asked "What should we try now?":
+
+> You are working on "Concede fewer late goals". Nothing has been recorded about how it went yet.
+> You started it from the question "Late goals". That is what is on the record here, not a fresh
+> reading of it.
+
+Behind that question sat a supported explanation, two independent accounts, an open unknown, a
+falsifier and the kernel's own governed option set. Standing on the Focus, the person was given the
+question's NAME. Starting a Focus had made the product less intelligent about the one thing the
+Focus exists to work on.
+
+**The reader holds nothing.** `_relatedQuestionRead` composes every sentence at read time from the
+QUESTION's own canonical owners — its card for the current read, `_inquiryFrontier` for readiness,
+`_inquiryOptions` for the option set. Remove the question's support and what the Focus says changes
+with it, because there is no copy to go stale. Authorisation is the same one: the question is
+resolved inside `_allObjectsFor`, so a link pointing at another member's inquiry yields nothing
+rather than a redacted something — a relationship is not readership. The shape of the support may
+cross; the words nobody contributed may not.
+
+**Three defects found by driving it**, each repaired at its owner rather than in the new reader:
+
+| Owner | What was wrong |
+|---|---|
+| `_inquiryOptions` | Read the GROUP outcome vocabulary only (`better`/`no_change`/`worse`). A PERSONAL focus records `helped`/`no`/`mixed`, so a failed attempt matched neither list: it never became a caution and never triggered the exhausted rule. The founder's experiment law was silently off on that path. `present.outcomeHelped` owns both spellings now. |
+| `_objectBucket`, self scope | Passed `hypothesis` without `hypothesisStanding`, so `hypothesisHasStanding` was false for EVERY personal inquiry: a leading hypothesis with two support refs rendered as an unsupported candidate while the readiness line from the same record said one explanation has something behind it. #37's contradiction at the personal grain. |
+| the reading route's concept borrow | Read `origin.inquiryId` but not `addresses`, so a personal Focus started from a question was refused outside reading while the same reading on that question built a query. |
+
+**And one of my own sentences was the defect it was meant to fix.** The first version read
+`explained.claim`, which is voice-layer prose with its own fallback, and produced *"On that
+question the record currently reads: I don't have a read on this yet"* one sentence before *"There
+is enough on that question for something to be worth trying"* — #37 reappearing in a new renderer.
+It reads the card's gated fields instead: `thinking` is an admitted read, `possibleExplanation` is
+somebody's candidate under its own provenance, and the genuine no-read state is said by saying
+nothing.
+
+**Re-tested on real production paths** for every case the brief names — weak/no evidence, one
+failed tactic, multiple attempts, user-reported statistics, related Inquiry context,
+external-source-backed context, provider degradation — across
+`focus-cross-object-reading-http-smoke` (37, new) and `focus-suggestion-audit-http-smoke` (27),
+both with models off. IntelliQ offers a small set of justified options **held on the question**,
+ranks nothing, fabricates no support, re-offers no failed tactic without saying what was recorded
+against it, and creates or revises no Focus.
+
+**What is deliberately NOT built.** Organisational learning is consulted **through the relation**
+— what was already tried on THIS question and what came of it — and not by widening a Focus turn
+to the reader's whole authorised set. `_learningRead` answers the unbound question and is the right
+owner for it; reaching it from inside a Focus would be a different capability, not this one.
+
+### Stale law, stale tests and accidental complexity
+
+**A gate that had never been run by anything.** `pilot-loop-smoke` calls itself *"the question
+'does the product work?' written as assertions"* — the complete value loop, end to end — and was
+not registered in `scripts/test.js`. Found by listing every file in `scripts/` against every file
+registered. Registered green at 26 assertions, unchanged: a gate that had to be edited to be
+admitted would not have been a gate.
+
+**An assertion that could not fail.** `material-classification-smoke` MC-F1 ended `|| true`, so it
+passed on every status there is, under a label about a law it never tested — and its probe was a
+POST to the player's own focus, not the case the label describes. It now asserts the half nobody
+had written: a personal focus's materials are not readable by somebody who cannot open it.
+Mutating the route's authorisation away turns it red.
+
+**An assertion of mine that could not fail either.** FX-D2 required a failed tactic to be absent
+from the option list — and a failed tactic is not the kind of thing the option set builds from, so
+its absence was true for a reason unrelated to the law. It is paired now with FX-D2b, which records
+the same attempt as having helped and requires it to come back as precedent.
+
+**Accidental complexity removed rather than added to.** `_objectSelfRead` resolved
+`_allObjectsFor` three times per turn and the new reader would have made four, each projecting
+every group the reader is in. One build, passed down; the `.find` stays inside the reader so the
+authorisation rule is stated where the reading happens.
+
+**Checked and found clean:** every one of the 159 `MemberApp.*` handlers referenced from markup or
+code resolves to a definition; `reachability-smoke` (21) holds; no unused binding was introduced by
+this round's changes; no suite file other than the six deliberate external/tool scripts
+(`advisor-smoke`, `db-cas-live`, `llm-smoke`, `mobile-inspect`, `seed-alma`, and the durability
+check, which is registered as external by design) is unregistered.
+
+**Not refactored, deliberately.** `_assistantAnswer` calls `_learningRead` and `_reportedRead`
+twice each in the same `else if` chain — once as the predicate, once for the value. It is real
+waste and it is in a stable green layer that this round had no other reason to touch, so it is
+recorded here rather than changed at the end of a merge-readiness pass.
+
+### Exactly what is internally proven green, at this head
+
+- **Truth Layer: GREEN**, every registered suite, run from this exact tree.
+- **Every registered real-Chromium gate, re-run at head:** chart-shape 50, composer-fit 33,
+  exhausted-help 26, forum-share 31, group-loop 55, library 33, naming 32, onboard 34, pilot-coach
+  135, priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34.
+  **682 assertions, 0 failed.** Plus `live-recovery-repro` **63 passed, 0 failed** — **745 assertions across 15 real-browser gates, 0 failed**.
+- **Real PostgreSQL, process killed between write and read:** `durable-restart-check`
+  **35 passed, 0 failed** — sessions, accounts, the email index, invites, passwords and the
+  concurrent-write conflict path all survive a restart.
+- **One new suite this round**, registered: `focus-cross-object-reading-http-smoke` (37), plus
+  `pilot-loop-smoke` (26) registered for the first time.
+- **Eight mutations this round**, each required red then restored: other readers' Forum messages
+  left bare; `mine` true for every viewer; the cross-object reader returning nothing (12 red);
+  resolving the question outside the reader's authorised set; dropping the attribution sentence;
+  the group-only outcome vocabulary; the self bucket withholding the hypothesis's standing; the
+  reading route forgetting the personal spelling of the link; and the materials route's
+  authorisation.
+
+### Remaining live-only checks — unchanged, and genuinely external
+
+These cannot be proven from inside this container and nothing above should be read as proving them:
+
+1. **Render** — the deployed build, its disk, its dashboard environment, a restart under load.
+2. **Neon** — network partition, pooler, connection ceiling, cold start, managed-service failures.
+   The durability proof is a local PostgreSQL in this container and says none of it.
+3. **A real provider** — answer quality, latency, truncation and degradation against live models.
+   Every law in this round is carried on the deterministic path for exactly this reason, and the
+   prompt is asserted to agree rather than to substitute; what a real model actually writes is
+   still unobserved.
+4. **Real invite delivery** — an email leaving the system and arriving.
+5. **An actual iPhone running Safari** — the 390px gates run real Chromium at that width, which is
+   not iOS Safari.
+
+### Unresolved blockers
+
+**None internally.** No finding classified as a blocker is open, no registered gate is red, and no
+mutation survived unrecorded.
+
+Open findings that are **not** blockers and were deliberately not worked this round, unchanged from
+§15: #5, #23 and #18 (copy and IA judgement, no defect reproduced), #25 (needs a product rule about
+when a refusal is worth a card), #26 and #27 (model-path phrasing; the deterministic path does not
+say it and the prompt already forbids it), #38 (concept ratified, surface change not reached), #39
+(no divergence reproduced).
+
+### Verdict
+
+**READY FOR LIVE REHEARSAL.** Internally green at this head, and stopping here so this exact
+candidate can be rehearsed on Render, Neon, a real provider and a real iPhone before merge review.
+Not ready to merge on internal evidence alone, and this handoff does not claim it is.
