@@ -344,11 +344,26 @@ Object.assign(ai, {
     await page.waitForTimeout(900);
     /* Read the rendered line each browser draws for a given sentence, not the whole room: the
        question is what sits NEXT TO this message, and a room-wide match would be satisfied by
-       the label on any other line. */
-    const lineFor = (p, text) => p.evaluate(t => {
-      const el = [...document.querySelectorAll('.iqt-turns .iq-msg')].find(n => n.textContent.includes(t));
-      return el ? el.textContent.replace(/\s+/g, ' ').trim() : null;
-    }, text);
+       the label on any other line.
+
+       POLLED RATHER THAN READ ONCE. This read the DOM immediately after a fixed wait, which was
+       true of a machine running one Chromium and false of one running the fifteenth in a row:
+       under contention the second context had not finished its first render and the read came
+       back null, failing three assertions about a law that was holding perfectly. The room is
+       fetched over HTTP and rendered, so the honest harness waits for the render rather than for
+       a number somebody guessed — and a timeout still fails, so this cannot hide a room that
+       genuinely never draws. */
+    const lineFor = async (p, text) => {
+      for (let i = 0; i < 40; i++) {
+        const hit = await p.evaluate(t => {
+          const el = [...document.querySelectorAll('.iqt-turns .iq-msg')].find(n => n.textContent.includes(t));
+          return el ? el.textContent.replace(/\s+/g, ' ').trim() : null;
+        }, text);
+        if (hit) return hit;
+        await p.waitForTimeout(250);
+      }
+      return null;
+    };
     const mineToP1 = await lineFor(page, homeWords);
     const mineToP2 = await lineFor(page2, OTHERS);
     const theirsToP1 = await lineFor(page, OTHERS);
