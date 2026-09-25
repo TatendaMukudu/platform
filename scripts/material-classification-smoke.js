@@ -220,8 +220,22 @@ const server = app.listen(0, async () => {
       && String(asOrg.j.classificationReason).includes('entitled to speak'));
 
     console.log('\n  F — BOUND TO THE OBJECT, AND ONLY THAT ONE');
-    const onOther = await post(`/api/objects/focus/foc_mine/materials`, playerT, {});
-    ok('MC-F1 material lists are read per object', onOther.status === 404 || onOther.status === 405 || true);
+    /* ── THIS ASSERTION USED TO BE UNFALSIFIABLE, AND IT LOOKED FINE ─────────────────────────
+       It read `onOther.status === 404 || onOther.status === 405 || true`, so it passed on every
+       status there is — and the probe it ran was a POST to the player's OWN focus, which is not
+       the case its own label describes. A check that cannot fail sitting under a true-sounding
+       label is worse than no check: it occupies the place where somebody would otherwise have
+       written one.
+
+       WHAT SECTION F IS ACTUALLY FOR is that a material list belongs to ONE object and is read by
+       whoever may open THAT object. F2 and F2b already prove the second half from the inside; the
+       half nobody had written is the outside — somebody who cannot open the object gets nothing
+       from it, rather than an empty list that looks like "there is nothing here". */
+    const peek = await fetch(`${base}/api/objects/focus/foc_mine/materials`, { headers: H(coachT) })
+      .then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+    ok('MC-F1 a personal focus\'s materials are not readable by somebody who cannot open it',
+      peek.status === 403 || peek.status === 404
+      || !((peek.j || {}).materials || []).some(m => m.materialId === mineId));
     const list = await fetch(`${base}/api/objects/focus/tf_squad/materials`, { headers: H(coachT) })
       .then(r => r.json());
     ok('MC-F2 the squad focus carries the deck', (list.materials || []).some(m => m.materialId === matId));

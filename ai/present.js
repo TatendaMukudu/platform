@@ -322,6 +322,24 @@ const FOCUS_OUTCOME_TEXT = Object.freeze({
 /* The same words, lower-cased for the middle of a sentence ("and after it, it got better"). */
 function outcomeText(result) { return FOCUS_OUTCOME_TEXT[String(result || '').trim()] || null; }
 
+/* ── DID IT HELP: TRUE, FALSE, OR NOT KNOWN — ACROSS BOTH VOCABULARIES ────────────────────────
+   The table above is the only place that knows both spellings, so the predicate belongs beside
+   it rather than in each reader. Every caller that asked this question wrote
+   `o === 'better'` / `o === 'no_change' || o === 'worse'`, which is the GROUP vocabulary only —
+   so a PERSONAL focus recorded as `no` was invisible to the rule that a failed tactic must not
+   come back as a fresh option. That rule is the founder's experiment law and it must not depend
+   on which grain the focus happens to be at.
+
+   `unclear` and `mixed` return null, and null is not false. "Too tangled up in other things to
+   tell" is a recorded outcome that says nothing about whether the thing helped, and treating it
+   as a failure would turn honest uncertainty into evidence against a tactic. */
+function outcomeHelped(result) {
+  const r = String(result || '').trim();
+  if (r === 'helped' || r === 'better') return true;
+  if (r === 'no' || r === 'no_change' || r === 'worse') return false;
+  return null;
+}
+
 /* ── A HEADING A PERSON CAN READ AT A GLANCE ──────────────────────────────────────────────────
    Founder, from a live screenshot: a Focus card was using the whole raw paragraph as its title,
    so the heading was the entire thing the person had typed and there was nothing left for the
@@ -454,4 +472,4 @@ function focusCard(focus = {}, opts = {}) {
 }
 
 module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
-  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, focusLead, hypothesisHasStanding, outcomeText };
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard, focusLead, hypothesisHasStanding, outcomeText, outcomeHelped };

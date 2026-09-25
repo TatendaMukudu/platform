@@ -12602,6 +12602,100 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
    AND A REPORTED OUTCOME IS NOT A CAUSE. "It helped" is what somebody observed after working on
    something. Saying it caused the change would be the causality claim this product does not make,
    so the limitation travels with the answer rather than being left to the phrasing. */
+/* ── READING ACROSS A GOVERNED RELATION, WHICH IS NOT INHERITING ACROSS ONE ───────────────────
+   FOUNDER RULING, findings R1 #42, on the one seam the previous round left open: *"A Focus must
+   not copy or inherit another object's option set or evidence as if it owns them, but creating a
+   Focus must not make IntelliQ less intelligent. If a Focus is related to an Inquiry, IntelliQ
+   may read across that governed relation — subject to the same authorization/privacy rules — to
+   consult the addressed Inquiry, previous attempts and outcomes, relevant organisational
+   learning, user-provided material, and genuine external knowledge with provenance. Treat this as
+   cross-object reading, not inheritance or duplication. Evidence stays with its canonical owner.
+   Do not create a second option store, second evidence store, or parallel Focus intelligence
+   model."*
+
+   REPRODUCED FIRST. A personal Focus addressing a question whose kernel readiness is
+   `worth_testing`, asked "What should we try now?" on the real turn route with models off:
+
+     You are working on "Concede fewer late goals". Nothing has been recorded about how it
+     went yet. You started it from the question "Late goals". That is what is on the record
+     here, not a fresh reading of it.
+
+   Behind that question, at that moment, the record held a supported explanation, two independent
+   accounts, an open unknown, a falsifier, and the kernel's own governed option set. Standing on
+   the Focus, the person was told the question's NAME and nothing else in it. Starting a Focus had
+   made the product less intelligent about the exact thing the Focus exists to work on.
+
+   WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT.
+
+     IT IS A READER. It holds nothing, writes nothing, and caches nothing. Every sentence is
+     composed at read time from the QUESTION's own canonical owners — its card for the current
+     understanding, `_inquiryFrontier` for readiness, `_inquiryOptions` for the option set. If the
+     question changes, this changes with it, because there is no copy to go stale.
+
+     THE OPTIONS ARE THE QUESTION'S AND ARE SAID TO BE. `_inquiryOptions` is the single owner and
+     is called here rather than reimplemented, so the kernel's `worth_testing` gate, its refusal to
+     rank, and its rule that a failed tactic becomes a caution rather than an option all hold by
+     construction. Nothing is written onto the Focus and no second option store exists.
+
+     AUTHORISATION IS THE SAME ONE, NOT A PARALLEL ONE. The question is resolved inside
+     `_allObjectsFor(code, userId)` — the reader's own authorised set — so a relation pointing at
+     something this person cannot open yields nothing at all rather than a redacted something. A
+     link is not readership; that is the same rule the Forum ask turns on.
+
+     AND NO EVIDENCE CROSSES. The shape of what the question rests on may be reported; not one
+     word anybody contributed is. That is the rule `_objectSelfRead`'s own deeper layer already
+     follows for an Inquiry read directly, and reading it across a link does not relax it. */
+function _relatedQuestionRead(authorised, rel, triedBefore) {
+  try {
+    if (!rel || !rel.kind || !rel.id) return null;
+    /* `authorised` IS `_allObjectsFor(code, userId)` AND NOTHING ELSE, and the `.find` stays here
+       rather than at the call site so the authorisation rule is stated where the reading happens.
+       It is passed in because `_objectSelfRead` already builds that set — it was being rebuilt
+       four times on a single Focus turn, and this reader added the fourth. */
+    const src = (authorised || [])
+      .find(o => o && o.kind === rel.kind && String(o.id) === String(rel.id));
+    if (!src) return null;
+    const raw = src.raw || {};
+    const card = src.present || {};
+    const detail = card.detail || {};
+    const summary = card.summary || {};
+    /* ── THE THREE EPISTEMIC STATES, KEPT APART HERE TOO ────────────────────────────────────
+       The first version of this read `explained.claim`, which is `ai/voice.js` prose and carries
+       its own fallback — so a question whose kernel had admitted no read produced, on the Focus,
+       "On that question the record currently reads: I don't have a read on this yet", one
+       sentence before "There is enough on that question for something to be worth trying". That
+       is findings R1 #37's contradiction reappearing in a new renderer, which is the exact hazard
+       ai/present.js's own note calls "a law with one owner and two renderers".
+
+       So the card's fields are read instead, where the gating already lives: `thinking` is an
+       ADMITTED read and exists only when the kernel gave that hypothesis standing of its own;
+       `possibleExplanation` is somebody's candidate at its own standing; neither present is the
+       genuine no-read state, and it is said by saying nothing rather than by a sentence that
+       contradicts the readiness line under it. */
+    const claim = String(summary.thinking || '').trim();
+    const candidate = summary.possibleExplanation && summary.possibleExplanation.statement
+      ? { statement: String(summary.possibleExplanation.statement),
+          supported: Number(summary.possibleExplanation.supportedBy) > 0 }
+      : null;
+    const open = (detail.stillUnknown || []).filter(Boolean).map(String);
+
+    /* READINESS AND OPTIONS UNDER WHICHEVER SPELLING THIS SCOPE STORES. A GROUP question arrives
+       in the bucket as a projection that already carries both, computed by the same two owners
+       below with the group's own tried-before list. A PERSONAL question arrives as the raw
+       inquiry state, so they are computed here — from those same owners, never from a second
+       rule. `signals` is an array on the raw record and a count on a projection, which is the
+       distinction that tells the two apart without guessing. */
+    let readiness = raw.readiness || null;
+    let optionSet = raw.options || null;
+    if (!readiness && Array.isArray(raw.signals)) {
+      const frontier = _inquiryFrontier(raw, { memberCount: 1 });
+      readiness = frontier.readiness || null;
+      optionSet = _inquiryOptions(raw, frontier, triedBefore || [], []);
+    }
+    return { claim, candidate, open, readiness, optionSet };
+  } catch (_) { return null; }
+}
+
 /* `depth` IS 0 OR 1, AND IT IS NOT CHOSEN BY MATCHING ENGLISH. The call site picks it by whether
    the concise read has already been said in this conversation — see the branch in
    `_assistantAnswer`. Matching cues like "show me the evidence" here would rebuild the allowlist
@@ -12609,7 +12703,11 @@ function _teamStateAnswer(code, userId, question, { now = Date.now(), lens = nul
 function _objectSelfRead(code, userId, object, depth = 0) {
   try {
     if (!object || !object.kind || object.kind === 'conversation' || object.kind === 'material') return null;
-    const live = _allObjectsFor(code, userId)
+    /* ONE BUCKET BUILD FOR THE WHOLE READ. This resolved `_allObjectsFor` separately for the
+       object, for the question it came from and for what was already tried on that question —
+       three full builds per turn, each of which projects every group the reader is in. */
+    const authorised = _allObjectsFor(code, userId);
+    const live = authorised
       .find(o => o.kind === object.kind && String(o.id) === String(object.id));
     if (!live) return null;
     const card = live.present || {};
@@ -12643,7 +12741,7 @@ function _objectSelfRead(code, userId, object, depth = 0) {
       const rel = (live.raw || {}).addresses
         || (_origin && _origin.inquiryId ? { kind: 'inquiry', id: String(_origin.inquiryId) } : null);
       if (rel && rel.kind && rel.id) {
-        const src = _allObjectsFor(code, userId).find(o => o.kind === rel.kind && String(o.id) === String(rel.id));
+        const src = authorised.find(o => o.kind === rel.kind && String(o.id) === String(rel.id));
         if (src) parts.push(`You started it from ${rel.kind === 'inquiry' ? 'the question' : 'the ' + rel.kind} "${String((src.explained || {}).headline || '').replace(/\.$/, '')}".`);
         /* ── AND WHAT WAS ALREADY TRIED ON THE SAME QUESTION, WITH WHAT CAME OF IT ───────────
            The founder's experiment law: repeated failure is itself an outcome, a materially
@@ -12671,7 +12769,7 @@ function _objectSelfRead(code, userId, object, depth = 0) {
           return g && g.inquiryId ? `inquiry:${g.inquiryId}` : null;
         };
         const _here = `${rel.kind}:${rel.id}`;
-        const tried = _allObjectsFor(code, userId)
+        const tried = authorised
           .filter(o => o.kind === 'focus' && String(o.id) !== String(live.id) && _srcOf(o) === _here)
           .map(o => ({ label: String(((o.present || {}).summary || {}).title
               || (o.explained || {}).headline || '').replace(/\.$/, '').slice(0, 160),
@@ -12683,6 +12781,70 @@ function _objectSelfRead(code, userId, object, depth = 0) {
             .map(t => `"${t.label}" — recorded as ${String(present.outcomeText(t.outcome) || t.outcome).toLowerCase()}`)
             .join('; ')}.`);
           limitations.push('what was recorded after an earlier attempt is not proof that attempt caused it');
+        }
+        /* ── AND WHAT THE QUESTION ITSELF CURRENTLY HOLDS, READ ACROSS THE LINK ──────────────
+           Findings R1 #42's remaining seam. Up to here the reply named the question and what had
+           been tried on it, and stopped — so a Focus addressing a question with a supported
+           explanation, an open unknown and a governed option set told its owner the question's
+           NAME. See `_relatedQuestionRead` for the ruling and the reproduction.
+
+           ATTRIBUTED IN EVERY SENTENCE, because that is the whole difference between reading and
+           inheriting. "On that question…" is not decoration: a reader who cannot tell whose
+           evidence this is has been handed the question's support as though the Focus had earned
+           it, which is the duplication the founder ruled out. */
+        const across = _relatedQuestionRead(authorised, rel,
+          tried.map((t, n) => ({ focusId: `t${n}`, text: t.label, outcome: t.outcome })));
+        if (across) {
+          if (across.claim) {
+            parts.push(`On that question the record currently reads: ${String(across.claim).replace(/\.$/, '')}.`);
+          } else if (across.candidate) {
+            /* SOMEBODY'S CANDIDATE, AT ITS OWN STANDING AND UNDER ITS OWN PROVENANCE. "Someone
+               suggested" is the card's own words and carries the thing the product law cares
+               about: IntelliQ did not come up with this and does not own it. */
+            parts.push(`On that question nobody has an established read yet — someone suggested it is because ${
+              String(across.candidate.statement).replace(/^[A-Z]/, c => c.toLowerCase()).replace(/\.$/, '')}, and ${
+              across.candidate.supported ? 'something on the record supports that' : 'nothing on the record supports that yet'}.`);
+          }
+          if (across.open.length) {
+            /* An unknown is usually written as a question, and `…follow them?.` is the kind of
+               thing that makes a reader stop trusting the whole sentence. */
+            const _open = across.open.slice(0, 2).join('; ').trim();
+            parts.push(`Still open on it: ${/[.?!]$/.test(_open) ? _open : `${_open}.`}`);
+          }
+          const state = (across.readiness || {}).state || null;
+          if (state) {
+            /* THE STATE AND ITS REASON TRAVEL TOGETHER. The reason was landing several sentences
+               later, after the options, where it read as a detached assertion about the group
+               rather than as why the product is saying what it is saying. */
+            const _why = String((across.optionSet || {}).because || (across.readiness || {}).because || '');
+            const _head = state === 'worth_testing'
+              ? 'There is enough on that question for something to be worth trying'
+              : state === 'gather_information'
+                ? 'On that question the record says it is worth learning more before trying anything'
+                : 'There is not enough on that question yet to suggest anything worth trying';
+            parts.push(_why ? `${_head} — ${_why.charAt(0).toLowerCase()}${_why.slice(1)}` : `${_head}.`);
+          }
+          /* THE OPTIONS ARE THE QUESTION'S. Named, with what each would teach and what it does
+             not settle, and never re-sorted: `_inquiryOptions` states `ranked: false` because
+             array order is not preference, and reading them across a link must not quietly
+             become a recommendation. The cautions travel with them for the same reason they do
+             at the question's own grain — a person seeing an option must see that its family was
+             already attempted. */
+          const opts = ((across.optionSet || {}).options || []).slice(0, 3);
+          if (opts.length) {
+            parts.push(`Held on that question, in no order: ${opts
+              .map(o => `"${String(o.text || '').slice(0, 160)}" — it would tell you ${
+                String(o.wouldTeach || '').replace(/^[A-Z]/, c => c.toLowerCase()).replace(/\.$/, '')}`)
+              .join('; ')}.`);
+            parts.push('Those belong to the question, not to this focus, and nothing here picks one.');
+            limitations.push('those options are held on the question this focus came from — its evidence stays there and none of it belongs to this focus');
+          }
+          for (const c of ((across.optionSet || {}).cautions || []).slice(0, 2)) {
+            parts.push(`Already attempted about that question: "${String(c.text || '').slice(0, 160)}", and nothing recorded says it helped.`);
+          }
+          if (across.claim || across.candidate || across.open.length || state) {
+            limitations.push('what that question rests on was read across the link to it, and stays the question\'s own record');
+          }
         }
       }
     } else {
@@ -17893,8 +18055,15 @@ function _inquiryOptions(inq, frontier, triedBefore, helpers) {
   if (!readiness || readiness.state !== 'worth_testing') return null;
 
   const tried = Array.isArray(triedBefore) ? triedBefore : [];
-  const helped = tried.filter(t => t && t.outcome === 'better');
-  const didNotHelp = tried.filter(t => t && (t.outcome === 'no_change' || t.outcome === 'worse'));
+  /* BOTH GRAINS' WORDS FOR THE SAME ANSWER. These two lines read `=== 'better'` and
+     `'no_change' || 'worse'` — the GROUP vocabulary — which was complete while the only caller
+     was the group projection. Read across a governed relation from a PERSONAL focus, whose
+     outcomes are `helped`/`no`/`mixed`, a failed attempt matched neither list: it would not have
+     become a caution and would not have triggered the exhausted rule, so the one law that stops a
+     failed tactic coming back as a fresh option would have been silently off on that path.
+     `present.outcomeHelped` owns both spellings, beside the table that already knew both. */
+  const helped = tried.filter(t => t && present.outcomeHelped(t.outcome) === true);
+  const didNotHelp = tried.filter(t => t && present.outcomeHelped(t.outcome) === false);
 
   const hyps = ((inq && inq.hypotheses) || []).filter(h => h && h.status !== 'refuted');
   const supported = hyps.filter(h => (h.supportRefs || []).length > 0);
@@ -18718,7 +18887,25 @@ function _objectBucket(code, userId, scope = 'self') {
          permanent exclusion list. */
       if (!i.openedBy && _onboardingOnly(i, userId)) continue;
       const lead = (i.hypotheses || []).find(h => h && h.id === i.leadingHypothesisId);
+      /* ── AND ITS STANDING, WHICH THIS BRANCH HAD NEVER PASSED ──────────────────────────────
+         `hypothesis` was handed over without `hypothesisStanding`, so `present.hypothesisHasStanding`
+         was false for EVERY personal inquiry in the product, whatever the kernel had computed.
+         The card therefore rendered a leading hypothesis carrying two support refs as somebody's
+         unsupported candidate — "nothing on the record supports that yet" — while the readiness
+         line derived from the same record said one explanation has something behind it. Two
+         renderers, one record, opposite answers: findings R1 #37's contradiction at the personal
+         grain, found by driving the Focus suggestion path this round.
+
+         Read exactly as the group projection reads it (`_groupInquiryProjections`), from the
+         kernel's own band for THAT hypothesis and the refs it actually attached — never recounted
+         here (L-DC1). A lead with no confidence object stays unsupported, which is the safe
+         direction and the reading an older record already gets. */
       add('inquiry', { ...i, hypothesis: lead && lead.statement,
+        hypothesisStanding: lead && lead.confidence
+          ? { band: lead.confidence.band, score: lead.confidence.score, status: lead.status,
+              supportedBy: (lead.supportRefs || []).length,
+              because: (lead.confidence.because || []).slice(0, 3) }
+          : null,
         stillUnknown: (i.missingSignals || []).map(m => m && (m.question || m)).filter(Boolean) });
     }
     const plan = _proactiveInsights(code, userId, { audience: 'self' });
@@ -19420,10 +19607,22 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
 
      RESOLVED WITHIN THE READER'S OWN SCOPE. The lookup is against the same subject the object
      belongs to, so it cannot reach an inquiry from another group or another tenant even if an id
-     collided — which is exactly the shape group-loop-smoke's same-id fixture exists to catch. */
+     collided — which is exactly the shape group-loop-smoke's same-id fixture exists to catch.
+
+     AND UNDER BOTH NAMES THE RECORD USES FOR THAT LINK. A group focus stores
+     `origin.inquiryId`; a PERSONAL focus stores `addresses: {kind, id}`. Only the first was read
+     here, so a coach who started a personal Focus from their own question was told "there is
+     nothing here to search on that is not something you wrote" while the same reading on the
+     question itself built `sports football late goals best practice guidance`. The link existed,
+     the concept existed, and the borrow looked at the wrong field. Reproduced on the real route
+     before changing anything. `_objectSelfRead` reads both spellings and says in its own comment
+     why they are not consolidated here: renaming them is a canonical-owner change with its own
+     blast radius, and this is a reader. */
   let topic = (object.raw && object.raw.topic) || {};
   if (!topic.canonicalConcept) {
-    const originId = String(((object.raw || {}).origin || {}).inquiryId || '');
+    const _addr = (object.raw || {}).addresses;
+    const originId = String(((object.raw || {}).origin || {}).inquiryId
+      || (_addr && _addr.id ? _addr.id : '') || '');
     if (originId) {
       const nodeId = String(req.query.scope || '').startsWith('group:')
         ? String(req.query.scope).slice(6) : ((object.raw || {}).nodeId || null);
