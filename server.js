@@ -12909,6 +12909,9 @@ function _assistantAnswer(code, userId, question, opts = {}) {
      about the free-text retrieval bundle, delivered as a statement about what the product knows,
      with the real answer rendered on the group's own screen one tap away. */
   const teamLens = _teamQuestionLens(q);
+  /* READ ONCE, HERE, so the branch below can ask whether it found anything before claiming the
+     turn — see the note there. Only computed when a lens matched, so ordinary turns pay nothing. */
+  const _teamLensRead = teamLens ? _teamStateAnswer(code, userId, question, { lens: teamLens }) : null;
   const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
@@ -13012,17 +13015,35 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     const r = _reasonReadAnswer(code, userId);
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
-  } else if (teamLens) {
-    const t = _teamStateAnswer(code, userId, question, { lens: teamLens });
-    if (t && t.answer) {
-      answer = t.answer; confidence = t.confidence; limitations = t.limitations;
-      try { _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: `assistant ${teamLens}` }); } catch (_) {}
-    } else {
-      // The reader is on no group at all, which is a fact about them rather than about the
-      // record. Said as that, rather than as a shortage of evidence.
-      answer = `You are not on a group yet, so there is nothing at group grain for me to read.`;
-      confidence = 'confirmed'; limitations = [];
-    }
+  } else if (teamLens && _teamLensRead && _teamLensRead.count) {
+    /* ── AND IT ONLY CLAIMS THE TURN WHEN IT HAS SOMETHING TO SAY ABOUT A GROUP ─────────────
+       LIVE iPHONE, findings R1 #42. This branch used to test `t.answer`, and for the `options`
+       lens that string is never empty: the lens appends "What to try is yours to decide; I can
+       say what is recorded and what is not" whatever it found. So a coach standing INSIDE a Focus
+       who asked "What are our options here?" — one of the three most natural ways to ask — got
+       that single sentence and nothing else, while "What should we try now?" on the same screen a
+       moment earlier returned the focus, the question it came from, and the attempt that had
+       already failed. Same question, same object, two different products.
+
+       The group answer is the right one when somebody asks about their group. It is the wrong one
+       when it found no group to speak about, and a closing line is not a finding. Requiring
+       `count` — the number of group projections it actually read, which every other lens branch
+       already treats as its content signal — lets the turn fall through to the branches below,
+       where the object the person is standing in gets its look.
+
+       AND THE TWO EMPTY CASES ARE SEPARATED, because they were being answered as one. "You are
+       not on a group yet" is a fact about the READER and is the right answer for somebody who is
+       on none — `_teamStateAnswer` returns null for them, which is what the branch below keys on.
+       "Nothing at group grain about this" is a fact about the RECORD, and telling a coach who
+       leads a group that they are not on one is simply false. That case falls through to the
+       branches beneath, where the object they are standing in gets its look. */
+    const t = _teamLensRead;
+    answer = t.answer; confidence = t.confidence; limitations = t.limitations;
+    try { _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: `assistant ${teamLens}` }); } catch (_) {}
+  } else if (teamLens && !_teamLensRead) {
+    // On no group at all — a fact about them rather than about the record, and said as that.
+    answer = `You are not on a group yet, so there is nothing at group grain for me to read.`;
+    confidence = 'confirmed'; limitations = [];
   } else if (teamStatusQ) {
     // TEAM/ORG STATUS — "how's the team doing?" is a question about the GROUP, so it is
     // answered at the group's grain first: what is working, what needs attention, what is

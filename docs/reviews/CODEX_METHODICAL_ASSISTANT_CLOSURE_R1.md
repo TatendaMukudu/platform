@@ -2114,3 +2114,51 @@ ref that names an object *and* driven through the real route, where a null looku
 again (7 red); the lookup bound back to the headline (the same 7, which is how the defect looked);
 the client losing its word for the kind; the refusal speaking in code words; and a link allowed on
 any kind of source.
+
+### What IntelliQ says when somebody asks a Focus what to try — finding #42
+
+The founder asked for the whole suggestion path on a Focus re-audited against named cases: no
+evidence, one failed tactic, multiple attempts, user-reported figures, external-source-backed
+options, provider degradation.
+
+**Most of what the audit found was already right**, which is why it is a file and not a sentence.
+Every law here is a rule about what *not* to say — no invented tactic, no ranking, no winner, no
+cause asserted from a sequence, no failed tactic resurfaced as new, nothing written by asking — and
+nothing on a screen ever complains about their absence. Every assertion runs with models off, which
+is the pilot's own configuration; the prompt is asserted to *agree* with the deterministic path
+rather than substitute for it.
+
+**One real defect, and it was the founder's own phrasing that found it.** The group-lens branch
+tested that its answer string was non-empty, and for the `options` lens that string is *never* empty
+— it appends "What to try is yours to decide; I can say what is recorded and what is not" whatever
+it found. So a coach standing **inside a Focus** who asked "What are our options here?" got that one
+sentence and nothing else, while "What should we try now?" on the same screen a moment earlier
+returned the focus, the question it came from, and the attempt that had already failed. Same
+question, same object, two different products — and the first of those is exactly the "weak
+grounding" the live report describes.
+
+The branch now requires `count`, the number of group projections it actually read, which every other
+lens branch already treats as its content signal. A lens that found no group falls through to the
+object the person is standing in.
+
+**And the two empty cases are separated, because they were being answered as one.** "You are not on a
+group yet" is a fact about the *reader* and is right for somebody on none; "nothing at group grain
+about this" is a fact about the *record*, and telling a coach who leads a group that they are not on
+one is simply false. Removing the fallback outright turned `composer-coach-questions-smoke` CQ-G1
+red, correctly — that gate exists for the first case — so the two are now distinguished by whether
+the group read returns anything at all.
+
+**What is deliberately not built.** A Focus does not offer a menu of tactics. The governed option set
+lives at the **inquiry** grain, gated on the kernel's own `worth_testing`, and a Focus is a
+commitment rather than a question. Asked what to try, it answers with what the record holds — the
+question it came from, what was already tried on that question, and what came of it — and
+manufactures no choice the record does not support. Wiring a Focus to inherit its addressed
+question's option set is a real and defensible next step; it is a canonical-owner change with its own
+blast radius and it is recorded here rather than done quietly at the end of a round.
+
+`focus-suggestion-audit-http-smoke` (27). **Four mutations, each red then restored:** the group lens
+claiming the turn on a non-empty string again (A1b and A4, which is precisely how the defect looked);
+the focus read no longer carrying what was already tried (4 red); the "not proof the attempt caused
+it" caveat dropped; and the read no longer naming the question it came from. That last one **survived
+first** — `FS-A5` matched `/Late goals/i`, and the focus is called "Concede fewer late goals", so the
+assertion was satisfied by the title it was meant to look past. It pins the sentence now.
