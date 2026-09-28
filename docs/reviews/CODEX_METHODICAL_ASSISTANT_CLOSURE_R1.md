@@ -2642,3 +2642,129 @@ reproduced), #25 (needs a product rule about when a refusal is worth a card), #2
 **READY FOR LIVE REHEARSAL**, unchanged from §16 and now with eight more live defects closed
 behind it. Internally green at this head. Not ready to merge on internal evidence alone, and this
 handoff does not claim it is.
+
+## 18. Claude — live rehearsal defect closure — 2026-09-28
+
+**Head:** *this commit* on `codex/pilot-recovery-gate-r7` — a commit cannot carry its own hash, so
+read the branch tip. The last commit carrying a product change is `f98bbf7`. **Nothing merged.
+Nothing deployed. No new feature work.**
+
+Brief: close only the five live rehearsal defects the founder recorded after `672fcc9` — findings
+R1 #52A to #52E — reproducing each on the real production path, fixing the canonical owner rather
+than the copy, with registered regression proof and a mutation for every new assertion.
+
+### Four of the five had a correct answer the product already knew
+
+That is the pattern worth recording, because it says where to look next time. In each case the
+deterministic path, or a canonical owner one call away, already held the right answer — and
+something between it and the person chose differently.
+
+| # | What the founder saw | What was actually wrong |
+|---|---|---|
+| **A** | "I don't have enough authorised evidence to answer that yet", on a screen carrying that person's own Inquiry and Focus | `_assistantAnswer` reaches `_allObjectsFor` only through a BOUND object. Unbound, nothing asked the question the person was asking — so the answer was true about the free-text retrieval bundle and false about the product. **The seventh time this round has found that shape.** |
+| **B** | "That's a reasoning question more than a read of your recorded data … once the reasoning engine is switched on" | Measured: "What do you know about me so far?", "Why do you think that?" and "What are you uncertain about?" all classified as `world_knowledge`, because `WORLD` matches a bare `\bwhy\b`. The most record-facing questions in the product were routed to the edge that answers about the world, and with models off that edge narrates its own configuration. |
+| **C** | "That is the same part of the record I just showed you — ask about something else in it" | The repeat guard outranking the question it exists to answer. A record nobody has added to gives the same verdict twice, and that sameness IS the answer. |
+| **D** | "And do you want to involve th" | #47 was repaired in `_composeTurn`, and the composer is one of **three** doors — off, over budget, refused. In the others the reasoning edge writes the reply through `assembleGoverned`, which had no opinion about whether the model finished. |
+| **E** | an apology, then a menu of ways to manage the object | The deterministic path answered the same question correctly **in the same run**: it named the blocking fact and asked the one question that would move it on. The model was simply free to do otherwise. |
+
+### What was changed, and where
+
+- **`_recordSelfRead`** answers from `_allObjectsFor` — the same authorised set the screen reads —
+  and says in words the distinction the finding asks for by name: *no settled High or Low is not
+  an empty record*. Somebody at the very beginning gets a different answer from somebody with open
+  questions and nothing settled. References only; not one word anybody contributed crosses.
+- **A `self_read` register** in `ai/reasoning-register.js`, outranking `hasWorld` exactly as
+  `recall` already does and for the same reason, with `wantsReasoning` false for it so the
+  reasoning edge can never claim one. Narrow on the OBJECT, not the verb: "what do you know about
+  a 4-3-3?" is still a world question.
+- **The degrade line no longer classifies the question back at the person.** What is left is the
+  capability fact, which they are entitled to and which the classification was burying.
+- **`qa.verdict`**, set by the three branches that carry a requested verdict. The repeat guard
+  keeps their words and adds only that nothing has moved — the founder's own instruction: *"if the
+  evidence is unchanged, say that plainly while still answering the requested question."* The
+  guard is unchanged for what it was written for.
+- **`_unfinishedProse`** is one owner, shared by the composer and applied at the turn's single
+  exit, which covers the doors that exist and the ones written later.
+- **`languageGuard.narratesItself`** holds the model to the answer the product already gives. An
+  apology for an earlier turn is not an answer; a classification of the question is not an answer;
+  the interface is not a set of options. The two paths now return the same bytes.
+
+### The exit guard was too wide, and two suites found it
+
+The gateway's own warning arrived on schedule: *"a heuristic over the last character would call an
+honest answer ending in a list item truncated."* The deterministic path quotes documents — `From
+scouting.pptx: … won six drew three lost one at home` ends in a letter and is complete. The guard
+applies only to prose a MODEL wrote now, because kernel prose is never a fragment: no ceiling and
+no stream sits between the kernel and that line.
+
+### Four of my own assertions were unfalsifiable, and mutations found all four
+
+- **Section E ran with the composer off.** `IQ_COMPOSER` is read once at module load, so deleting
+  the environment variable mid-suite did nothing — both arms were the same path, their equality
+  was trivial, and removing the guard under test changed nothing.
+- **Section D passed on the composer's guard**, not the one under test, for the same reason. It
+  degrades the composer for real now, which is also the founder's own configuration.
+- **Two assertions credited the exit guard** for a property `assembleGoverned` already guarantees
+  through cite-or-ask: an uncited claim is demoted into a question, so a bare fragment never
+  reaches the exit as bare text. One assertion naming the real owner replaced them.
+
+**And a line of mine went the same way.** The exit guard cleared `qa.citations` on an empty answer
+and no mutation could kill it — the only path that can produce one carries no citations to begin
+with. By this codebase's standard a safeguard that changes nothing is worse than its absence.
+
+### Proof
+
+- **Truth Layer: green**, every registered suite, from this tree.
+- **`rehearsal-honesty-http-smoke` 34**, registered, reproduced red first.
+- **Nine mutations**, each required red then restored: the self-read never consulted; the
+  `self_read` register dropped; the two record states collapsed; the repeat guard swallowing the
+  verdict again; the exit guard removed; the model-written narrowing widened to every reply; the
+  self-narration guard removed; and each of its two halves removed separately, because the
+  founder's own live reply breaks both rules at once and either half alone kept the section green.
+- **Every registered real-Chromium gate at head:** chart-shape 50, composer-fit 33, exhausted-help
+  26, forum-share 31, group-loop 55, library 33, naming 32, onboard 34, pilot-coach 139,
+  priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34, live-recovery-repro
+  63. **749 assertions, 0 failed.**
+- **Real PostgreSQL, process killed between write and read:** `durable-restart-check` **35 passed,
+  0 failed**. A local PostgreSQL in this container: no pooler, no cold start, no partition. **Not
+  Neon and not Render.**
+- **A corpus check on each new guard**, because a guard that refuses the product's own sentences is
+  worse than the defect: 3,039 string literals scanned, **0 false positives**. `the reasoning
+  engine` is deliberately NOT a narration pattern — seven of the product's own sentences use it,
+  and every one is an honest statement about a capability somebody just tried to use.
+
+### #52F — no defect
+
+The founder has no canonical High or Low, so no High/Low object conversation can be rehearsed
+truthfully. **Nothing was fabricated to satisfy a test.** The empty state is the correct result
+until real evidence crosses the standing threshold. If one appears before the pilot, run the same
+four questions on it.
+
+### What remains, and it is genuinely live-only
+
+1. **Render** — the deployed build, its disk, its dashboard environment, a restart under load.
+2. **Neon** — network partition, pooler, connection ceiling, cold start, managed-service failure.
+3. **A real provider.** Every law this round is on the deterministic path and the prompt is
+   asserted to agree rather than substitute, but what a real model writes is still unobserved.
+   **#52D's door was found by degrading the composer deliberately; the live incidence of a dropped
+   stream is still a provider fact, not a proven one.**
+4. **Real invite delivery.**
+5. **An actual iPhone running Safari** — the 390px gates are real Chromium, which is not iOS Safari.
+6. **#52F's High/Low conversation**, when a real standing exists.
+
+### Unresolved blockers
+
+**None internally.** No finding classified as a blocker is open, no registered gate is red, and no
+mutation survived unrecorded.
+
+Unchanged and not blockers: #5, #23, #18 (copy and IA judgement, no defect reproduced), #25 (needs
+a product rule about when a refusal is worth a card), #26 and #27 (model-path phrasing the
+deterministic path does not produce and the prompt already forbids), #38 (concept ratified, surface
+change not reached), #39 (no divergence reproduced).
+
+### Verdict
+
+**READY FOR LIVE REHEARSAL**, with the five defects from the last rehearsal closed behind it.
+Internally green at this head. Not ready to merge on internal evidence alone, and this handoff does
+not claim it is — the next honest step is the same rehearsal again, on the device, against this
+exact candidate.
