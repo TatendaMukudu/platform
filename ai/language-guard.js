@@ -110,5 +110,66 @@ function invitesGovernedCreation(text) {
   return CREATE_STANDING.test(t) || STANDING_AS_EVIDENCE.test(t);
 }
 
+/* ── THE PRODUCT TALKING ABOUT ITSELF INSTEAD OF ANSWERING ───────────────────────────────────
+   LIVE iPHONE (findings R1 #52B and #52E). Two shapes of the same fault, both measured on the
+   real route:
+
+     asked "Why do you think that?"   →  "That's a reasoning question more than a read of your
+                                          recorded data … once the reasoning engine is switched on"
+     asked "What could we try?"       →  "I'm not going to keep repeating that screenshot at you —
+                                          I'm sorry, that was not useful … Here is what you can do
+                                          with this focus: show this inquiry, set a review date,
+                                          discuss it with the group … Which of those would you like?"
+
+   NEITHER IS AN ANSWER. The first narrates the product's own configuration; the second apologises
+   for a previous turn and then offers the INTERFACE as the substance. The founder's rule for this
+   round is one line — internal routing, prompt and process language must not leak unless somebody
+   asked how IntelliQ works — and the second half of #52E is its own rule: management actions are
+   not options, unless the person asked how to manage the object.
+
+   ENFORCED RATHER THAN REQUESTED. `ai/composer.js` already says never to describe the interface,
+   and the model did it anyway; a rule that lives only in a prompt is not implemented. This is the
+   check, beside the prediction, diagnosis and High/Low rules, for the same reason they are here.
+
+   THE MENU NEEDS BOTH HALVES, because either alone is innocent. "Open the governed discussion" is
+   a legitimate action label on a card, and "would you like" is ordinary English; what is wrong is
+   OFFERING A CHOICE OF THEM AS THE ANSWER. So the pattern requires an offering frame and two or
+   more management actions in the same reply. */
+const SELF_NARRATION = new RegExp([
+  /\bI(?:'m| am) (?:so |really |very )?sorry\b/.source,
+  /\bI apolog(?:ise|ize)/.source,
+  /\blet me try (?:that )?again\b/.source,
+  /\bI should have (?:caught|noticed|said|done)\b/.source,
+  /\bI(?:'m| am) not going to keep\b/.source,
+  /\bthat (?:was|wasn't|was not) (?:very )?(?:useful|helpful)\b/.source,
+  /\byou(?:'re| are) asking me to\b/.source,
+  /\bthat(?:'s| is) a (?:reasoning|planning|world[- ]knowledge) question\b/.source,
+  /* `the reasoning engine` IS DELIBERATELY NOT ON THIS LIST, and a corpus scan is why. Seven of
+     the product's own sentences use it — "reading a picture needs the reasoning engine on this
+     host" — and every one is an honest statement about a CAPABILITY somebody just tried to use.
+     That is not scaffolding; scaffolding is classifying the person's question back at them,
+     which the pattern above catches. A guard that refused the capability answer would have
+     traded a leak for a lie. */
+  /\bmy (?:system )?(?:prompt|instructions|routing|classifier|pipeline)\b/.source,
+  /\bI (?:was |have been )?(?:routed|classified) (?:this|that|your)\b/.source,
+].join('|'), 'i');
+
+const OFFER_FRAME = /\b(?:here(?:'s| is| are) what you can do|would you like|which of (?:those|these)|you (?:could|can) (?:also )?(?:choose|pick)|your options (?:here )?are)\b/i;
+const MANAGEMENT_ACTION = /\b(?:show (?:this|the) (?:inquiry|focus|evidence)|set a review date|discuss (?:it|this) with the group|open the governed discussion|attach material|keep (?:this|it) in (?:the )?library|open this as an inquiry|revise this focus|start (?:this|a separate) focus|put this to the forum)\b/i;
+
+function offersInterfaceMenu(text) {
+  const t = String(text == null ? '' : text);
+  if (!OFFER_FRAME.test(t)) return false;
+  let n = 0;
+  for (const m of t.matchAll(new RegExp(MANAGEMENT_ACTION.source, 'gi'))) { if (m) n++; }
+  return n >= 2;
+}
+
+function narratesItself(text) {
+  const t = String(text == null ? '' : text);
+  return SELF_NARRATION.test(t) || offersInterfaceMenu(t);
+}
+
 module.exports = { predictsOrDiagnoses, describesOnly, invitesGovernedCreation,
+  narratesItself, offersInterfaceMenu, SELF_NARRATION, OFFER_FRAME, MANAGEMENT_ACTION,
   PREDICTIVE, PERSON_FUTURE, GUARANTEE, DIAGNOSTIC, CREATE_STANDING, STANDING_AS_EVIDENCE };

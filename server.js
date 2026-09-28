@@ -11153,7 +11153,11 @@ async function _governedReason(code, userId, question, { register, priorMessages
   // deterministic answer (return null → caller keeps it); a pure reasoning question says so.
   if (!ai.enabled()) {
     if (register === 'mixed' && context.length) return null;
-    return { answer: `That's a reasoning question more than a read of your recorded data. I can think it through with you — weighing the general trade-offs against what's actually recorded here — once the reasoning engine is switched on. Until then I'll only speak to what's in your data, so I don't guess.`,
+    /* THIS SENTENCE USED TO CLASSIFY THE PERSON'S QUESTION BACK AT THEM — "that's a reasoning
+       question more than a read of your recorded data" — which is findings R1 #52B's rule in one
+       line: internal routing language is not an answer. What is left is the capability fact,
+       which they are entitled to and which the classification was burying. */
+    return { answer: `Answering that properly means weighing things up rather than reading them off your record, and the reasoning engine is not switched on here. I can tell you what is actually recorded, and I would rather do that than guess.`,
       confidence: 'none', limitations: ['the reasoning edge is off (no model configured)'], captureProposals: [], provenance: [], usable: true };
   }
 
@@ -11757,19 +11761,16 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
        question on its own line and then started another sentence had its question thrown away
        along with the fragment — the founder's own reproduction shape, and a real loss rather than
        a cosmetic one. */
-    const _endsMidWord = (t) => /[\p{L}\p{N}]$/u.test(String(t || '').trim());
+    /* THE MEASUREMENT IS `_unfinishedProse` — one owner, shared with the turn's own exit guard,
+       because findings R1 #52D found the third door open while this one was shut. */
+    const _mark = ai.isTruncated && ai.isTruncated(reply);
+    const _fin = _unfinishedProse(reply);
     let _cutShort = false;
     let _usable = reply;
-    const _looksCut = (ai.isTruncated && ai.isTruncated(reply)) || _endsMidWord(reply);
-    if (_looksCut) {
-      const _whole = String(reply || '');
-      const _end = Math.max(_whole.lastIndexOf('. '), _whole.lastIndexOf('.\n'),
-        _whole.lastIndexOf('? '), _whole.lastIndexOf('?\n'),
-        _whole.lastIndexOf('! '), _whole.lastIndexOf('!\n'),
-        /[.?!]$/.test(_whole.trim()) ? _whole.trim().length - 1 : -1);
-      _usable = _end > 0 ? _whole.slice(0, _end + 1) : '';
+    if (_mark || _fin.cut) {
+      _usable = _fin.cut ? _fin.kept : String(reply || '');
       _cutShort = true;
-      console.log(`[composer] the reply did not finish (${ai.isTruncated && ai.isTruncated(reply) ? 'provider reported the ceiling' : 'it stops mid-word and the provider said nothing'}) — kept ${_usable.length} of ${_whole.length} chars`);
+      console.log(`[composer] the reply did not finish (${_mark ? 'provider reported the ceiling' : 'it stops mid-word and the provider said nothing'}) — kept ${String(_usable).length} of ${String(reply || '').length} chars`);
       _metric(code, 'composer_truncated');
     }
     /* AND THE READER IS TOLD, IN THE PROSE THEY ARE READING. The limitation below reaches the
@@ -11791,9 +11792,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
        What replaces it says only what is true FOR THE READER: the answer stopped early, what they
        are looking at is whole, and there is a way to get the rest. No ceiling, no token, no
        mechanism. */
-    const written = _cutShort
-      ? `${_polished}\n\nThat answer stopped before it was finished. What is above it is complete — ask me to carry on and I will pick up from there.`
-      : _polished;
+    const written = _cutShort ? `${_polished}\n\n${CUT_SHORT_NOTE}` : _polished;
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
@@ -11953,6 +11952,24 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
         _metric(code, 'composer_refused');
         return _degraded('unverified');
       }
+    }
+    /* ── AND THE REPLY IS ABOUT THEIR RECORD, NOT ABOUT INTELLIQ ───────────────────────────
+       LIVE iPHONE (findings R1 #52B, #52E). Asked "What could we try?" the founder was given an
+       apology for a previous turn, loop commentary, and then the INTERFACE as the answer: "here
+       is what you can do with this focus: show this inquiry, set a review date, discuss it with
+       the group … which of those would you like?" Measured on the real route, and the
+       deterministic path answered the same question correctly in the same run — it named the
+       blocking fact and asked the one question that would move it on.
+
+       SO THE TWO PATHS ARE MADE TO CONVERGE THE ONLY WAY THAT HOLDS: the model is held to the
+       answer the product already gives. `ai/composer.js` has said "never describe the interface"
+       for months and the model did it anyway, which is the whole argument for checking rather
+       than asking. Management actions are not options; an apology for a previous turn is not an
+       answer; and neither is a classification of the question that was just asked. */
+    if (languageGuard.narratesItself(written)) {
+      console.log('[composer] refused — the reply was about IntelliQ rather than about their record');
+      _metric(code, 'composer_refused');
+      return _degraded('unverified');
     }
     if (languageGuard.invitesGovernedCreation(written)) {
       console.log('[composer] refused — invited the person to create a High or a Low');
@@ -13328,6 +13345,138 @@ const _LEARN_STOP = new Set(('a,an,and,are,as,at,be,but,by,can,did,do,does,for,f
   + 'learn,learned,learnt,learning,far,now,yet,ever,much,any,some,tell,say,know'
 ).split(','));
 
+/* ── WHAT IS ACTUALLY ON THIS PERSON'S RECORD, READ FROM THE SAME PLACE THE SCREEN READS ─────
+   LIVE iPHONE (findings R1 #52A). On Home, asked "What do you actually have on me?", the founder
+   was told "I don't have enough authorised evidence to answer that yet" — while the same screen
+   carried their Inquiry and their Focus, and while the very next turn discussed that Inquiry
+   correctly. Reproduced on the real route, with the objects listed beside the answer:
+
+     OBJECTS ON THE SCREEN: inquiry:mine "Where you are trying to get to."
+                            focus:foc_t  "Get into the starting eleven."
+     ANSWER:                "I don't have enough authorised evidence to answer that yet."
+
+   THE SENTENCE WAS TRUE ABOUT THE FREE-TEXT RETRIEVAL BUNDLE and false about the product, which
+   is the seventh time this round has found that shape. `_assistantAnswer` reaches
+   `_allObjectsFor` only through a BOUND object; unbound, nothing asked the one question the
+   person was asking.
+
+   THE FOUNDER'S THIRD BULLET IS THE INTERESTING ONE: distinguish "no settled High or Low" from
+   "no authorised record at all". They are completely different facts about somebody and the
+   product was collapsing them into one refusal. A person with four open questions and no
+   standing has a rich record and nothing settled; a person with neither is at the beginning.
+   Those get different answers here.
+
+   REFERENCES, NEVER CONTENTS. What crossed is the SHAPE of the record — how many questions, what
+   they are called, whether anything has reached a standing — and not one word anybody
+   contributed. Every sentence is composed from the cards `ai/present.js` already renders, so the
+   screen and the answer cannot drift apart, which is the whole defect being fixed. */
+/* ── DID THIS PROSE FINISH? ONE OWNER, BECAUSE THERE IS MORE THAN ONE DOOR ───────────────────
+   LIVE iPHONE (findings R1 #52D). "And do you want to involve th" reached the founder AFTER the
+   #47 repair. Reproduced on the real route by stubbing every model door and asking the same
+   question three ways: bound to an Inquiry it was caught, unbound it was caught, and on a plain
+   reasoning question with the composer off it was committed verbatim.
+
+   #47 WAS FIXED IN `_composeTurn`, AND THE COMPOSER IS NOT THE ONLY PATH. When it is switched
+   off, over budget, refused by the manifest or refused by the grounding cage — four ordinary
+   states, and the pilot runs in the first of them — the reasoning edge writes the reply instead,
+   through `assembleGoverned`, which had no opinion about whether the model finished its sentence.
+   Fixing that file too would have made two copies of one rule and left the third door open.
+
+   SO THE RULE LIVES HERE AND IS APPLIED AT THE TURN'S SINGLE EXIT, which is what the finding
+   asks for in its own words: detect the incomplete trailing text "before committing the turn".
+   Every path, including any written later, passes through that one place.
+
+   WHAT COUNTS AS UNFINISHED is the narrow question #47 settled: does it end in the MIDDLE OF A
+   WORD. A finished sentence does not, in any language that ends its sentences with punctuation,
+   and neither does a complete list item — which is the false positive the gateway's own note
+   warns against and the reason this does not simply look at the last character. */
+function _unfinishedProse(text) {
+  const whole = String(text == null ? '' : text);
+  if (!/[\p{L}\p{N}]$/u.test(whole.trim())) return { cut: false, kept: whole };
+  const end = Math.max(whole.lastIndexOf('. '), whole.lastIndexOf('.\n'),
+    whole.lastIndexOf('? '), whole.lastIndexOf('?\n'),
+    whole.lastIndexOf('! '), whole.lastIndexOf('!\n'),
+    /[.?!]$/.test(whole.trim()) ? whole.trim().length - 1 : -1);
+  return { cut: true, kept: end > 0 ? whole.slice(0, end + 1).trim() : '' };
+}
+
+/* The one sentence a person reads when an answer stopped early. It says only what is true for
+   them — findings R1 #46 forbids naming an internal answer-length limit — and it is written once
+   so the composer and the reasoning edge cannot describe the same event differently. */
+const CUT_SHORT_NOTE = 'That answer stopped before it was finished. What is above it is complete — '
+  + 'ask me to carry on and I will pick up from there.';
+
+function _recordSelfRead(code, userId, question) {
+  try {
+    const q = String(question || '').toLowerCase();
+    const mine = _allObjectsFor(code, userId).filter(o => o && !o.parked);
+    const of = k => mine.filter(o => o.kind === k);
+    const inquiries = of('inquiry'), focuses = of('focus'), highs = of('high'), lows = of('low');
+    const name = o => String(((o.present || {}).summary || {}).full
+      || ((o.present || {}).summary || {}).title
+      || (o.explained || {}).headline || '').replace(/\.$/, '').trim();
+    const parts = [];
+    const limitations = ['this is the shape of what is recorded, not what anybody said in it'];
+
+    /* NOTHING AT ALL IS A REAL ANSWER, and a different one from "nothing has settled yet". */
+    if (!mine.length) {
+      return { text: 'There is nothing on your record yet — no questions open, nothing you have '
+        + 'committed to, and nothing that has reached a standing. Tell me what you are seeing and '
+        + 'I will hold it as your account of it; that is what everything else here is built from.',
+        limitations: ['nothing has been recorded for you yet, which is a fact about the record rather than about you'] };
+    }
+
+    const bits = [];
+    if (inquiries.length) bits.push(`${inquiries.length} question${inquiries.length === 1 ? '' : 's'} being worked out`);
+    if (focuses.length) bits.push(`${focuses.length} thing${focuses.length === 1 ? '' : 's'} you have committed to`);
+    if (highs.length) bits.push(`${highs.length} high${highs.length === 1 ? '' : 's'}`);
+    if (lows.length) bits.push(`${lows.length} low${lows.length === 1 ? '' : 's'}`);
+    parts.push(`On your record right now: ${bits.join(', ')}.`);
+
+    /* NAMED, because a count is not a read. Two, because this is the first screen and a list of
+       six is the questionnaire this product keeps being told not to be. */
+    const named = [...inquiries, ...focuses].slice(0, 2).map(name).filter(Boolean);
+    if (named.length) parts.push(`${named.length === 1 ? 'It is' : 'They are'} ${named.map(n => `"${n}"`).join(' and ')}.`);
+
+    /* ── THE DISTINCTION THE FINDING ASKS FOR, SAID IN WORDS ──────────────────────────────
+       A standing is not something anybody creates and not something a full record guarantees;
+       saying "nothing has crossed yet" beside "here is what is open" is the only way a reader
+       can tell the two states apart. */
+    if (!highs.length && !lows.length) {
+      parts.push('Nothing has crossed into a High or a Low yet. That is not the same as having '
+        + 'nothing recorded — it means no reading has enough behind it to stand on its own.');
+    }
+
+    /* WHY DO YOU THINK THAT — the basis, from the card rather than from a fresh reading. */
+    if (/\bwhy\b|\bbased (?:on|upon)\b|\bmakes you\b|\bcome from\b/.test(q)) {
+      const top = inquiries[0] || null;
+      const card = top ? (top.present || {}) : {};
+      const admitted = String((card.summary || {}).thinking || '').trim();
+      const because = ((card.detail || {}).because || []).filter(Boolean).slice(0, 2);
+      if (top && admitted) {
+        parts.push(`On "${name(top)}" the reading is ${admitted.replace(/\.$/, '')}${
+          because.length ? `, and it rests on ${because.join(', ')}` : ''}.`);
+      } else if (top && because.length) {
+        parts.push(`On "${name(top)}" nothing has been admitted as a reading yet — what people `
+          + `described rests on ${because.join(', ')}, and the explanation for it is the open part.`);
+      }
+    }
+
+    /* WHAT ARE YOU UNCERTAIN ABOUT — the open unknowns, which the kernel already ranked. */
+    if (/\buncertain|\bunsure|\bnot sure|\bconfiden|\bcertain|\bdon'?t (?:you )?know|\bdo not know\b/.test(q)) {
+      const open = inquiries.flatMap(o => (((o.present || {}).detail || {}).stillUnknown || []))
+        .filter(Boolean).slice(0, 2);
+      parts.push(open.length
+        ? `What is open: ${open.map(u => String(u).replace(/[.?!]$/, '')).join('; ')}.`
+        : 'Nothing is recorded as open on any of it, which is its own answer: what is here has not '
+          + 'raised a question nobody can account for.');
+    }
+
+    parts.push('That is what the record holds, not a fresh reading of it.');
+    return { text: parts.join(' '), limitations };
+  } catch (_) { return null; }
+}
+
 function _learningRead(code, userId, question) {
   try {
     const authorised = _allObjectsFor(code, userId);
@@ -13513,12 +13662,41 @@ function _assistantAnswer(code, userId, question, opts = {}) {
      object's description or an internal limit. */
   const _options = (!_support && opts.object && _TRY_Q.test(q))
     ? _optionsAnswer(_authorisedNow, opts.object) : null;
+  /* ── AND "WHAT DO YOU ACTUALLY HAVE ON ME?" IS ANSWERED FROM THE RECORD (findings R1 #52A) ──
+     Unbound, on Home, this dead-ended on the free-text bundle while the person's own objects sat
+     on the screen behind the answer. It is checked before the router for the same reason the
+     support question is: no branch below can answer it better, and every one of them answered it
+     worse. Bound, the object in front of them is the better subject and the branches that serve
+     it are left alone. */
+  /* NOT "UNBOUND" — "NOT STANDING IN ANYTHING THAT COULD ANSWER IT BETTER". On Home the server
+     binds the CONVERSATION itself (`_composerActionContext` resolves `kind: 'conversation'`), so a
+     test for `!opts.object` never fires where the founder actually met this. `_boundRead` is the
+     honest question: it is null for a conversation and for a material by design, and non-null for
+     the four kinds that can answer for themselves. A material-bound thread keeps its own branches,
+     because "what do you know about this?" there means the document. */
+  const _selfRead = (!_boundRead && !opts.materialRow && !opts.material
+      && reasoningRegister.classifyRegister(question).register === 'self_read')
+    ? _recordSelfRead(code, userId, question) : null;
   const priv = ev.filter(e => e.visibility === 'private');
-  if (_options) {
+  /* ── A VERDICT WAS ASKED FOR, AND ONE OF THESE THREE GIVES IT ──────────────────────────────
+     Findings R1 #52C. The repeat guard downstream replaces an answer that matches the previous
+     one word for word — right for a restated action, wrong for a question whose honest answer has
+     not changed. "Does the record support this?" asked twice about a record nobody has added to
+     has the same answer twice, and being told to ask something else instead is the guard deciding
+     the person's question was not worth answering. So the three branches that carry a REQUESTED
+     VERDICT say so, and the guard keeps their words. */
+  let verdict = false;
+  if (_selfRead) {
+    answer = _selfRead.text;
+    confidence = 'confirmed';   // about WHAT THE RECORD HOLDS, which is the only claim made
+    limitations = _selfRead.limitations;
+    verdict = true;
+  } else if (_options) {
     answer = _options.text;
     confidence = 'confirmed';   // about WHAT THE RECORD SUPPORTS TRYING, which is the only claim
     limitations = _options.limitations;
     _onSubject = true;
+    verdict = true;
   } else if (_support) {
     /* CLASSIFICATION FIRST, THEN WHY, THEN WHAT IT RESTS ON — the founder's own order, and all
        three in this one answer: the verdict, the reading it is a verdict about, the shape of what
@@ -13529,6 +13707,7 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     confidence = 'confirmed';   // about WHAT STANDING THE RECORD GIVES IT, the only claim made
     limitations = [..._support.limitations, ...((_boundRead || {}).limitations || [])];
     _onSubject = true;
+    verdict = true;
   } else if (personHit) {
     const visible = new Set(getVisibleUserIds(code, userId));
     const first = String(personHit.name).split(/\s+/)[0];
@@ -13956,7 +14135,7 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     .map(c => ({ ...c, evidenceRefs: (c.evidenceRefs || []).filter(id => authorised.includes(id)) }))
     .filter(c => c.evidenceRefs.length);
   return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok,
-    groundedClaims: boundedClaims, citations, groundingId, standingRead };
+    groundedClaims: boundedClaims, citations, groundingId, standingRead, verdict };
 }
 
 /* ─── ORGANISATIONAL-STATE BOUNDARY + INQUIRY (recommendation-only) ────────────
@@ -17475,6 +17654,25 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
        The action reader being unavailable says nothing about a question that WAS answered, and
        `qa` is the record of that. So an answered question wins the branch, and the unavailable
        sentence is kept for what it was written for: a change nobody could read. */
+    /* ── AND A REQUESTED VERDICT IS NEVER WHAT GETS SUPPRESSED ────────────────────────────
+       LIVE iPHONE (findings R1 #52C). "Does the record support this, or is it still a hypothesis?"
+       was answered correctly once, and a later support turn came back with "That is the same part
+       of the record I just showed you — ask about something else in it." The guard had taken
+       precedence over the question.
+
+       THE GUARD IS RIGHT ABOUT WHAT IT WAS WRITTEN FOR and wrong here. A record nobody has added
+       to gives the same verdict twice, and that sameness IS the answer — being told to ask
+       something else instead is the product deciding the question was not worth answering, on the
+       one class of question it exists to answer.
+
+       SO THE WORDS ARE KEPT AND THE SAMENESS IS SAID, which is exactly what the founder asked
+       for: "if the evidence is unchanged, say that plainly while still answering the requested
+       question." `qa.verdict` is set by the three branches that carry one — the support
+       classification, the option set, and the record self-read — so this cannot be mistaken for
+       any answer that merely happens to repeat. */
+    if (qa && qa.verdict) {
+      responseText = `${responseText} Nothing has been added to the record since you last asked, so that answer has not moved.`;
+    } else {
     const _answeredAQuestion = !!qa;
     responseText = _answeredAQuestion
       ? 'That is the same part of the record I just showed you — it is what I have on both. '
@@ -17482,6 +17680,49 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
       : actionReading.unavailable
         ? 'I cannot reliably interpret that change while the language model is unavailable. Your message is still in this private conversation, and nothing was saved or shared.'
         : 'I heard that as a change to what you wanted. Nothing was saved or shared; tell me which action you want me to prepare.';
+    }
+  }
+
+  /* ── AND NOTHING LEAVES THIS FUNCTION IN THE MIDDLE OF A WORD ─────────────────────────────
+     LIVE iPHONE (findings R1 #52D): "And do you want to involve th", on a build that already
+     carried the #47 repair. That repair is in `_composeTurn`, and the composer is one of three
+     doors — with it switched off, over budget, or refused, the reasoning edge writes the reply
+     through `assembleGoverned`, which had no opinion about whether the model finished. Driven on
+     the real route with every model door stubbed: bound and unbound the fragment was caught, and
+     on a plain reasoning question with the composer off it was committed verbatim.
+
+     THIS IS THE TURN'S SINGLE EXIT, so it covers the doors that exist and the ones written later.
+     `_composeTurn` still does its own, earlier and better: it can RETRY, which is worth more to
+     the person than a repair, and it can tell a provider ceiling from a dropped stream. This is
+     the floor underneath it, not a replacement for it.
+
+     AND NOTHING IS SOURCED OFF AN ANSWER THAT WAS NEVER WRITTEN, which is the finding's second
+     sentence: with no finished sentence in it there is nothing to cite, so the citations go with
+     the text rather than being left underneath a recovery state as though they supported it. */
+  /* ── AND ONLY WHERE A MODEL WROTE IT ───────────────────────────────────────────────────
+     The first version of this guard applied to every reply and broke two suites, which is the
+     gateway's own warning arriving on schedule: "a heuristic over the last character would call
+     an honest answer ending in a list item truncated." The deterministic path quotes documents —
+     `From scouting.pptx:\n\nHome form\nwon six drew three lost one at home` ends in a letter and
+     is complete — and kernel-written prose is never a fragment, because no ceiling and no stream
+     sits between the kernel and this line.
+
+     A MODEL WROTE IT, OR IT IS NOT IN SCOPE. `composedReply` is the composer's; `qa.reasoning` is
+     the reasoning edge's, which is the door findings R1 #52D found open. Anything written later
+     that asks a model for prose has to set one of those to reach a person at all. */
+  const _modelWrote = !!composedReply || !!(qa && qa.reasoning);
+  const _tail = _modelWrote ? _unfinishedProse(responseText) : { cut: false, kept: responseText };
+  if (_tail.cut) {
+    console.log(`[turn] a reply reached the exit unfinished — kept ${_tail.kept.length} of ${String(responseText || '').length} chars`);
+    _metric(code, 'turn_unfinished_at_exit');
+    responseText = _tail.kept ? `${_tail.kept}\n\n${CUT_SHORT_NOTE}` : CUT_SHORT_NOTE;
+    /* A LINE CLEARING `qa.citations` STOOD HERE AND WAS REMOVED. It read as the finding's second
+       sentence — "do not source a visibly incomplete response" — and no mutation could kill it:
+       the only path that can produce a fragment with nothing whole in it is the reasoning edge,
+       which carries no citations to begin with, and the composer's own earlier guard catches its
+       side before this. The PROPERTY is real and is asserted at RH-D5; the line was a safeguard
+       that changed nothing, which by this codebase's standard is worse than its absence, because
+       the next person to read it will believe it is load-bearing. */
   }
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).

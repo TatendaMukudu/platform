@@ -81,6 +81,44 @@ const RECALL = new RegExp([
   /\b(?:repeat|recap) (?:that|what i (?:just )?said|our (?:chat|conversation))\b/.source,
 ].join('|'), 'i');
 
+/* ── IS THE PERSON ASKING WHAT INTELLIQ ITSELF HOLDS? ────────────────────────────────────────
+   LIVE iPHONE (findings R1 #52A/#52B). On Home, asked "What do you know about me so far?" and
+   "Why do you think that?" and "What are you uncertain about?", the founder was told:
+
+     "That's a reasoning question more than a read of your recorded data. I can think it through
+      with you … once the reasoning engine is switched on."
+
+   Measured: all three classify as `world_knowledge`. `WORLD` matches a bare `\bwhy\b` and
+   `what do you know about`, and none of the other detectors has an opinion — so the question
+   most completely ABOUT THE RECORD was routed to the edge that answers about the world, and with
+   models off that edge narrates its own configuration at the person.
+
+   THE SAME ARGUMENT RECALL ALREADY MAKES. Recall wins outright because it is about the thread
+   rather than the records; this is about IntelliQ'S OWN READ of the records — what it holds, why
+   it holds it, and what it is unsure of — which is the most org-fact question there is and needs
+   no model at all. So it outranks `hasWorld` for the same reason, and `wantsReasoning` is false
+   for it, which is what keeps the reasoning edge from claiming the turn.
+
+   NARROW ON THE OBJECT, NOT THE VERB. "What do you know about a 4-3-3?" is a world question and
+   must stay one; "what do you know about me" is not. So every pattern here anchors on the SELF
+   or the CURRENT READ as the thing being asked about, never on "know" or "why" alone. */
+const SELF = new RegExp([
+  // what do you know / have / hold — about ME, about US, about THIS, or so far
+  /\bwhat (?:do|have) you (?:actually |even |currently )?(?:know|have|got|hold|remember)\b[^?]{0,40}?\b(?:about (?:me|us|my|our|this|that|it)|on (?:me|us)|so far|already|at all|right now)\b/.source,
+  /\bwhat do you know so far\b/.source,
+  /\bwhat(?:'s| is) on (?:my|our) record\b/.source,
+  // why do you say that — the basis for the read IntelliQ just gave
+  /\bwhy do you (?:think|say|believe|reckon)\s+(?:that|this|so|it|these)\b/.source,
+  /\bwhat makes you (?:say|think|believe)\s+(?:that|this|so|it)\b/.source,
+  /\bwhat(?:'s| is| are) (?:that|this|it|they) based (?:on|upon)\b/.source,
+  /\bwhere (?:did|does) (?:that|this|it) come from\b/.source,
+  // and what it does NOT know, which is the same question from the other side
+  /\bwhat are you (?:un)?(?:certain|sure|confident|clear)\b/.source,
+  /\bwhat are you (?:not sure|unsure)\b/.source,
+  /\bwhat (?:don'?t|do not) you know\b/.source,
+  /\bhow (?:confident|sure|certain) are you\b/.source,
+].join('|'), 'i');
+
 /* Return the register plus the raw signals (so callers/tests can see WHY). A question that
    touches the org AND asks for reasoning/planning is MIXED — the most valuable case, where
    world knowledge is fused with the grounded read. Pure org-state questions stay org_fact so
@@ -91,15 +129,20 @@ function classifyRegister(question) {
   const hasWorld = WORLD.test(q);
   const hasPlan = PLAN.test(q);
   const hasRecall = RECALL.test(q);
+  const hasSelf = SELF.test(q);
   let register;
   if (!q) register = 'org_fact';
   // Recall is unambiguous and wins outright — it is about the thread, not the records.
   else if (hasRecall) register = 'recall';
+  /* AND A QUESTION ABOUT INTELLIQ'S OWN READ WINS FOR THE SAME REASON — it is about the records,
+     and answering it from the world-knowledge edge is how the founder came to be told that the
+     reasoning engine was switched off when they had asked what was on their own file. */
+  else if (hasSelf) register = 'self_read';
   else if (hasOrg && (hasWorld || hasPlan)) register = 'mixed';
   else if (hasPlan && !hasOrg) register = 'planning';
   else if (hasWorld && !hasOrg) register = 'world_knowledge';
   else register = 'org_fact';                 // default: try the grounded read (safe, no egress)
-  return { register, signals: { hasOrg, hasWorld, hasPlan, hasRecall } };
+  return { register, signals: { hasOrg, hasWorld, hasPlan, hasRecall, hasSelf } };
 }
 
 /* ── OUTPUT POLISH ───────────────────────────────────────────────────────────
@@ -138,6 +181,8 @@ function composeRecall(priorMessages = []) {
 
 // Does answering this register benefit from world-knowledge reasoning (i.e. an LLM edge)?
 // org_fact is answered purely from the deterministic read; the rest want reasoning.
+/* `self_read` is deliberately absent: it is answered from the record by `_recordSelfRead` and a
+   model adds nothing to "what do you hold about me". */
 function wantsReasoning(register) { return register === 'world_knowledge' || register === 'mixed' || register === 'planning'; }
 
 /* ── 2. GOVERNED ASSEMBLER ───────────────────────────────────────────────────
@@ -260,4 +305,4 @@ function buildUserMessage({ question, context = [], priorMessages = [] } = {}) {
   return lines.join('\n');
 }
 
-module.exports = { classifyRegister, wantsReasoning, assembleGoverned, buildUserMessage, composeRecall, polish, SYSTEM_PROMPT };
+module.exports = { classifyRegister, wantsReasoning, assembleGoverned, buildUserMessage, composeRecall, polish, SYSTEM_PROMPT, SELF };
