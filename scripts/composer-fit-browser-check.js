@@ -126,6 +126,17 @@ const PAGES = ['home', 'high', 'low', 'inquiry', 'focus', 'notes', 'library'];
       await page.waitForTimeout(1500);
       const notice = await page.$('button:has-text("I understand")');
       if (notice) { await notice.click().catch(() => {}); await page.waitForTimeout(400); }
+      const notification = await page.evaluate(() => {
+        const dot = document.querySelector('#notif-btn .badge');
+        const bell = document.getElementById('notif-btn');
+        bell.click();
+        const panel = document.getElementById('notif-panel-content');
+        return { dotVisible: !!dot && getComputedStyle(dot).display !== 'none',
+          panel: panel && panel.textContent, count: AppState.getUnreadAlertCount() };
+      });
+      ok(`CF-${width}-N1 an empty notification panel has no unread dot`,
+        notification.count === 0 && !notification.dotVisible);
+      await page.evaluate(() => document.getElementById('notif-btn').click());
 
       /* ── A — THE INVITATION FITS, ON EVERY SURFACE THAT HAS ONE ─────────────────────────── */
       const clipped = [], narrow = [];

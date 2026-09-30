@@ -930,3 +930,33 @@ Classification: **PILOT METHODICAL-ASSISTANT BUG — option/suggestion semantics
 No live High/Low object conversation can be rehearsed truthfully yet. Do not fabricate one just to satisfy a test. The empty state remains an acceptable truthful result until real evidence crosses the standing threshold.
 
 Classification: **NO DEFECT / LIVE TEST UNAVAILABLE.**
+
+### 53. Subsequent live-device rehearsal: intent, answer completion, upload state, notifications and privacy
+
+The founder reproduced eight more failures on the deployed iPhone build. They are independent
+acceptance cases; a green local route does not claim the deployed provider or Safari has passed.
+
+1. Malformed speech or a routing/meta transcript was offered as the exact title of a Focus. Such
+   text is not a commitment, even when a model returns `intent: stated`. No canonical Focus may be
+   created from it without an ordinary human-authored commitment and confirmation.
+2. Assistant replies exposed routing and classification prose. The human answer should address
+   the question; internal intent labels are not a response.
+3. With enough governed evidence to offer bounded options, IntelliQ still asked broad clarifying
+   questions. Inquiry and Focus option replies should read the existing readiness/option owner,
+   explain uncertainty, and offer a small unranked set. A genuinely missing fact gets one question.
+4. The general self-read misdescribed what it could access. It must distinguish its visible-object
+   overview from private conversation and attached-material context; absence of an object is not
+   absence of a conversation.
+5. Incomplete replies and provider fallback prose reached users as though final. Retry or show an
+   explicit recovery state; never source a fragment or call an interface menu substantive advice.
+6. An image attachment could stall with a single ambiguous processing message. The person needs
+   a bounded waiting state and an honest timeout/retry that does not claim a write was lost.
+7. A red unread dot appeared over a bell with no discoverable notification. Badge and panel must
+   derive from the same visible items, including the empty state and marking them read.
+8. High, Low, Inquiry and Focus pages must say who can read the object. A private outcome can
+   inform its owner, but must never silently train shared organisational learning or be placed in
+   a leader-readable action log. Historic personal action shells require a read-side quarantine.
+
+**Privacy law:** relevance and a recorded personal outcome grant no organisation readership.
+Changing an audience requires the canonical owner and deliberate confirmation; a private Focus
+outcome remains personal even when the owner uses it to understand their own progress.

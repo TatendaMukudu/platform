@@ -375,7 +375,7 @@ const server = app.listen(0, async () => {
 
     // 18 · Confidence Engine suppression — an unproven type is stood down, org-wide
     noticeFeedback[CODE] = noticeFeedback[CODE] || {};
-    noticeFeedback[CODE].withdrawal = { useful: 0, dismiss: 7 };   // proven unhelpful here
+    noticeFeedback[CODE].withdrawal = { shared: { useful: 0, dismiss: 7 } };   // explicit shared feedback only
     const stood = _proactiveInsights(CODE, 'm', { audience: 'self', now });
     ok('18 · a proven-unhelpful pattern type is suppressed by the Confidence Engine',
        !flat(stood).some(i => i.patternType === 'withdrawal'));

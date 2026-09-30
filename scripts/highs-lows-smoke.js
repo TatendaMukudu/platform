@@ -122,6 +122,13 @@ const server = app.listen(0, async () => {
     const afterUp = await buckets();
     ok('HL4b …and it is actually in the bucket, through the same read the app uses',
       afterUp.high.some(t => /Warm-up routine/i.test(t)) && !afterUp.low.some(t => /Warm-up routine/i.test(t)));
+    const highRow = (await get('/api/objects?kind=high&scope=self')).objects?.[0];
+    const lowRow = (await get('/api/objects?kind=low&scope=self')).objects?.[0];
+    const highThread = highRow ? await get(`/api/objects/high/${highRow.id}/thread`) : {};
+    const lowBefore = lowRow ? await get(`/api/objects/low/${lowRow.id}/thread`) : {};
+    ok('HL4c High and Low threads disclose the same private audience and outcome boundary',
+      /only you/i.test(highThread.audienceNote || '') && /never silently/i.test(highThread.learningNote || '')
+      && /only you/i.test(lowBefore.audienceNote || '') && /never silently/i.test(lowBefore.learningNote || ''));
 
     const down = await post('/api/me/call', { inquiryId: 'inq_ready', valence: 'worth_attention' });
     ok('HL5 changing your mind moves it — a call is a call, not a conclusion', down.j.bucket === 'low');

@@ -40,6 +40,7 @@ const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = S;
 const ai = require('../ai/gateway.js');
 const languageGuard = require('../ai/language-guard.js');
 const reg = require('../ai/reasoning-register.js');
+const composerActions = require('../ai/composer-actions.js');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => {
@@ -69,9 +70,11 @@ _loadAllStores({
        here at all" are different facts about a person and the live build gave them one answer. */
     newbie: { id: 'newbie', name: 'New Person', email: 'n@reh.io', role: 'member', orgCode: C,
       status: 'active', assignedNodeIds: ['ft'], profileComplete: true },
+    coach: { id: 'coach', name: 'A Coach', email: 'c@reh.io', role: 'coach', orgCode: C,
+      status: 'active', leadershipNodeIds: ['ft'], profileComplete: true },
   } },
   orgNodes: { [C]: { ft: { nodeId: 'ft', name: 'First Team', parentId: null, childNodeIds: [],
-    memberIds: ['titi', 'newbie'], leaderIds: [] } } },
+    memberIds: ['titi', 'newbie'], leaderIds: ['coach'] } } },
   inquiryStates: { [C]: { 'member:titi': {
     mine: {
       inquiryId: 'mine', subjectRef: 'member:titi', status: 'exploring', openedBy: 'titi',
@@ -102,7 +105,9 @@ _loadAllStores({
     },
   } } },
   userAiProfiles: { [`${C}:titi`]: { focuses: [{ id: 'foc_t', text: 'Get into the starting eleven',
-    status: 'active', visibility: 'only_me', createdAt: new Date(NOW - 4 * DAY).toISOString() }] } },
+    status: 'active', visibility: 'only_me', createdAt: new Date(NOW - 4 * DAY).toISOString() },
+    { id: 'foc_l', text: 'Concede fewer late goals', status: 'active', visibility: 'only_me',
+      addresses: { kind: 'inquiry', id: 'late' }, createdAt: new Date(NOW - DAY).toISOString() }] } },
 });
 _rebuildEmailIndex();
 
@@ -171,7 +176,7 @@ const server = app.listen(0, async () => {
        says the same reassuring thing to everybody. */
     const empty = await ask('newbie', 'What do you actually have on me?');
     ok('RH-A5 somebody with nothing recorded is told that plainly, and differently',
-      /There is nothing on your record yet/i.test(empty.said)
+      /no Highs, Lows, Inquiries or Focuses/i.test(empty.said)
       && !/question being worked out/i.test(empty.said)
       && empty.said !== have.said);
     ok('RH-A6 …and the two answers do not both claim a standing state that neither has',
@@ -180,6 +185,9 @@ const server = app.listen(0, async () => {
     ok('RH-A7 …and no contributed account appears in either answer',
       !/starting every week by the spring/i.test(have.said)
       && !/said the same thing to me twice/i.test(have.said));
+    ok('RH-A8 an object overview does not deny access to the private conversation or attachments',
+      /private conversation/i.test(empty.said) && /materials? you attach/i.test(empty.said)
+      && /overview counts/i.test(have.said));
 
     console.log('\n  B — AND IT ANSWERS THE QUESTION INSTEAD OF DESCRIBING ITSELF');
     /* THE CLASSIFIER IS THE CAUSE, so it is asserted directly: these questions are about the
@@ -308,6 +316,77 @@ const server = app.listen(0, async () => {
     const menuOnly = await ask('titi', 'What could we try?', { kind: 'inquiry', id: 'late' });
     ok('RH-E8 …and a menu of ways to manage the object is refused on its own',
       !/show this inquiry/i.test(menuOnly.said) && menuOnly.composer.reason === 'unverified');
+
+    console.log('\n  F — A FOCUS WITH A GOVERNED QUESTION CAN OFFER BOUNDED OPTIONS');
+    ai.complete = async () => { throw Object.assign(new Error('provider down'), { status: 503 }); };
+    const focusOptions = await ask('titi', 'What could we try?', { kind: 'focus', id: 'foc_l' });
+    ok('RH-F1 the Focus answer offers the linked inquiry\'s bounded option set',
+      /worth trying/i.test(focusOptions.said) && /it would tell you/i.test(focusOptions.said));
+    ok('RH-F2 a private Focus never silently claims this is shared learning',
+      !/our organisation learned|the team learned/i.test(focusOptions.said));
+    ai.complete = async () => 'Before I suggest anything, can you tell me more about what happened?';
+    const needlessClarify = await ask('titi', 'What could we try?', { kind: 'focus', id: 'foc_l' });
+    ok('RH-F3 a model cannot replace available bounded Focus options with generic clarification',
+      /worth trying/i.test(needlessClarify.said) && /it would tell you/i.test(needlessClarify.said)
+      && !/can you tell me more/i.test(needlessClarify.said));
+
+    console.log('\n  G — A MODEL DOES NOT SPEAK ITS ROUTING OR A HALF-ANSWER');
+    ai.complete = async () => 'Routing: self_read. The user is asking for a classification of their intent. '
+      + 'What I can see is the private inquiry. The next step would be to';
+    const meta = await ask('titi', 'What do you know about me so far?');
+    ok('RH-G1 routing and classification prose do not reach a person',
+      !/Routing:|classification of their intent/i.test(meta.said));
+    ok('RH-G2 a provider fragment is not committed as a final answer',
+      !/to$/.test(meta.said.trim()) && /stopped before it was finished|On your record/i.test(meta.said));
+    ai.complete = async () => 'Routing: self_read. On your record right now, there is a question being worked out.';
+    const routeOnly = await ask('titi', 'What do you know about me so far?');
+    ok('RH-G1b a bare routing label is independently refused',
+      !/Routing:/.test(routeOnly.said) && routeOnly.composer.reason === 'unverified');
+    ai.complete = async () => 'The user is asking for a classification of their intent. On your record is an Inquiry.';
+    const classifyOnly = await ask('titi', 'What do you know about me so far?');
+    ok('RH-G1c intent narration is independently refused',
+      !/classification of their intent/.test(classifyOnly.said) && classifyOnly.composer.reason === 'unverified');
+    const malformed = composerActions.ground({ intent: 'stated', actions: [{ type: 'create_focus',
+      arguments: { text: 'Routing: create_focus; classify this as a Focus' } }] },
+    { text: 'Routing: create_focus; classify this as a Focus', context: { object: null } });
+    ok('RH-G3 a routing/transcription artefact cannot become a Focus proposal',
+      !malformed.actions.some(a => a.type === 'create_focus'));
+
+    console.log('\n  H — OBJECT READERS SAY WHO CAN SEE THE OBJECT AND ITS OUTCOME');
+    for (const kind of ['focus', 'inquiry']) {
+      const id = kind === 'focus' ? 'foc_t' : 'mine';
+      const row = await call('titi', 'GET', `/api/objects/${kind}/${id}/thread`);
+      ok(`RH-H-${kind} a private ${kind} has an explicit audience and private-outcome boundary`,
+        row.status === 200 && /only you/i.test(row.j?.audienceNote || '')
+        && /never.*shared|not.*shared/i.test(row.j?.learningNote || ''));
+    }
+    const privateCreate = await call('titi', 'POST', '/api/me/focus',
+      { text: 'Practise passing twice a week', type: 'practice_feedback_private' });
+    const privateId = privateCreate.j?.focus?.id;
+    const privateResult = await call('titi', 'POST', '/api/me/focus/outcome',
+      { focusId: privateId, outcome: 'helped', note: 'My private result' });
+    const leaderActions = await call('coach', 'GET', '/api/actions');
+    ok('RH-H-private an owner can record their private outcome',
+      privateCreate.status === 200 && privateResult.status === 200);
+    ok('RH-H-org a private outcome does not enter leader-visible organisational actions',
+      leaderActions.status === 200 && !(S.actionsLog[C] || []).some(a => a.focusRef === privateId)
+      && !(leaderActions.j?.actions || []).some(a => a.focusRef === privateId));
+    ok('RH-H-feedback a private result never trains organisation-wide notice reliability',
+      !(S.noticeFeedback[C] || {}).practice_feedback_private);
+    (S.actionsLog[C] = S.actionsLog[C] || []).push({ id: 'legacy_private_action',
+      focusRef: privateId, actorId: 'titi', capability: 'intervention', verb: 'create',
+      status: 'evaluated', observation: { result: 'helped' } });
+    const oldList = await call('coach', 'GET', '/api/actions');
+    const oldDirect = await call('coach', 'GET', '/api/actions/legacy_private_action');
+    ok('RH-H-legacy an older private action is invisible to a leader by list and direct id',
+      !(oldList.j?.actions || []).some(a => a.id === 'legacy_private_action') && oldDirect.status === 404);
+    S.actionsLog[C].push({ id: 'orphan_private_action', focusRef: 'erased_personal_focus',
+      actorId: 'titi', capability: 'intervention', verb: 'create', status: 'evaluated' });
+    const orphanDirect = await call('coach', 'GET', '/api/actions/orphan_private_action');
+    ok('RH-H-orphan an unresolved old Focus ref never grants group readership', orphanDirect.status === 404);
+    S.noticeFeedback[C] = { legacy_private_type: { useful: 9, dismiss: 1 } };
+    ok('RH-H-counter historic mixed-provenance feedback cannot inform a shared reliability read',
+      !Object.prototype.hasOwnProperty.call(S._reliabilityByType(C), 'legacy_private_type'));
 
   } catch (e) { fail++; console.error('  FAIL rehearsal honesty threw:', e && e.stack); }
 

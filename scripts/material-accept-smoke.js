@@ -202,7 +202,7 @@ const wsAttachFn = appJs.slice(appJs.indexOf('async wsAttach(fileInput)'), appJs
 ok('M8 the upload is bounded — a stalled POST cannot leave the card reading forever',
   wsAttachFn.length > 400 && /new AbortController\(\)/.test(wsAttachFn) && /signal: ctrl\.signal/.test(wsAttachFn));
 ok('M8b …and the timer is cleared in a `finally`, so it stays live through the body read',
-  /finally \{ clearTimeout\(timer\); \}/.test(wsAttachFn));
+  /finally \{ clearTimeout\(timer\); clearTimeout\(stillReading\); \}/.test(wsAttachFn));
 /* M8c USED TO PIN THE OPPOSITE SENTENCE, and the reason is worth keeping. It asserted the card
    said "took too long to send. Nothing was saved", under the heading "rather than reporting a
    save that did not happen" — which is the right instinct aimed at the wrong risk. The risk in
@@ -258,7 +258,7 @@ ok('M10 a successful attachment removes the waiting bubble rather than replacing
   /const quietly = \(\) =>/.test(wsAttachFn) && /p\.remove\(\)/.test(wsAttachFn)
   && !/I can see \$\{/.test(wsAttachFn));
 ok('M10b …while the waiting state still exists, because an upload in flight must be visible',
-  /iq-attach-pending/.test(wsAttachFn) && /Reading \$\{esc\(file\.name\)\}/.test(wsAttachFn));
+  /iq-attach-pending/.test(wsAttachFn) && /Still waiting for IntelliQ to read the image/.test(wsAttachFn));
 ok('M10c …and a FAILED attachment still speaks, because an error with no words is a dead end',
   /done\(/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',

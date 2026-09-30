@@ -1636,6 +1636,13 @@ function hydrateIcons(root) {
 
 function updateAlertBadge(){
   const count = AppState.getUnreadAlertCount();
+  const dot = document.querySelector('#notif-btn .badge');
+  if (dot) {
+    dot.style.display = count ? 'block' : 'none';
+    dot.setAttribute('aria-hidden', 'true');
+  }
+  const bell = document.getElementById('notif-btn');
+  if (bell) bell.setAttribute('aria-label', count ? `${count} unread notifications` : 'Notifications');
   document.querySelectorAll('.nav-badge').forEach(b => {
     b.textContent = count;
     b.style.display = count ? 'inline' : 'none';
@@ -1943,6 +1950,7 @@ function _renderMemberTimeline(data, el) {
 function markAllRead(){
   AppState.alerts.forEach(a=>a.unread=false);
   updateAlertBadge();
+  renderNotifPanel();
   showToast('All alerts marked as read','success');
 }
 
@@ -5095,7 +5103,28 @@ const IQComposer = {
 
 /* ── NOTIFICATION PANEL ──────────────────────────────────── */
 function toggleNotifPanel(){
+  renderNotifPanel();
   document.getElementById('notif-panel').classList.toggle('open');
+}
+
+function renderNotifPanel(){
+  const host = document.getElementById('notif-panel-content');
+  if (!host) return;
+  host.replaceChildren();
+  const alerts = AppState.alerts || [];
+  if (!alerts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'iq-home-empty';
+    empty.textContent = 'No notifications right now.';
+    host.appendChild(empty);
+    return;
+  }
+  for (const alert of alerts.slice(0, 30)) {
+    const row = document.createElement('div');
+    row.className = 'notif-item';
+    row.textContent = String(alert.title || 'Notification');
+    host.appendChild(row);
+  }
 }
 
 /* ── RENDER ALL PAGES (structure) ───────────────────────── */
@@ -12865,6 +12894,8 @@ const MemberApp = {
                     would be the product talking to itself. */ ''}
               ${sum.full && sum.leadIsWhole === false
                 ? `<p class="iqt-said">${esc(sum.full)}</p>` : ''}
+              <p class="iqt-privacy">${esc(data.audienceNote || 'Audience unavailable — check Who can see this.')}
+                <span>${esc(data.learningNote || '')}</span></p>
             </div>
           </div>
           <div class="iqt-doors">
@@ -15663,7 +15694,7 @@ const MemberApp = {
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
     if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">Reading ${esc(file.name)}…</div>`);
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">${/^image\//.test(file.type) ? 'Sending and reading image' : 'Reading file'} ${esc(file.name)}…</div>`);
     if (thread) thread.scrollTop = thread.scrollHeight;
     fileInput.value = '';
     const done = (html) => { const p = document.getElementById('iq-attach-pending'); if (p) { p.removeAttribute('id'); p.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
@@ -15721,6 +15752,12 @@ const MemberApp = {
          headers and then stalls. Cleared in `finally`, never on the headers. */
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
+      // A slow vision read has no separate progress event on this route. Describe the uncertainty
+      // honestly while the request is pending; do not claim upload or vision has finished.
+      const stillReading = setTimeout(() => {
+        const p = document.getElementById('iq-attach-pending');
+        if (p && isImage) p.textContent = 'Still waiting for IntelliQ to read the image…';
+      }, 8000);
       let r, raw;
       try {
         r = await fetch('/api/assistant/attachments', {
@@ -15754,7 +15791,7 @@ const MemberApp = {
         throw new Error(String(err && err.name) === 'AbortError' || String(err) === 'timeout'
           ? 'That took too long to confirm, so I cannot tell you whether it saved. Try again — the same file will not be added twice.'
           : 'I could not reach IntelliQ to save that.');
-      } finally { clearTimeout(timer); }
+      } finally { clearTimeout(timer); clearTimeout(stillReading); }
       let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
       /* An upload that discovers the session has ended is the SAME fact as a read discovering it,
          and it used to become a local "I couldn't save that" inside this one card — leaving the

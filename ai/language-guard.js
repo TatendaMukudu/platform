@@ -152,6 +152,8 @@ const SELF_NARRATION = new RegExp([
      traded a leak for a lie. */
   /\bmy (?:system )?(?:prompt|instructions|routing|classifier|pipeline)\b/.source,
   /\bI (?:was |have been )?(?:routed|classified) (?:this|that|your)\b/.source,
+  /(?:^|[.!?]\s+)\s*(?:routing|classification|classifier|intent)\s*[:=]/.source,
+  /\bthe user is asking for a classification of (?:their|the) intent\b/.source,
 ].join('|'), 'i');
 
 const OFFER_FRAME = /\b(?:here(?:'s| is| are) what you can do|would you like|which of (?:those|these)|you (?:could|can) (?:also )?(?:choose|pick)|your options (?:here )?are)\b/i;

@@ -4771,7 +4771,14 @@ const MIN_COHORT = 5;
 function _reliabilityByType(code) {
   const fb = noticeFeedback[code] || {};
   const out = {};
-  Object.keys(fb).forEach(type => { out[type] = confidence.reliability(fb[type]); });
+  // Historical counters mixed personal Focus outcomes with other feedback and carry no origin.
+  // They cannot be treated as organisation learning. Only explicitly shared, provenance-bearing
+  // counts can enter this read; old mixed counters remain on disk for correction/audit.
+  Object.keys(fb).forEach(type => {
+    const shared = fb[type] && fb[type].shared;
+    if (shared && Number.isFinite(shared.useful) && Number.isFinite(shared.dismiss))
+      out[type] = confidence.reliability(shared);
+  });
   return out;
 }
 
@@ -9232,6 +9239,19 @@ const _CAPABILITIES = {
 };
 
 function _actionsFor(code) { return actionsLog[code] || (actionsLog[code] = []); }
+/* Older personal Focuses already placed action shells in the organisation log. Keep their
+   history on disk, but exclude those shells from every organisation reader and aggregate. */
+function _orgActionsFor(code) {
+  const personalRefs = new Set(Object.entries(userAiProfiles)
+    .filter(([key]) => key.startsWith(`${code}:`))
+    .flatMap(([, profile]) => ((profile && profile.focuses) || []).map(f => String(f.id))));
+  const groupRefs = new Set(Object.values(teamFocuses[code] || {})
+    .flatMap(rows => (rows || []).map(f => String(f.focusId))));
+  // An unknown historic ref proves no group authority. Fail closed when the personal profile
+  // was erased or an old row cannot be resolved; a genuine group Focus has a canonical owner.
+  return _actionsFor(code).filter(a => !a.focusRef
+    || (groupRefs.has(String(a.focusRef)) && !personalRefs.has(String(a.focusRef))));
+}
 function _actionById(code, id) { return (actionsLog[code] || []).find(a => a.id === id); }
 function _actAudit(a, stage, by, extra) { a.audit.push({ stage, by: by || 'system', at: new Date().toISOString(), ...(extra || {}) }); a.updatedAt = new Date().toISOString(); }
 
@@ -9291,13 +9311,13 @@ app.get('/api/actions', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
   if (!_isLeader(code, req.iqSession.userId)) return res.status(403).json({ error: 'leaders only' });
   const status = req.query.status;
-  const rows = _actionsFor(code).filter(a => !status || a.status === status).slice(-100).reverse().map(actionLib.summarize);
+  const rows = _orgActionsFor(code).filter(a => !status || a.status === status).slice(-100).reverse().map(actionLib.summarize);
   res.json({ ok: true, actions: rows });
 });
 app.get('/api/actions/:id', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
   if (!_isLeader(code, req.iqSession.userId)) return res.status(403).json({ error: 'leaders only' });
-  const a = _actionById(code, req.params.id);
+  const a = _orgActionsFor(code).find(a => a.id === req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, action: a });
 });
@@ -9498,7 +9518,8 @@ function _createPersonalFocus(code, userId, input = {}, opts = {}) {
     ...(addresses ? { addresses } : {}), ...(input.origin ? { origin: input.origin } : {}),
     createdAt: input.createdAt || new Date().toISOString() };
   mem.focuses.unshift(focus);
-  _beginFocusAction(code, focus, input.invitedBy || userId, { subjectId: userId });
+  // A personal Focus lives with its owner. The organisation-wide action log is leader-readable;
+  // recording a private commitment there would disclose its existence and later its outcome.
   mem.lastUpdated = new Date().toISOString();
   _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: input.auditBasis || audience.visibility });
   scheduleSave();
@@ -9726,10 +9747,8 @@ function _recordPersonalFocusOutcome(code, userId, focusId, outcome, note = '') 
   focus.status = 'done';
   focus.outcome = _focusOutcomeRecord(outcome, userId, Date.now(), note);
   focus.resolvedAt = new Date().toISOString();
-  _completeFocusAction(code, focus, outcome, userId);
-  if (focus.type && outcome !== 'mixed') {
-    try { _recordNoticeFeedback(code, focus.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
-  }
+  // The owner can learn from this in their own Focus and proactive read. A private result must
+  // never update the organisation's action log or notice-reliability counters by implication.
   mem.lastUpdated = focus.resolvedAt;
   _audit(code, { actor: userId, action: 'focus_outcome', subjectIds: [userId], basis: outcome });
   scheduleSave();
@@ -13095,6 +13114,7 @@ function _objectSelfRead(code, userId, object, depth = 0) {
     const parts = [];
     const limitations = [];
     let added = 0;   // what the deeper layer genuinely contributed
+    let hasOptions = false;
 
     if (object.kind === 'focus') {
       const out = detail.outcome;
@@ -13209,6 +13229,7 @@ function _objectSelfRead(code, userId, object, depth = 0) {
              already attempted. */
           const opts = ((across.optionSet || {}).options || []).slice(0, 3);
           if (opts.length) {
+            hasOptions = true;
             parts.push(`Held on that question, in no order: ${opts
               .map(o => `"${String(o.text || '').slice(0, 160)}" — it would tell you ${
                 String(o.wouldTeach || '').replace(/^[A-Z]/, c => c.toLowerCase()).replace(/\.$/, '')}`)
@@ -13308,7 +13329,7 @@ function _objectSelfRead(code, userId, object, depth = 0) {
        authorised bucket. Resolving it a second time at the call site would be a second answer to
        "what is this object called", which is how two surfaces come to print different names for
        one thing. */
-    return { text: parts.join(' '), title, limitations, depth: depth && added ? 1 : 0 };
+    return { text: parts.join(' '), title, limitations, depth: depth && added ? 1 : 0, hasOptions };
   } catch (_) { return null; }
 }
 
@@ -13420,10 +13441,10 @@ function _recordSelfRead(code, userId, question) {
 
     /* NOTHING AT ALL IS A REAL ANSWER, and a different one from "nothing has settled yet". */
     if (!mine.length) {
-      return { text: 'There is nothing on your record yet — no questions open, nothing you have '
-        + 'committed to, and nothing that has reached a standing. Tell me what you are seeing and '
-        + 'I will hold it as your account of it; that is what everything else here is built from.',
-        limitations: ['nothing has been recorded for you yet, which is a fact about the record rather than about you'] };
+      return { text: 'I see no Highs, Lows, Inquiries or Focuses for you yet. I can still use what '
+        + 'you say in this private conversation and materials you attach to it. Those are context '
+        + 'for our conversation; they do not automatically become findings or shared learning.',
+        limitations: ['this overview counts visible objects, not every private conversation or attachment'] };
     }
 
     const bits = [];
@@ -13472,7 +13493,9 @@ function _recordSelfRead(code, userId, question) {
           + 'raised a question nobody can account for.');
     }
 
-    parts.push('That is what the record holds, not a fresh reading of it.');
+    parts.push('This overview counts the Highs, Lows, Inquiries and Focuses you can open. I can '
+      + 'also use this private conversation and its attachments, but they are not automatically '
+      + 'findings or shared learning.');
     return { text: parts.join(' '), limitations };
   } catch (_) { return null; }
 }
@@ -14135,7 +14158,8 @@ function _assistantAnswer(code, userId, question, opts = {}) {
     .map(c => ({ ...c, evidenceRefs: (c.evidenceRefs || []).filter(id => authorised.includes(id)) }))
     .filter(c => c.evidenceRefs.length);
   return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok,
-    groundedClaims: boundedClaims, citations, groundingId, standingRead, verdict };
+    groundedClaims: boundedClaims, citations, groundingId, standingRead, verdict,
+    optionSetAvailable: !!(_boundRead && _boundRead.hasOptions && _onSubject) };
 }
 
 /* ─── ORGANISATIONAL-STATE BOUNDARY + INQUIRY (recommendation-only) ────────────
@@ -14638,7 +14662,7 @@ function _intelligencePacket(code, userId, now = Date.now()) {
   } catch (_) {}
   try { feedInput.orgPlaybook = { candidates: _deriveOrgCandidates(code) || [], entries: (orgPlaybook[code] || []).filter(e => e && e.status === 'active') }; } catch (_) {}
   try {
-    const summary = outcomeIntel.summarize(actionsLog[code] || []);
+    const summary = outcomeIntel.summarize(_orgActionsFor(code));
     const patterns = [...new Set(((feedInput.reasoner && feedInput.reasoner.agenda) || []).map(a => a.kind).filter(Boolean))];
     feedInput.outcomeIntelligence = { briefs: patterns.map(pt => outcomeIntel.earlySignalBrief({ patternType: pt, signalCount: 1, outcomeSummary: summary })).filter(Boolean) };
   } catch (_) {}
@@ -17544,7 +17568,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // flag off the function was never entered and there was nothing to report. One place decides
   // now, and a turn that is eligible for the composer always comes back with either a written
   // reply or a reason there is none.
-  if (String(text || '').trim() && !(cls.command && cls.command.payload)) {
+  // The canonical question already supplies bounded, unranked options across this Focus's
+  // link. Keep that answer when asked for options: a model's generic request for more context
+  // must not conceal an available, attributed set.
+  const boundFocusOptions = qa && qa.optionSetAvailable
+    && actionContext.object && actionContext.object.kind === 'focus'
+    && _TRY_Q.test(cls.questionText || text);
+  if (String(text || '').trim() && !(cls.command && cls.command.payload) && !boundFocusOptions) {
     const attempt = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
       // The object this turn is bound to, as a REF. `about` above is the headline/body the prompt
@@ -20023,6 +20053,17 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
   const _aud = _forumAudience(code, userId, _nodeId ? { ...object, nodeId: _nodeId } : object);
   const _forum = _aud.available;
+  const _rawAudience = object.raw || {};
+  const _owner = String(_rawAudience.ownerId || object.ownerId || userId);
+  const _chosenAudience = kind === 'focus'
+    ? { visibility: _rawAudience.visibility || 'private', participantIds: _rawAudience.participants || [] }
+    : _objectAudience(code, _owner, kind, object.id);
+  const _groupName = _nodeId && ((orgNodes[code] || {})[_nodeId] || {}).name;
+  const _audienceNoteText = _nodeId
+    ? `Shared with ${_groupName || 'this group'} — people authorised for this group can read this object.`
+    : _audienceNote(code, _chosenAudience.visibility, (_chosenAudience.participantIds || [])
+      .filter(id => String(id) !== _owner));
+  const _privateObject = !_nodeId && !['shared', 'invited'].includes(_chosenAudience.visibility);
   /* WHETHER THIS READER HAS MARKED IT. Read from their OWN memory, so it is their mark and can be
      nobody else's -- the control has to be able to say "take this off" rather than offering to add
      a mark that is already there, and a screen that cannot tell is a screen that lies about state.
@@ -20056,6 +20097,10 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
     openingSpeech: _oApproved.ok ? _oSpeech : '',
     openingNote: _oApproved.ok ? '' : _oApproved.note,
     prioritised: _mine.includes(`${kind}:${object.id}`),
+    audienceNote: _audienceNoteText,
+    learningNote: _privateObject
+      ? 'A private outcome may inform your own read. It never silently becomes shared organisational learning.'
+      : 'Your private conversations stay private. A shared outcome follows this object’s audience and governed evidence rules.',
     /* ── THE ACTION HALF OF THIS QUESTION, ON THE QUESTION'S OWN SCREEN ──────────────────────
        Both fields are already on the group inquiry projection this object was built from — they
        reach the group screen and reached this one nowhere, which is how the two most important

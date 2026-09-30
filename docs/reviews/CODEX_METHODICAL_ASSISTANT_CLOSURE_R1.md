@@ -2768,3 +2768,60 @@ change not reached), #39 (no divergence reproduced).
 Internally green at this head. Not ready to merge on internal evidence alone, and this handoff does
 not claim it is — the next honest step is the same rehearsal again, on the device, against this
 exact candidate.
+
+## 19. Codex — subsequent live-device findings closure — 2026-09-29
+
+**Starting remote truth:** `a31128dd193cdd4b3387786bdc0258d9bfa3c17a` on
+`codex/pilot-recovery-gate-r7`, draft PR #90. This section covers findings R1 #53.
+**Nothing merged or deployed.**
+
+The eight live observations were each pinned to a failing local case before changing its owner:
+meta speech proposed as a Focus; routing prose in a reply; generic clarification replacing a
+bounded option set; self-read denying private context; model fragments and interface fallback;
+an image request with no bounded waiting explanation; a notification dot without discoverable
+items; and personal outcomes leaking into organisation action and feedback projections. The
+live deployment itself was not changed or retested.
+
+| Finding | Canonical repair and check |
+|---|---|
+| Malformed/meta speech as Focus | `composer-actions.ground` vetoes a narrow router/transcription shape even when intent says stated; RH-G3 fails when veto removed. |
+| Routing/meta answer | `language-guard` refuses routing labels and classification narration; RH-G1, G1b, G1c isolate the variants. Each pattern was removed separately in mutation and failed. |
+| Needless clarification | Focus-bound option requests use the linked Inquiry's governed, unranked option read if one exists. RH-F3 fails when the deterministic guard is removed; an Inquiry's existing bounded answer remains under its earlier refusal guard. |
+| Self-read scope | `_recordSelfRead` distinguishes a visible-object overview from private conversation and attachments, including the zero-object case. RH-A5/A8 fail on the old descriptions. |
+| Partial/provider fallback | The existing single-exit fragment guard and composer refusal remain; RH-D/G exercise unfinished provider text and RH-E the model's apology/interface menu against the deterministic answer. The new routing probes prevent a newly observed variant from escaping. |
+| Stalled image | The existing 30-second abort/idempotent retry now has an 8-second honest waiting state for an image and clears both timers. M10b fails if that state is removed. |
+| Phantom badge | The bell dot and label derive from the same unread alerts as the panel; the panel displays those items or an explicit empty state and refreshes after marking read. NB1/NB3 fail when the dot is forced visible. |
+| Privacy legibility and learning | Every object thread supplies audience and learning notes. A personal Focus no longer enters leader-readable action log or organisation notice feedback; historic personal or unowned Focus action shells are filtered from leader routes and outcome intelligence, and mixed-provenance legacy counters are excluded from shared reliability. RH-H and HL4c fail independently when each boundary is removed. |
+
+**Law:** a private outcome can inform its owner's read. Relevance, similarity, or a recorded
+outcome does not grant organisation readership or silently convert it into shared learning.
+Existing personal records and historical counters remain durable for correction and audit;
+unattributed aggregate feedback is not promoted into shared calibration. A deliberately shared,
+provenance-bearing path is required before aggregate reliability can use new feedback.
+
+The HTTP, pure, and client-extracted checks run on the production route/functions, not a second
+implementation. The new notification suite is registered with Truth Layer. Earlier tests which
+asserted that a private Focus *must* create an organisation action were corrected to assert the
+privacy law, while group Focus action coverage remains. The browser gate includes a new badge
+assertion. Asset stamp was updated with `npm run stamp:record`.
+
+### Gate result and live-only limits
+
+**Truth Layer green at this tree:** `npm test` completed with all sources parsing and all 318
+registered suites passing. The focused
+`rehearsal-honesty-http-smoke` is **51 passed, 0 failed** after the Focus option mutation;
+the preceding 50/1 run reproduced the model override. Other focused suites passed after their
+respective mutations.
+
+All 14 registered `*-browser-check.js` gates and `live-recovery-repro.js` were attempted. They
+cannot start in this workspace: no Chromium
+binary is installed (Playwright expects `/root/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`).
+An attempted Playwright download yielded an incomplete 0 MiB archive in the restricted network.
+Thus browser assertions, including the new badge check, are **unverified here**. The real
+`durable-restart-check` exits 2 because `DATABASE_URL` is absent; fake-DB durability boundaries
+inside Truth Layer can pass, but a killed-process PostgreSQL round trip is **unverified here**.
+Neither is reported green by inference from earlier heads.
+
+Next live dependencies are the actual iPhone/Safari upload and notification state, the configured
+provider's replies and stream failures, Render/Neon restart and delivery conditions, and a real
+High/Low conversation once one reaches standing. Do not merge or deploy on this handoff.

@@ -500,6 +500,7 @@ img { max-width: 100%; }
 }
 .icon-btn:hover { background: var(--bg-hover); }
 .icon-btn .badge {
+  display: none;
   position: absolute; top: 5px; right: 5px;
   width: 8px; height: 8px;
   border-radius: 50%; background: var(--danger);

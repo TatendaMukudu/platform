@@ -75,8 +75,8 @@ const sideEffects = (code, focus) => ({
     const df = focusState('focus-direct', direct.json.focus.id), cf = focusState('focus-composer', composer.json.focus.id);
     ok('FP1 direct create and composer create produce the same governed Focus shape', direct.json.ok && composer.json.ok && JSON.stringify(comparable(df)) === JSON.stringify(comparable(cf)));
     const directCreateEffects = sideEffects('focus-direct', df), composerCreateEffects = sideEffects('focus-composer', cf);
-    ok('FP2 both create transports apply lifecycle, lastUpdated and audit side effects', JSON.stringify(directCreateEffects) === JSON.stringify(composerCreateEffects)
-      && directCreateEffects.lastUpdated && directCreateEffects.action);
+    ok('FP2 both create transports update the owner and audit without a shared action', JSON.stringify(directCreateEffects) === JSON.stringify(composerCreateEffects)
+      && directCreateEffects.lastUpdated && !directCreateEffects.action);
     ok('FP3 both sources are validated references rather than copied conversation text', df.source?.conversationId === directConversation.json.conversationId && cf.source?.conversationId === composerConversation.json.conversationId && !JSON.stringify(df.source).includes('Start context'));
 
     const directRetry = await post('focus-direct', '/api/me/focus', { text: df.text, sourceConversationId: directConversation.json.conversationId });
@@ -114,8 +114,8 @@ const sideEffects = (code, focus) => ({
     const composerOutcome = await confirm('focus-composer', outcomeTurn, 'record_focus_outcome');
     ok('FP7 direct and composer outcome produce the same closed Focus state', directOutcome.json.ok && composerOutcome.json.outcome === 'helped' && JSON.stringify(comparable(df)) === JSON.stringify(comparable(cf)));
     const directOutcomeEffects = sideEffects('focus-direct', df), composerOutcomeEffects = sideEffects('focus-composer', cf);
-    ok('FP8 outcome parity includes learn lifecycle, notice feedback, lastUpdated and audit', JSON.stringify(directOutcomeEffects) === JSON.stringify(composerOutcomeEffects)
-      && directOutcomeEffects.feedback?.useful === 1 && directOutcomeEffects.action && directOutcomeEffects.lastUpdated);
+    ok('FP8 both outcomes stay owner-scoped, with equivalent lastUpdated and audit', JSON.stringify(directOutcomeEffects) === JSON.stringify(composerOutcomeEffects)
+      && !directOutcomeEffects.feedback && !directOutcomeEffects.action && directOutcomeEffects.lastUpdated);
     ok('FP8a direct outcome advances memory lastUpdated itself', S._getMemory('focus-direct', 'owner').lastUpdated !== directBeforeOutcome);
     ok('FP8b composer outcome advances memory lastUpdated itself', S._getMemory('focus-composer', 'owner').lastUpdated !== composerBeforeOutcome);
 
@@ -127,7 +127,7 @@ const sideEffects = (code, focus) => ({
     const gdf = focusState('focus-group-direct', gd.json.focus.id), gcf = focusState('focus-group-composer', gc.json.focus.id);
     ok('FP9 explicit participants and composer group sharing resolve the same audience', gdf.visibility === 'invited' && gcf.visibility === 'invited'
       && JSON.stringify(gdf.participants) === JSON.stringify(gcf.participants));
-    ok('FP10 group-created Focus uses the same lifecycle owner and side effects', sideEffects('focus-group-direct', gdf).action && sideEffects('focus-group-composer', gcf).action
+    ok('FP10 invited personal Focus still avoids organisation-wide action side effects', !sideEffects('focus-group-direct', gdf).action && !sideEffects('focus-group-composer', gcf).action
       && sideEffects('focus-group-direct', gdf).lastUpdated && sideEffects('focus-group-composer', gcf).lastUpdated);
 
     const beforeForbidden = S._getMemory('focus-group-composer', 'owner').focuses.length;

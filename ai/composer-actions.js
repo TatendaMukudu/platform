@@ -528,8 +528,12 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        malformed reply or a models-off turn all fall back to the English list rather than to
        staging a commitment nobody made. */
     const _modelSaysStated = String((reading && reading.intent) || '') === 'stated';
+    // A leaked router/transcription instruction is not a person's commitment, even if a model
+    // labels it "stated". Keep the veto narrow so ordinary multilingual declarations still pass.
+    const _metaSpeech = /^\s*(?:\[?meta\]?|routing|classification|classifier|intent)\s*[:=]/i.test(current)
+      || /\bclassify this as (?:a |an )?(?:focus|inquiry|high|low)\b/i.test(current);
     const _mayTakeWording = !_isQuestion(current)
-      && (requested || _statesIntent(current) || _modelSaysStated);
+      && !_metaSpeech && (requested || _statesIntent(current) || _modelSaysStated);
 
     /* ── AND THE GATE APPLIES TO THE MODEL'S OWN WORDS, NOT ONLY TO THE FALLBACKS ──────────────
        This block used to sit ABOVE the gate and copied `raw.text` in unconditionally, so the

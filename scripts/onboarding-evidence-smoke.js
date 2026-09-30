@@ -171,14 +171,10 @@ const server = app.listen(0, async () => {
     ok('OE8d …with no target and no review date invented for them — they were not asked, and focus_stalled fires off that date',
       !focuses.find(f => f.id === done.j.focus.id).reviewAt &&
       !focuses.find(f => f.id === done.j.focus.id).target);
-    /* OE8e — ADDED BECAUSE A MUTATION BIT NOTHING. Deleting _beginFocusAction left every
-       assertion here green: the buckets read mem.focuses, so a focus can reach the screen while
-       existing nowhere the outcome ledger can find it. _completeFocusAction looks the action up
-       BY focusRef, so without this the day somebody says whether it helped there is nothing to
-       record it against — which is the exact question the whole Highs and Lows machinery
-       downstream is waiting on. */
-    ok('OE8e …and it is in the actions ledger under its own ref, so the day they say whether it helped there is something to record that against',
-      (S.actionsLog[C] || []).some(a => a && a.focusRef === done.j.focus.id && a.stage === 'observe'));
+    /* Private onboarding commitments belong to the owner's Focus store. A shared actions ledger
+       can be read by leaders, so even an action shell would disclose the private commitment. */
+    ok('OE8e …and a private onboarding Focus does not enter the shared actions ledger',
+      !(S.actionsLog[C] || []).some(a => a && a.focusRef === done.j.focus.id));
 
     /* ── OE9: SHORT ANSWERS ARE NOT ACCOUNTS. "n/a" is how people get past a required field. ── */
     const thin = await post('/api/auth/complete-profile', p3T, {
