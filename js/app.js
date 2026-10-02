@@ -15682,22 +15682,78 @@ const MemberApp = {
      intake door (/api/evidence/import) → canonical evidence → the assistant can cite it
      on the very next turn. This is "here are the meeting minutes / the game stats" made
      literal: talking to IntelliQ IS how you feed it. Private by default. */
+  /* ── ONE SELECTION IS ONE ATTACHMENT, AND THE SCREEN HAS TO SHOW EXACTLY THAT ──────────────
+     LIVE iPHONE. One image attached once rendered its filename TWICE and then sat on "Sending
+     and reading image…" for ever. Driven on a real 390px Chromium against the real route, three
+     separate faults produced it and each is fixed here:
+
+       TWO SELECTIONS COULD BE IN FLIGHT AT ONCE. Nothing serialised this, and a phone picker
+       that fires `change` twice — or a thumb that taps twice — started two uploads, drew two
+       filename bubbles and spent two vision calls on one picture. Measured: two of each.
+
+       THE RETRY DREW THE FILENAME AGAIN. `wsAttachRetry` calls back into this function, which
+       began by rendering the person's own message. One selection, two bubbles — the founder's
+       screenshot exactly. The retry reuses the bubbles it already has now.
+
+       AND THE PENDING BUBBLE HAD A FIXED ID. `getElementById('iq-attach-pending')` finds the
+       FIRST one, so with two in flight the second attach cleared the first's bubble and left its
+       own on screen for ever. That is the stuck state, and it is why the element is held in a
+       closure now instead of being looked up by a name that cannot be unique.
+
+     WHAT IS DELIBERATELY NOT DONE: a queue. A second DIFFERENT file while one is in flight is
+     told to wait, in one line, rather than being silently dropped or silently stacked — the
+     person chose it and is entitled to know it did not happen. A repeat of the SAME file is the
+     picker talking, not the person, and goes quietly. */
+  _attachKeyOf(file) {
+    return `${String(file && file.name)}|${Number(file && file.size) || 0}|${Number(file && file.lastModified) || 0}`;
+  },
+
   async wsAttach(fileInput) {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (!file) return;
     const objectThread = this._inquiryThread;
     const retryContext = fileInput && fileInput.retryContext;
+    const thread = document.getElementById('iq-conversation');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    /* THE GUARD, BEFORE ANYTHING IS DRAWN OR SENT. A retry is not a second selection: it holds
+       the slot the first attempt already had, which is what makes "Try again" safe to press. */
+    const key = this._attachKeyOf(file);
+    if (!retryContext && this._attachInFlight) {
+      if (this._attachInFlight === key) return;          // the same selection, arriving twice
+      if (thread) {
+        thread.insertAdjacentHTML('beforeend',
+          `<div class="iq-msg iq-msg-iq" role="status">Still sending ${esc(this._attachInFlightName || 'the last file')}. Try that one again once it is done.</div>`);
+        thread.scrollTop = thread.scrollHeight;
+      }
+      if (fileInput) fileInput.value = '';
+      return;
+    }
+    this._attachInFlight = key;
+    this._attachInFlightName = file.name;
     const about = retryContext ? retryContext.about : (objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null));
     // Never borrow the plain private chat's conversation ID for a scoped object.
     // Retrying after navigation keeps the original object and conversation binding.
     const conversationId = retryContext ? retryContext.conversationId : (about ? (objectThread?.conversationId || undefined) : (this._chatConvId || undefined));
-    const thread = document.getElementById('iq-conversation');
-    const esc = s => this._escape(String(s == null ? '' : s));
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">${/^image\//.test(file.type) ? 'Sending and reading image' : 'Reading file'} ${esc(file.name)}…</div>`);
+    /* THE ELEMENTS, NOT THEIR NAMES. A retry is handed the two it already drew; a fresh
+       selection draws them once. Held by reference, so two of these running at once can never
+       reach into each other's bubbles. */
+    let said = retryContext && retryContext.saidEl;
+    let pend = retryContext && retryContext.pendEl;
+    if (thread && (!said || !said.isConnected)) {
+      thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
+      said = thread.lastElementChild;
+    }
+    if (thread && (!pend || !pend.isConnected)) {
+      thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" role="status"></div>`);
+      pend = thread.lastElementChild;
+    }
+    if (pend) {
+      pend.className = 'iq-msg iq-msg-iq iq-pending';
+      pend.textContent = `${/^image\//.test(file.type) ? 'Sending and reading image' : 'Reading file'} ${file.name}…`;
+    }
     if (thread) thread.scrollTop = thread.scrollHeight;
-    fileInput.value = '';
-    const done = (html) => { const p = document.getElementById('iq-attach-pending'); if (p) { p.removeAttribute('id'); p.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
+    if (fileInput) fileInput.value = '';
+    const done = (html) => { if (pend) { pend.classList.remove('iq-pending'); pend.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
     /* ── AND ON SUCCESS, NOTHING IS SAID AT ALL ────────────────────────────────────────────────
        The file is already in the thread as the PERSON'S OWN message, which is what attaching is:
        another way of speaking. A second bubble from IntelliQ announcing that the file arrived is
@@ -15712,8 +15768,7 @@ const MemberApp = {
        error and its retry are the only way back. It is removed only when there is nothing left to
        say. */
     const quietly = () => {
-      const p = document.getElementById('iq-attach-pending');
-      if (p) p.remove();
+      if (pend && pend.isConnected) pend.remove();
       if (thread) thread.scrollTop = thread.scrollHeight;
     };
     try {
@@ -15755,8 +15810,7 @@ const MemberApp = {
       // A slow vision read has no separate progress event on this route. Describe the uncertainty
       // honestly while the request is pending; do not claim upload or vision has finished.
       const stillReading = setTimeout(() => {
-        const p = document.getElementById('iq-attach-pending');
-        if (p && isImage) p.textContent = 'Still waiting for IntelliQ to read the image…';
+        if (pend && pend.isConnected && isImage) pend.textContent = 'Still waiting for IntelliQ to read the image…';
       }, 8000);
       let r, raw;
       try {
@@ -15830,9 +15884,18 @@ const MemberApp = {
          person has already done the work of finding the file — the picker has been cleared, so
          without this they have to go and find it again to learn whether it was the file or the
          connection. The File object is held for exactly one retry and dropped after it. */
-      this._retryAttach = { file, about, conversationId };
+      /* THE SLOT TRAVELS WITH THE RETRY, which is what stops "Try again" drawing a second
+         filename: the same two elements are handed back and reused in place. */
+      this._retryAttach = { file, about, conversationId, saidEl: said, pendEl: pend };
       done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`
         + ` <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.wsAttachRetry(this)">Try again</button>`);
+    } finally {
+      /* THE GUARD IS RELEASED ON EVERY PATH — success, refusal, abort, or a throw nobody
+         predicted. An in-flight flag that one branch forgets to clear is a paperclip that
+         stops working until the page is reloaded, which is a worse defect than the one it
+         was added to fix. */
+      this._attachInFlight = null;
+      this._attachInFlightName = null;
     }
   },
 

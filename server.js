@@ -21466,6 +21466,36 @@ function _materialChecksum(text) {
   return require('crypto').createHash('sha256').update(String(text || '')).digest('hex').slice(0, 32);
 }
 
+/* ── AND A PICTURE IS IDENTIFIED BY ITS BYTES, NOT BY WHAT A MODEL SAID ABOUT THEM ───────────
+   LIVE iPHONE. One image attached once rendered its filename twice and then sat on "Sending and
+   reading image…". Reproduced on the real route by sending the same picture the way a phone
+   whose answer never arrived sends it — byte-identical, no conversationId:
+
+     materials created : 2      conversations created : 2      vision calls : 2
+
+   THE DEDUPLICATION WAS KEYED ON THE WRONG THING. `_materialChecksum` hashes the material's TEXT,
+   and an image material's text is the DESCRIPTION a vision model wrote. Vision is not
+   deterministic: the same league table read twice came back as "fourth on 24 points from 16
+   played" and "4th place with 24 points after 16 games". Different sentences, different checksum,
+   so the retry defeated the material dedupe AND the conversation reconciliation that hangs off
+   it — and the person saw the filename twice because there really were two of everything.
+
+   The text-attachment retry gate never caught it because text bytes ARE identical on a retry;
+   images were the one shape whose identity passed through a model on the way to the key.
+
+   SO THE KEY IS THE BYTES. What arrived is what identifies it, which is also true of a document
+   and is why both retained shapes use this. It is scoped to the owner's own private copy exactly
+   as the text checksum is, so equal bytes belonging to somebody else are not a way into their
+   material.
+
+   AND IT IS CHECKED BEFORE THE MODEL RUNS, which is the half that fixes the stuck state: a retry
+   now returns the material it already made, immediately, instead of spending another vision call
+   to produce a different sentence about the same picture. */
+function _sourceChecksum(mimetype, data) {
+  return require('crypto').createHash('sha256')
+    .update(`${String(mimetype || '')}:${String(data || '')}`).digest('hex').slice(0, 32);
+}
+
 /* The universal composer attachment door. Files are material, not evidence about the person or
    organisation. They are anchored either to the currently authorised object or to the caller's
    private conversation, and later turns receive only the bounded material context. */
@@ -21568,6 +21598,9 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
   let kind = 'text';
   let readFrom = null;
   let _retainSource = null;
+  /* THE MATERIAL THIS UPLOAD TURNED OUT TO ALREADY BE, when the bytes say so. Set before any
+     model runs, which is what makes a retry free — see `_sourceChecksum`. */
+  let _reusing = null;
 
   /* ── A DOCUMENT IS READ BY THE SERVER, NOT BY THE BROWSER ────────────────────────────────────
      FOUNDER DECISION, September 2026: *Office parsing belongs server-side. Core document
@@ -21616,6 +21649,27 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
       return res.status(413).json({ error: 'That image is larger than IntelliQ will read.',
         limitMB: Math.round(IMAGE_B64_CAP / (1024 * 1024)) });
     }
+    /* ── THE SAME PICTURE, ALREADY READ, IS NOT READ AGAIN ──────────────────────────────
+       Before the model, because this is what makes a retry free and what stops one selection
+       becoming two attachments. `_sourceChecksum` identifies the bytes; if this owner already
+       has a private material made from exactly these bytes, that material IS the answer, and
+       everything below — the vision call, a second description, a second row — is skipped. The
+       conversation reconciliation further down then finds the thread the first attempt made,
+       for the same reason and by the same owner-scoped rule. */
+    const _srcSum = _sourceChecksum(mimetype, data);
+    const _already = Object.values(_materials(code))
+      .find(m => m && m.sourceChecksum === _srcSum && m.byId === userId && m.visibility === 'private');
+    if (_already) {
+      /* THE ROW ITSELF IS CARRIED FORWARD, not a reconstruction of its text. The first version
+         rebuilt the description from the stored sections so the text checksum downstream would
+         match — which worked, and made the byte key redundant: a mutation reverting it stayed
+         green because the rebuilt text hashed the same. Reusing the row directly is both simpler
+         and the only version where the key is load-bearing. */
+      _reusing = _already;
+      kind = 'image';
+      readFrom = { mimetype, bytes: Math.round(data.length * 0.75), reread: false };
+      _retainSource = { mimetype, data, bytes: Math.round(data.length * 0.75), checksum: _srcSum };
+    } else {
     if (!ai.canUnderstand('image')) {
       return res.status(503).json({ error: 'I cannot look at a picture right now.',
         because: 'no_vision_model',
@@ -21653,10 +21707,11 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
        of it — and a description is a reading, so the thing it is a reading OF has to remain
        openable or nobody can check it. Held here and attached to the material below; who may open
        it is decided entirely by who may read that material. */
-    _retainSource = { mimetype, data, bytes: Math.round(data.length * 0.75) };
+    _retainSource = { mimetype, data, bytes: Math.round(data.length * 0.75), checksum: _srcSum };
+    }
   }
 
-  if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
+  if (!_reusing && !text.trim()) return res.status(400).json({ error: 'attachment text required' });
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
   const key = _wsKey(code, userId);
   const checksum = _materialChecksum(text);
@@ -21687,7 +21742,12 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'object not found' });
     }
   }
-  const existing = Object.values(_materials(code))
+  /* ── WHICH MATERIAL THIS UPLOAD IS ─────────────────────────────────────────────────────
+     The row the bytes already resolved to, if they did; otherwise the long-standing text match.
+     ONE lookup, because two would be two answers to "is this the same upload" — and the first
+     version had two, with the second made unkillable by the first. */
+  const _srcKey = (_retainSource && _retainSource.checksum) || null;
+  const existing = _reusing || Object.values(_materials(code))
     .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
   const conversations = _assistantConvs(key);
   if (b.conversationId) {
@@ -21737,7 +21797,8 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
         : (material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text'),
       sections: material.segment(text, { kind: kind !== 'text' ? kind : String(b.kind || 'text') }),
       refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
-      checksum, visibility: 'private', provenance: 'external', createdAt: Date.now(),
+      checksum, sourceChecksum: _srcKey || null,
+      visibility: 'private', provenance: 'external', createdAt: Date.now(),
       /* WHETHER THE ORIGINAL IS STILL OPENABLE, AND IF NOT, WHY NOT — as a state on the material
          rather than as the absence of one, because "there is no source" and "the source was
          deleted" are different facts and a reader is entitled to know which. */
@@ -21750,6 +21811,17 @@ app.post('/api/assistant/attachments', requireAuth, async (req, res) => {
      checksum matches the TEXT, and the text of an image material is its description; somebody
      re-sending the same picture after deleting the original is not a reason to quietly put the
      bytes back, because the deletion was a decision. A material that never had one still gets it. */
+  /* A BACKFILL FOR ROWS MADE BEFORE THIS FIELD EXISTED STOOD HERE AND WAS REMOVED. No mutation
+     could kill it, and looking at why settled it: it fires only when an OLD image row is found by
+     TEXT checksum, which for an image means two separate vision reads worded the description
+     identically — vanishingly rare, and exactly the case that does not need rescuing. It read as
+     though it protected every account that had attached a picture before this change, and it
+     protected almost none of them.
+
+     WHAT IS TRUE INSTEAD, and belongs in the handoff rather than in a line that implies
+     otherwise: an image attached before this deploy has no byte key, so the first time it is
+     attached again it becomes one new material with one. From then on it deduplicates. One
+     one-time duplicate for an existing picture, and none afterwards. */
   if (_retainSource && row.sourceMedia && row.sourceMedia.retained !== true
       && (row.sourceMedia.because || 'never_held') === 'never_held') {
     row.sourceMedia = { retained: true, mimetype: _retainSource.mimetype, bytes: _retainSource.bytes };

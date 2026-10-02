@@ -254,11 +254,23 @@ ok('M9a …and the card it shows makes no claim about what the file proves',
    The waiting bubble is NOT removed: a phone on a stadium connection needs to see that something
    is happening, and on failure the error and its retry are the only way back. Asserting both
    halves, because "say nothing" is only right for the case where there is nothing to say. */
-ok('M10 a successful attachment removes the waiting bubble rather than replacing it with a receipt',
-  /const quietly = \(\) =>/.test(wsAttachFn) && /p\.remove\(\)/.test(wsAttachFn)
+/* ── AND THESE TWO STOPPED NAMING A MECHANISM THAT NO LONGER EXISTS ──────────────────────
+   They matched `p.remove()` and the literal id `iq-attach-pending`, which was the waiting
+   bubble's name while there could only ever be one of them. There can be two — a phone picker
+   firing twice, a thumb tapping twice — and `getElementById` returns the FIRST, so the second
+   attach cleared the first's bubble and left its own on screen for ever. That was the live
+   "stuck on Sending and reading image" state, and the repair was to hold the element by
+   reference instead of by a name that cannot be unique.
+
+   THE LAW IS UNCHANGED and is what is asserted: an upload in flight is visible, and a successful
+   one leaves nothing behind rather than a receipt. Its REMOVAL is now proved behaviourally in
+   `attach-once-browser-check` — AO-A2, AO-A5, AO-C6 — on a rendered 390px screen, which is a
+   better proof than a regex over this function ever was. */
+ok('M10 a successful attachment says nothing rather than replacing the wait with a receipt',
+  /const quietly = \(\) =>/.test(wsAttachFn) && /quietly\(\);/.test(wsAttachFn)
   && !/I can see \$\{/.test(wsAttachFn));
 ok('M10b …while the waiting state still exists, because an upload in flight must be visible',
-  /iq-attach-pending/.test(wsAttachFn) && /Still waiting for IntelliQ to read the image/.test(wsAttachFn));
+  /iq-pending/.test(wsAttachFn) && /Still waiting for IntelliQ to read the image/.test(wsAttachFn));
 ok('M10c …and a FAILED attachment still speaks, because an error with no words is a dead end',
   /done\(/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
 ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',

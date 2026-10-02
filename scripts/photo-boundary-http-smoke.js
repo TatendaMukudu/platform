@@ -94,6 +94,9 @@ for (const id of SQUAD.slice(0, 5)) {
 
 // A one-pixel PNG. Real bytes, real base64, not a string pretending to be an image.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+/* AND ONE THIS SUITE NEVER UPLOADS SUCCESSFULLY, for the no-vision case. Different bytes, so the
+   route cannot resolve it to a reading it already has. */
+const UNSEEN_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP48EEEAATIAfXuneOLAAAAAElFTkSuQmCC';
 
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -222,9 +225,14 @@ const server = app.listen(0, async () => {
     ok('PH-E4 …and an empty image is refused rather than stored as an empty reading', noData.status === 400);
 
     console.log('\n  E2 — AND WITH NO VISION MODEL IT SAYS SO, RATHER THAN BLAMING THE FILE');
+    /* ── A PICTURE NOBODY HAS READ YET, which is what this law is about ──────────────────
+       This sent the SAME bytes the suite had already uploaded, and once the route began looking
+       a picture up by its bytes before calling the model, that upload resolved to the reading it
+       already had and returned 200 — correctly, because nothing needed reading. The capability
+       refusal is about a picture IntelliQ cannot read, so the case has to be one it has not. */
     const realCan = ai.canUnderstand;
     ai.canUnderstand = () => false;
-    const blind = await upImage('coach');
+    const blind = await upImage('coach', 'image/png', UNSEEN_PNG, 'never-read.png');
     ai.canUnderstand = realCan;
     ok('PH-E5 with no model that can see, the upload is refused', blind.status === 503);
     ok('PH-E6 …naming the missing capability rather than calling the picture unreadable',

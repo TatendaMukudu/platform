@@ -42,6 +42,10 @@ _loadAllStores({
   orgUsers: { [C]: {
     coach: { id: 'coach', name: 'Dana Coach', email: 'c@i.io', role: 'coach', orgCode: C,
       status: 'active', leadershipNodeIds: ['n'], assignedNodeIds: ['n'], profileComplete: true },
+    /* SOMEBODY ELSE WITH THE SAME PICTURE — section F's scope check needs a real second owner,
+       because deduplicating on bytes alone would otherwise be a door into another person's file. */
+    other: { id: 'other', name: 'Sam Other', email: 'o@i.io', role: 'member', orgCode: C,
+      status: 'active', assignedNodeIds: ['n'], profileComplete: true },
   } },
   orgNodes: { [C]: { n: { nodeId: 'n', name: 'First Team', parentId: null, childNodeIds: [],
     memberIds: ['coach'], leaderIds: ['coach'] } } },
@@ -55,12 +59,24 @@ const SEEN = 'A league statistics table. It lists 28 played, 9 wins, 15 draws, 4
   + '1.50 points per game, 0.93 scored per match and 0.71 conceded per match, with home 5-8-1 and away 4-7-3.';
 const REAL = { enabled: ai.enabled, budgetAvailable: ai.budgetAvailable,
   canUnderstand: ai.canUnderstand, understand: ai.understand, complete: ai.complete, completeJSON: ai.completeJSON };
-let sawMedia = null;
+let sawMedia = null, calls = 0, varyReads = false;
 Object.assign(ai, {
   enabled: () => true,
   budgetAvailable: () => true,
   canUnderstand: (what) => what === 'image',
-  understand: async (o) => { sawMedia = (o && o.media) || null; return SEEN; },
+  /* COUNTED, because section F's whole claim is that a retry does not read the picture again.
+
+     AND DELIBERATELY NOT STABLE WHEN SECTION F ASKS. Vision is not deterministic, and that is the
+     whole defect: the same league table came back live as "fourth on 24 points from 16 played"
+     and as "4th place with 24 points after 16 games". A stub that returns one fixed sentence
+     would let the OLD text-checksum deduplication pass section F — measured, a mutation reverting
+     the key left F2 and F3 green — so the section would have proved nothing about the key it
+     exists to defend. */
+  understand: async (o) => {
+    sawMedia = (o && o.media) || null;
+    calls++;
+    return varyReads ? `${SEEN} Read number ${calls}, worded differently this time.` : SEEN;
+  },
   complete: async () => '',
   completeJSON: async () => null,
 });
@@ -69,6 +85,9 @@ Object.assign(ai, {
    and a fixture that sent a string where bytes belong would pass the route while proving nothing
    about what reaches the gateway. */
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+/* AND A SECOND, GENUINELY DIFFERENT PICTURE for the retry section — different bytes, so it is a
+   new upload rather than a lookup of the one section A already made. */
+const PNG2_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPgqjgBAAHaAUsQ+/EAAAAAAElFTkSuQmCC';
 
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -139,6 +158,59 @@ const server = app.listen(0, async () => {
       /look at|looked at|re-?read|read it again/i.test(gapSaid));
     ok('IV-E3 …and does not claim the image never arrived, which is the live failure',
       !/no image came through|cannot see|can't see|could not see/i.test(gapSaid));
+
+    console.log('\n  F — ONE SELECTION IS ONE ATTACHMENT, EVEN WHEN THE ANSWER NEVER ARRIVED');
+    /* ── LIVE iPHONE: one image, two filenames, then stuck ─────────────────────────────────
+       The founder attached one picture and the composer rendered its name twice before sitting
+       on "Sending and reading image…". Reproduced on this route by sending the picture the way
+       a phone whose reply never came back sends it — byte-identical, carrying no conversationId,
+       because the client never learned one:
+
+         materials created : 2     conversations created : 2     vision calls : 2
+
+       THE KEY WAS THE WRONG THING. `_materialChecksum` hashes the material's TEXT, and an image
+       material's text is the sentence a vision model wrote about it. Vision is not deterministic:
+       the same league table came back as "fourth on 24 points from 16 played" and as "4th place
+       with 24 points after 16 games". Different sentence, different checksum — so the retry
+       defeated the material deduplication AND the conversation reconciliation that hangs off it,
+       and the person really did have two of everything to look at.
+
+       `attachment-retry-http-smoke` never caught it because text bytes ARE identical on a retry.
+       An image was the one shape whose identity passed through a model on the way to the key. */
+    /* A DIFFERENT PICTURE FROM SECTION A'S, deliberately. The first version of this reused the
+       same bytes, so `first` already resolved to the material section A had made — F1 and F2
+       passed without a fresh upload ever happening, and F4 then counted a vision call that was
+       never going to occur. A retry test needs something to retry. */
+    varyReads = true;   // from here on, a second read of one picture is a different sentence
+    const visionBefore = calls;
+    const first = await call('POST', '/api/assistant/attachments', {
+      image: { data: PNG2_B64, mimetype: 'image/png', name: 'RETRY.png' },
+      title: 'RETRY.png', filename: 'RETRY.png' });
+    ok('IV-F1 the picture is accepted', first.status === 200 && !!(first.j || {}).materialId);
+    const again = await call('POST', '/api/assistant/attachments', {
+      image: { data: PNG2_B64, mimetype: 'image/png', name: 'RETRY.png' },
+      title: 'RETRY.png', filename: 'RETRY.png' });
+    ok('IV-F2 …and sending the same bytes again resolves to the SAME material',
+      again.status === 200 && (again.j || {}).materialId === (first.j || {}).materialId);
+    ok('IV-F3 …and to the same conversation, so one upload leaves one thread',
+      (again.j || {}).conversationId === (first.j || {}).conversationId);
+    /* THE HALF THAT FIXES THE STUCK STATE. A retry that re-reads the picture spends another
+       vision call and comes back with a different sentence — which is how the duplicate was
+       made. Looking the bytes up BEFORE the model runs is what makes Try again free. */
+    ok('IV-F4 …and the picture is not read a second time, which is what makes a retry free',
+      calls === visionBefore + 1);
+    /* AND THE DEDUPLICATION IS THE OWNER'S OWN. Equal bytes belonging to somebody else must not
+       be a way into their material, exactly as the text checksum has always been scoped. */
+    const other = await fetch(base + '/api/assistant/attachments', { method: 'POST',
+      headers: { Authorization: `Bearer ${issueToken('other', C, 'member')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: { data: PNG2_B64, mimetype: 'image/png', name: 'RETRY.png' },
+        title: 'RETRY.png', filename: 'RETRY.png' }) }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+    ok('IV-F5 …while the same bytes from somebody else are their own material, not a way into this one',
+      other.status === 200 && (other.j || {}).materialId !== (first.j || {}).materialId);
+    /* AND NONE OF IT BECAME EVIDENCE. Attaching twice is still attaching; a retry must not be a
+       second route into the record any more than the first attempt was. */
+    ok('IV-F6 …and neither attempt created evidence about anybody',
+      (first.j || {}).epistemicEffect === 'none' && (again.j || {}).epistemicEffect === 'none');
 
   } catch (e) { fail++; console.error('  FAIL image-vision suite threw:', e && e.stack); }
 
