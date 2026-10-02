@@ -2825,3 +2825,123 @@ Neither is reported green by inference from earlier heads.
 Next live dependencies are the actual iPhone/Safari upload and notification state, the configured
 provider's replies and stream failures, Render/Neon restart and delivery conditions, and a real
 High/Low conversation once one reaches standing. Do not merge or deploy on this handoff.
+
+## 19. Claude — the image Composer defect — 2026-10-02
+
+**Head:** *this commit* on `codex/pilot-recovery-gate-r7` — a commit cannot carry its own hash, so
+read the branch tip. The last commit carrying a product change is `fedfa43`. **Nothing merged.
+Nothing deployed.** Scope: the reproduced live image attachment defect and nothing else.
+
+Live behaviour: attaching one image rendered its filename twice and then stayed on "Sending and
+reading image…" without producing an image-grounded reply. It had reproduced with more than one
+image, which rules out anything about a particular file.
+
+### It was a real duplicate, not only duplicate rendering — and both at once
+
+The brief asks that question first, and the answer is both. Four defects in one lifecycle.
+
+**The server made two of everything.** Sending the picture the way a phone whose reply never
+arrived sends it — byte-identical, carrying no `conversationId`:
+
+```
+materials created : 2     conversations created : 2     vision calls : 2
+```
+
+`_materialChecksum` hashes the material's TEXT, and an image material's text is the sentence a
+vision model wrote about it. **Vision is not deterministic.** The same league table came back as
+*"fourth on 24 points from 16 played"* and as *"4th place with 24 points after 16 games"*.
+Different sentence, different checksum — so the retry defeated the material deduplication *and*
+the conversation reconciliation that hangs off it. `attachment-retry-http-smoke` never caught it
+because text bytes **are** identical on a retry; an image was the one shape whose identity passed
+through a model on the way to the key.
+
+`_sourceChecksum` identifies a picture by its bytes, and the lookup runs **before** the model.
+That is also what bounds the waiting state: a retry returns the material it already made instead
+of spending another vision call to produce a different sentence about the same picture.
+
+**And three faults in the rendering,** each measured on a real 390px Chromium:
+
+| | what it did | why |
+|---|---|---|
+| two selections in flight | two filename bubbles, two waiting bubbles, two vision calls | nothing serialised them; a picker firing `change` twice is enough |
+| the retry | drew the filename a second time | "Try again" calls back into `wsAttach`, which begins by rendering the person's own message |
+| the waiting bubble | one was left on screen with nothing able to reach it | a fixed id, and `getElementById` returns the **first** match |
+
+The third is the stuck state. The element is held in a closure now, so two attachments running at
+once cannot reach into each other's bubbles. The in-flight guard is released in `finally` on every
+path — a flag one branch forgets to clear is a paperclip that stops working until the page is
+reloaded, which is worse than the defect it was added to fix.
+
+### Against the brief, point by point
+
+- **one selection = one attachment and one durable turn** — AO-A1..A4, AO-C7, AO-C11, AO-C12.
+- **no duplicate filename bubbles** — AO-A1, AO-C4.
+- **bounded reading state** — AO-A5, AO-C3, AO-C6; the 30s ceiling is unchanged and the guard
+  clears with it.
+- **vision succeeds → the question is answered from the image** — IV-C1..C3, unchanged and green.
+- **fails or times out → pending cleared, one short recoverable error** — AO-C1..C3.
+- **retry creates no second attachment or turn** — IV-F2..F4, AO-C7, AO-C9..C12.
+- **image content never becomes evidence automatically** — IV-F6, AO-C8, and
+  `attachment-boundary-http-smoke` unchanged.
+- **a different file chosen while one is in flight** is told, in one line, rather than dropped or
+  stacked — AO-B1, AO-B2. The person chose it and is entitled to know it did not happen.
+
+### Proof
+
+- **Truth Layer: green**, every registered suite.
+- **`attach-once-browser-check` 22**, new, driven through the real picker with real PNG bytes at
+  390px against the real route. **`image-vision-http-smoke` 20**, gaining section F.
+- **Every real-Chromium gate at head:** attach-once 22, chart-shape 50, composer-fit 35,
+  exhausted-help 26, forum-share 31, group-loop 55, library 33, naming 32, onboard 34, pilot-coach
+  139, priority-surface 39, settings-tiers 45, stack 114, theme 21, voice-output 34,
+  live-recovery-repro 63. **773 assertions, 0 failed.**
+- **Real PostgreSQL across a process kill:** `durable-restart-check` **35 passed, 0 failed**.
+- **Ten mutations**, each red then restored: the in-flight guard removed; the retry drawing its
+  own bubbles; the pending element back to a fixed id; the guard never released; the byte lookup
+  removed — caught on the route *and* on the screen; the source checksum never stored; the
+  deduplication no longer scoped to its owner; the retry slot dropped from the error card.
+
+### Three of my own fixtures were wrong in ways that made assertions pass for nothing
+
+Found by mutation or by probe, and each cost real time:
+
+- **`page.evaluate` awaits a promise the function returns**, so two taps were sequential and the
+  overlap the section exists to create never happened. A block body fixed it.
+- **A stub returning one sentence for every picture** let the OLD text key pass the retry section:
+  a mutation reverting the key stayed green. Vision varies; the stub has to as well.
+- **A per-picture suffix taken from the base64 tail** was identical for two PNGs differing only in
+  their pixel bytes — the IEND chunk — so two distinct pictures read the same and deduplicated
+  into one. The assertion it broke had been right all along.
+
+### Two stale tests repaired at the law, and one line of mine removed
+
+- `material-accept` **M10/M10b** matched `p.remove()` and the literal id `iq-attach-pending` —
+  the mechanism that *caused* the stuck state. The law is unchanged and is what they assert now;
+  the removal is proved behaviourally on a rendered screen instead.
+- `photo-boundary` **PH-E5..E7** sent bytes the suite had already uploaded, so once a picture is
+  looked up before the model runs, that upload correctly returned the reading it already had. The
+  capability refusal is about a picture IntelliQ *cannot* read, so the case uses one it has not.
+- **A backfill of mine was removed.** It claimed to rescue rows made before the byte key existed
+  and no mutation could kill it: it fires only when an old image row is found by TEXT, meaning
+  two separate vision reads worded the description identically. It read as though it protected
+  every such account and protected almost none.
+
+### One known one-time effect, stated rather than papered over
+
+An image attached **before** this change has no byte key. The first time it is attached again it
+becomes one new material that has one; from then on it deduplicates. **One one-time duplicate per
+pre-existing picture, and none afterwards.** No migration is run, because rewriting stored
+materials to add a key derived from bytes we would have to re-read is a larger and riskier change
+than the defect warrants.
+
+### What this does not prove
+
+The vision provider itself. Every assertion here stubs `ai.understand`, because the defect was in
+what the product does *around* a read rather than in the read. **A real iPhone against a real
+provider is still the only thing that closes this**, and it is the same rehearsal the previous
+section asks for.
+
+### Verdict
+
+**A clean candidate.** Internally green at this head, scope held to the reported defect. Nothing
+merged, nothing deployed.
