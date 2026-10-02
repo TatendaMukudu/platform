@@ -31,17 +31,147 @@ const PREDICTIVE = new RegExp([
 // personal outcomes rather than every possible future-tense action.
 const PERSON_FUTURE = /\b(?:[Hh]e|[Ss]he|[Tt]hey|(?:(?:[Tt]his|[Tt]he|[Tt]hat|[Yy]our|[Oo]ur|[Aa]n?)\s+)?(?:player|member|person|student|employee|athlete)|[A-Z][a-z]+)\s+(?:will|won't|will\s+not)\s+(?:quit|drop\s+out|fail|burn\s+out|leave|decline|recover|disengage|withdraw|struggle)\b/;
 
+/* ── A PROMISE THAT SOMETHING WILL WORK ───────────────────────────────────────────────────────
+   Found by attack, September 2026: "a captain-led debrief will fix this and is guaranteed to
+   improve communication" passed `describesOnly` cleanly. Every pattern above is about a claim
+   concerning a PERSON or a trajectory; none of them is about a claim concerning an ACTION. So
+   the one sentence a decision-support product must never write — this option will work — was the
+   one shape the guard had no opinion on.
+
+   It is the same lie as a prediction, aimed at an option instead of a person, and it is more
+   dangerous here because it is what a leader acts on. IntelliQ can say an action has recorded
+   outcome history and what that history was. It cannot say it will work, is guaranteed to, is
+   the answer, or will solve anything, because nothing in the record establishes that and the
+   whole architecture exists to keep the difference visible.
+
+   "Fix" and "solve" earn their place by being outcome verbs rather than ordinary future tense:
+   "the report will open" stays allowed, as the boundary above already intends. */
+const GUARANTEE = new RegExp([
+  'guarantee', 'guaranteed\\s+to', 'sure\\s+to', 'certain\\s+to', 'bound\\s+to\\s+work',
+  'will\\s+(?:fix|solve|resolve|work|help|prevent|stop|ensure|guarantee|eliminate|cure)',
+  "will\\s+(?:definitely|certainly|surely)", 'this\\s+works', 'proven\\s+to\\s+(?:work|fix|help)',
+  'the\\s+(?:answer|solution|fix)\\s+is', 'all\\s+you\\s+need\\s+to\\s+do',
+].join('|'), 'i');
+
 // Diagnosis — naming a clinical condition. IntelliQ never does this. These are STEMS
 // (diagnos → diagnose/diagnosis/diagnostic), so they don't take a trailing word boundary.
 const DIAGNOSTIC = /diagnos|clinically|depress(?:ion|ed)|anxiety\s+disorder|bipolar|\badhd\b|autis(?:m|tic)|ptsd|\bdisorder\b|syndrome|patholog/i;
 
-/* Does this text predict the future or name a condition? */
+/* Does this text predict the future, promise that an action will work, or name a condition? */
 function predictsOrDiagnoses(text) {
   const t = String(text == null ? '' : text);
-  return PREDICTIVE.test(t) || PERSON_FUTURE.test(t) || DIAGNOSTIC.test(t);
+  return PREDICTIVE.test(t) || PERSON_FUTURE.test(t) || GUARANTEE.test(t) || DIAGNOSTIC.test(t);
 }
 
 /* Convenience: true when the text is SAFE to show (describes, doesn't predict/diagnose). */
 function describesOnly(text) { return !predictsOrDiagnoses(text); }
 
-module.exports = { predictsOrDiagnoses, describesOnly, PREDICTIVE, PERSON_FUTURE, DIAGNOSTIC };
+/* ── ASKING SOMEBODY TO RECORD A HIGH OR A LOW ────────────────────────────────────────────────
+   LIVE iPHONE (findings R1 #45). A model reply asked the founder whether they were "interested in
+   recording some Highs or Lows to give me actual evidence". Every clause of that is against the
+   product's own law: a High and a Low are GOVERNED STANDINGS that the canonical owner produces
+   when the record crosses a threshold, not objects a person creates — and what a person
+   contributes is an observation or an account, which is not evidence until it is deliberately
+   admitted through the evidence path.
+
+   THE DETERMINISTIC PATH ALREADY SAYS IT. `server.js` answers "a high is not something I create —
+   it is what appears when…" when asked directly. The prompt now carries the rule too, and this
+   guard is what makes it an implementation rather than a request: a prompt reaches nobody when
+   the model ignores it, and a model that has been told not to say something is exactly the thing
+   this file exists to catch when it says it anyway.
+
+   NARROW ON PURPOSE. It is the pairing of a CREATE verb with a High or a Low as its OBJECT that
+   is wrong, not the words themselves — "a high appeared on your record", "your Lows page", "this
+   is now a Low" are all correct and common, and a guard that rejected them would degrade honest
+   turns into deterministic ones for no reason. So a verb of creation must be followed by a High
+   or a Low within a short span, and the imperative and the invitation are both covered because
+   the founder met the invitation. */
+const CREATE_STANDING = new RegExp(
+  /* NOT PRECEDED BY AN ARTICLE OR A POSSESSIVE, which is what tells the VERB from the NOUN.
+     "record" is a noun all over this product — "on the record", "your record holds", "a record
+     of what happened" — and without this the guard would refuse the product's own commonest
+     sentence the moment a High or a Low appeared within a few words of it. */
+  '(?<!\\b(?:the|a|an|your|our|their|its|this|that|no|any)\\s)'
+  + '\\b(?:record|log|creat|add|make|enter|capture|start|raise|file|register)\\w*\\b'
+  + '(?:\\W+\\w+){0,6}?\\W+'
+  + '(?:a|an|any|some|more|new)?\\s*'
+  /* NOT A HYPHENATED COMPOUND. "high-stakes", "low-key", "high-pressure" are adjectives, and the
+     word boundary alone happily matches the first half of one. */
+  + '\\b(?:high|low)s?\\b(?!-)', 'i');
+
+/* The other half of the same sentence: a High or a Low offered as the way to GIVE evidence.
+   "record some Highs or Lows to give me actual evidence" is two violations, and the second is
+   the more damaging one — it tells a person their account is worth nothing until they file it
+   under a standing they are not entitled to assign. */
+const STANDING_AS_EVIDENCE = /\b(?:high|low)s?\b(?:\W+\w+){0,8}?\W+\b(?:evidence|proof|data|facts?)\b/i;
+
+function invitesGovernedCreation(text) {
+  const t = String(text == null ? '' : text);
+  return CREATE_STANDING.test(t) || STANDING_AS_EVIDENCE.test(t);
+}
+
+/* ── THE PRODUCT TALKING ABOUT ITSELF INSTEAD OF ANSWERING ───────────────────────────────────
+   LIVE iPHONE (findings R1 #52B and #52E). Two shapes of the same fault, both measured on the
+   real route:
+
+     asked "Why do you think that?"   →  "That's a reasoning question more than a read of your
+                                          recorded data … once the reasoning engine is switched on"
+     asked "What could we try?"       →  "I'm not going to keep repeating that screenshot at you —
+                                          I'm sorry, that was not useful … Here is what you can do
+                                          with this focus: show this inquiry, set a review date,
+                                          discuss it with the group … Which of those would you like?"
+
+   NEITHER IS AN ANSWER. The first narrates the product's own configuration; the second apologises
+   for a previous turn and then offers the INTERFACE as the substance. The founder's rule for this
+   round is one line — internal routing, prompt and process language must not leak unless somebody
+   asked how IntelliQ works — and the second half of #52E is its own rule: management actions are
+   not options, unless the person asked how to manage the object.
+
+   ENFORCED RATHER THAN REQUESTED. `ai/composer.js` already says never to describe the interface,
+   and the model did it anyway; a rule that lives only in a prompt is not implemented. This is the
+   check, beside the prediction, diagnosis and High/Low rules, for the same reason they are here.
+
+   THE MENU NEEDS BOTH HALVES, because either alone is innocent. "Open the governed discussion" is
+   a legitimate action label on a card, and "would you like" is ordinary English; what is wrong is
+   OFFERING A CHOICE OF THEM AS THE ANSWER. So the pattern requires an offering frame and two or
+   more management actions in the same reply. */
+const SELF_NARRATION = new RegExp([
+  /\bI(?:'m| am) (?:so |really |very )?sorry\b/.source,
+  /\bI apolog(?:ise|ize)/.source,
+  /\blet me try (?:that )?again\b/.source,
+  /\bI should have (?:caught|noticed|said|done)\b/.source,
+  /\bI(?:'m| am) not going to keep\b/.source,
+  /\bthat (?:was|wasn't|was not) (?:very )?(?:useful|helpful)\b/.source,
+  /\byou(?:'re| are) asking me to\b/.source,
+  /\bthat(?:'s| is) a (?:reasoning|planning|world[- ]knowledge) question\b/.source,
+  /* `the reasoning engine` IS DELIBERATELY NOT ON THIS LIST, and a corpus scan is why. Seven of
+     the product's own sentences use it — "reading a picture needs the reasoning engine on this
+     host" — and every one is an honest statement about a CAPABILITY somebody just tried to use.
+     That is not scaffolding; scaffolding is classifying the person's question back at them,
+     which the pattern above catches. A guard that refused the capability answer would have
+     traded a leak for a lie. */
+  /\bmy (?:system )?(?:prompt|instructions|routing|classifier|pipeline)\b/.source,
+  /\bI (?:was |have been )?(?:routed|classified) (?:this|that|your)\b/.source,
+  /(?:^|[.!?]\s+)\s*(?:routing|classification|classifier|intent)\s*[:=]/.source,
+  /\bthe user is asking for a classification of (?:their|the) intent\b/.source,
+].join('|'), 'i');
+
+const OFFER_FRAME = /\b(?:here(?:'s| is| are) what you can do|would you like|which of (?:those|these)|you (?:could|can) (?:also )?(?:choose|pick)|your options (?:here )?are)\b/i;
+const MANAGEMENT_ACTION = /\b(?:show (?:this|the) (?:inquiry|focus|evidence)|set a review date|discuss (?:it|this) with the group|open the governed discussion|attach material|keep (?:this|it) in (?:the )?library|open this as an inquiry|revise this focus|start (?:this|a separate) focus|put this to the forum)\b/i;
+
+function offersInterfaceMenu(text) {
+  const t = String(text == null ? '' : text);
+  if (!OFFER_FRAME.test(t)) return false;
+  let n = 0;
+  for (const m of t.matchAll(new RegExp(MANAGEMENT_ACTION.source, 'gi'))) { if (m) n++; }
+  return n >= 2;
+}
+
+function narratesItself(text) {
+  const t = String(text == null ? '' : text);
+  return SELF_NARRATION.test(t) || offersInterfaceMenu(t);
+}
+
+module.exports = { predictsOrDiagnoses, describesOnly, invitesGovernedCreation,
+  narratesItself, offersInterfaceMenu, SELF_NARRATION, OFFER_FRAME, MANAGEMENT_ACTION,
+  PREDICTIVE, PERSON_FUTURE, GUARANTEE, DIAGNOSTIC, CREATE_STANDING, STANDING_AS_EVIDENCE };

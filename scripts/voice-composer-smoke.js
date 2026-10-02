@@ -82,8 +82,27 @@ console.log('\n  WHAT IT MAY NEVER SAY');
 console.log('\n  IT MUST BE SAFE ON A THIN OBJECT — a blank card teaches people it has nothing to say');
 {
   const bare = voice.explainObject({ label: 'Something shifted' });
+  /* V14 USED TO MATCH THE LITERAL "not sure yet", which was one spelling of the law rather than
+     the law. The line it was watching — `I'm ${sure} about this one.` — reads the band, and on a
+     group inquiry the band belongs to the OBSERVATION. With no claim admitted, that printed
+     "I'm confident about this one" in IntelliQ's own voice, under a badge reading "Early
+     thinking", on a coach's phone. The assertion passed throughout, because its fixture happens
+     to be `tentative` and `tentative` is the one band for which the sentence is not a lie.
+
+     So it now asserts the property that was actually broken, which is strictly stronger: the
+     line says there is no read, and carries NO confidence word at all — because a confidence
+     word beside "I don't have a read yet" has nothing to attach to except the observation, which
+     is not what it was measured on. */
   ok('V14 an object with nothing but a label still explains itself honestly',
-    bare.headline === 'Something shifted.' && /not sure yet/.test(bare.claim));
+    bare.headline === 'Something shifted.' && /don't have a read on this yet/.test(bare.claim));
+  ok('V14b …and says so WITHOUT a confidence word, because there is no claim for one to describe',
+    !/\b(confident|fairly confident|starting to think so|not sure yet)\b/.test(bare.claim));
+  ok('V14c …and a well-evidenced observation with no admitted explanation does not claim confidence either — this is the case that was wrong',
+    () => {
+      const obs = voice.explainObject({ label: 'Communication after results', band: 'supported',
+        contributors: 5, independentOrigins: 5 });
+      return /don't have a read on this yet/.test(obs.claim) && !/\bconfident\b/.test(obs.claim);
+    });
   ok('V15 empty inputs produce empty lists, never undefined',
     Array.isArray(bare.stillUnknown) && Array.isArray(bare.wouldChangeMyMind));
   ok('V16 it does not invent a next question — that belongs to the caller, under the stopping rule',

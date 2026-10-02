@@ -67,13 +67,144 @@ const AttachmentHandler = {
     '.pptx': 'pptx',
   },
 
+  /* ── AND A LIST IS ONLY TRUE IF THE THING THAT READS IT LOADED ────────────────────────────
+     THE HOLE THIS CLOSES. Three of the five kinds above are read by libraries that arrive from a
+     CDN — `JSZip` for Word and PowerPoint, `XLSX` for spreadsheets — and this file assumed they
+     were there. They are not always there. A phone on a stadium connection, a filtered network, a
+     second visit with the app installed and no signal: the page still runs, the picker still
+     offers .docx, and `_processDocx` reaches `JSZip.loadAsync` and throws `JSZip is not defined`
+     at somebody who picked a file. That is the hollow-control shape this file already names two
+     paragraphs up, arriving through the one gap the rule did not cover: what is ADVERTISED was
+     hard-coded, while what is POSSIBLE depends on a network request nobody checked.
+
+     So the lists are derived from what actually loaded. A kind whose reader is missing is not
+     offered, and if one is picked anyway — a drag, a share sheet, an older cached page — the
+     refusal says which thing is missing and what to do instead, rather than a library's
+     ReferenceError. Nothing is narrowed when the libraries ARE present, which is the ordinary
+     case; this only changes what somebody sees when they could not have been served anyway. */
+  /* ── AND SINCE SEPTEMBER 2026 THE OFFICE FORMATS NEED NOTHING HERE ────────────────────────
+     This list was the right answer to the wrong architecture. Word, PowerPoint and spreadsheets
+     were read in this browser by JSZip and SheetJS, so what could be OFFERED genuinely depended
+     on whether two CDN requests had landed — and narrowing the picker was the honest response.
+
+     The founder's decision moved that reading to the server, where `lib/office.js` opens all three
+     with Node's own zlib and no dependency. So those kinds no longer need anything in the browser
+     and the picker offers them unconditionally again. The LAW is unchanged and is the reason this
+     map still exists rather than being deleted: what is offered is exactly what can be read. What
+     changed is who does the reading. */
+  KIND_NEEDS: {},
+  KIND_NEEDS_LABEL: { JSZip: 'the Word and PowerPoint reader', XLSX: 'the spreadsheet reader' },
+  _readerFor(kind) { return this.KIND_NEEDS[kind] || null; },
+  _readerPresent(kind) {
+    const g = this._readerFor(kind);
+    if (!g) return true;
+    try { return typeof (typeof window !== 'undefined' ? window : globalThis)[g] !== 'undefined'; }
+    catch (_) { return false; }
+  },
+  /* The kinds this browser can turn into words RIGHT NOW, which is not the same question as the
+     kinds this handler knows how to read. */
+  readableMaterialKinds() { return this.MATERIAL_KINDS.filter(k => this._readerPresent(k)); },
+  materialExtensions() {
+    const out = {};
+    for (const [ext, kind] of Object.entries(this.MATERIAL_EXTENSIONS)) {
+      if (this._readerPresent(kind)) out[ext] = kind;
+    }
+    return out;
+  },
+
   /* Derived, never typed twice — the picker and the parser table cannot drift apart. */
-  materialAcceptAttr() { return Object.keys(this.MATERIAL_EXTENSIONS).join(','); },
+  materialAcceptAttr() { return Object.keys(this.materialExtensions()).join(','); },
+
+  /* The legacy Knowledge/Data Sources door sends TEXT to the evidence importer. It therefore
+     offers only files this browser path can itself turn into text. Office files deliberately go
+     whole to the canonical conversation/material server reader; PDFs are document bytes for the
+     model, not extracted text. Neither a filename nor a parser receipt may stand in for content. */
+  knowledgeExtensions() {
+    const serverRead = new Set(Object.keys(this.SERVER_READ || {}));
+    return Object.fromEntries(Object.entries(this.materialExtensions())
+      .filter(([ext]) => !serverRead.has(ext)));
+  },
+  knowledgeAcceptAttr() { return Object.keys(this.knowledgeExtensions()).join(','); },
+
+  async processKnowledge(file) {
+    const match = String((file && file.name) || '').toLowerCase().match(/\.[a-z0-9]+$/);
+    const ext = match && match[0];
+    if (!ext || !this.knowledgeExtensions()[ext]) {
+      throw new Error('That file type cannot be read as knowledge here. Attach it in a conversation instead.');
+    }
+    const parsed = await this.process(file);
+    const content = String((parsed && parsed.content) || '').trim();
+    if (!content) throw new Error('Could not read any text from that file. Nothing was added.');
+    return { ...parsed, content };
+  },
+
+  /* ── WHAT THE COMPOSER'S PICKER MAY OFFER, NOW THAT A PICTURE GOES SOMEWHERE ──────────────
+     The Material list above is what this handler can turn into WORDS in the browser. An image
+     cannot be turned into words here and is read by the server through the vision gateway, so it
+     belongs on the picker and not on that list -- two capabilities, two lists, which is the rule
+     this file already states.
+
+     ONLY THE TYPES THE SERVER WILL ACTUALLY READ. `image/*` would let a phone offer HEIC, which
+     is what an iPhone produces by default and which nothing here can read; the picker would accept
+     it and the upload would refuse it, which is the hollow-control shape this codebase keeps
+     finding. Named explicitly so the file chooser itself does the refusing, before anybody waits. */
+  READABLE_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  composerAcceptAttr() {
+    return this.READABLE_IMAGE_TYPES.concat(Object.keys(this.materialExtensions())).join(',');
+  },
+
+  /* ── WHICH FORMATS THE SERVER READS, NOT THIS BROWSER ─────────────────────────────────────
+     FOUNDER DECISION, September 2026: Office parsing belongs server-side. Word, PowerPoint and
+     spreadsheets are opened by `lib/office.js`, which uses Node's own zlib and no dependency, so
+     the capability no longer turns on whether two CDN script tags arrived. This browser selects
+     the file and uploads it; it does not try to understand it.
+
+     Named here, beside the processors, so the picker and the uploader cannot disagree about which
+     formats take which road. */
+  SERVER_READ: Object.freeze({ '.docx': 'docx', '.xlsx': 'xlsx', '.pptx': 'pptx' }),
+  serverReadKind(file) {
+    const m = String((file && file.name) || '').toLowerCase().match(/\.[a-z0-9]+$/);
+    return (m && this.SERVER_READ[m[0]]) || null;
+  },
+  /* The bytes, base64, with the data: prefix removed — the shape `/api/assistant/attachments`
+     takes for a picture, reused rather than invented again for a document. */
+  fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || '').split(',')[1] || '');
+      r.onerror = () => reject(new Error('That file could not be read from your device.'));
+      r.readAsDataURL(file);
+    });
+  },
 
   /* ── Main entry point ─────────────────────────────────── */
   async process(file) {
     const kind = this.ACCEPTED[file.type];
     if (!kind) throw new Error(`Unsupported file type: ${file.type}`);
+    /* ── THOSE THREE DO NOT COME THROUGH HERE ANY MORE ──────────────────────────────────────
+       Word, PowerPoint and spreadsheets are read by the SERVER since September 2026, and the two
+       CDN scripts that used to open them in this browser are gone from index.html. So the
+       processors below would now reach an undefined `JSZip`/`XLSX` and throw a ReferenceError at
+       whoever called them.
+
+       The two pickers on the pilot journey never get here for those kinds — they check
+       `serverReadKind` and upload the file whole. This is for every OTHER caller: the alert
+       composer, the coach's card attachment, the knowledge import. They still browser-parse, and
+       rather than letting them fail with a library's own error they are told plainly that this
+       format goes up whole now, which is a true sentence about where the capability lives. */
+    if (this.SERVER_READ['.' + kind]) {
+      throw new Error('Word, PowerPoint and spreadsheet files are read by IntelliQ itself now — '
+        + 'attach it in a conversation and it will be read there.');
+    }
+    /* THE PICKER SHOULD NOT HAVE OFFERED THIS, but a drag, a share sheet or a page cached before
+       the connection went can all get here anyway. Say which thing is missing and what still
+       works — never let a library's own ReferenceError be the message a person reads. */
+    if (!this._readerPresent(kind)) {
+      const need = this.KIND_NEEDS_LABEL[this._readerFor(kind)] || 'the reader for this format';
+      const what = { docx: 'Word', pptx: 'PowerPoint', xlsx: 'Spreadsheet' }[kind] || 'These';
+      throw new Error(`${what} files need ${need}, which did not load on this connection. `
+        + 'Paste the text in instead, or try again when you are back online.');
+    }
 
     switch (kind) {
       case 'image':  return this._processImage(file);

@@ -56,6 +56,23 @@ const CLAIM_KEYWORDS = [
 ];
 function claimTypeOf(text) { for (const [ct, re] of CLAIM_KEYWORDS) if (re.test(text)) return ct; return null; }
 
+/* THE FOUR UNIVERSAL SHAPES OF OCCASION, and the word each is shown as when the organisation
+   has not supplied one. These are the fallbacks, not the meanings: `vocab` comes from the org's
+   resolved domain pack (ai/packs.js), so a club sees "match", a school "lesson", a business
+   "meeting", and an org that renamed the word itself sees its own. `eventPerformance` and its
+   siblings are read first; `event` — the key every pack has always had — is the performance
+   word, because that is the occasion a pack names when it only names one. */
+const EVENT_KIND_FALLBACK = {
+  performance: 'session', preparation: 'practice', gathering: 'meeting', milestone: 'deadline',
+};
+function eventWord(kind, vocab) {
+  const v = vocab && typeof vocab === 'object' ? vocab : {};
+  const specific = v['event' + kind.charAt(0).toUpperCase() + kind.slice(1)];
+  if (typeof specific === 'string' && specific.trim()) return specific.trim().slice(0, 40);
+  if (kind === 'performance' && typeof v.event === 'string' && v.event.trim()) return v.event.trim().slice(0, 40);
+  return EVENT_KIND_FALLBACK[kind] || 'session';
+}
+
 /* ── EXTRACTION — a sentence → PROPOSED records (never persisted). ── */
 function extract(text, ctx = {}) {
   const now = ctx.now || Date.now();
@@ -71,15 +88,52 @@ function extract(text, ctx = {}) {
   const clock = (raw.match(/\bat\s+([0-9][0-9:. ]*\s*(?:a\.?m\.?|p\.?m\.?)?)/i) || raw.match(/\b([0-9]{1,2}(?::[0-9]{2})?\s*(?:a\.?m\.?|p\.?m\.?))\b/i));
   const time = clock ? parseClock(clock[1]) : null;
 
-  // EVENT — a play/match/meeting/training/launch/review with a day (+ optional time).
-  const eventVerb = /\b(play|plays|playing|match|fixture|game|meeting|meet|training|session|launch|review|deadline|final)\b/i.test(raw);
-  if (eventVerb && (dayIdx >= 0 || rel != null)) {
-    const type = /\b(match|fixture|game|final|plays?|playing)\b/i.test(raw) ? 'match' : /\b(training|session)\b/i.test(raw) ? 'training' : /\b(meeting|meet|review)\b/i.test(raw) ? 'meeting' : 'default';
+  /* ── EVENT — an occasion with a day (+ optional time) ────────────────────────────────────
+     THE KERNEL DECIDES THE KIND; THE ORGANISATION SUPPLIES THE WORD. This used to read
+
+         const type = /match|fixture|game|final|plays?/ ? 'match' : ... : 'default';
+         const title = /first team/i.test(raw) ? 'First Team ' + type : capitalise(type);
+
+     so a school typing "we play Saturday" was handed an event called `match`, a business
+     typing "the product launch is Friday" was handed one titled "Default" — a machine word,
+     shown to a person, in the only sentence they see before confirming — and "first team", a
+     football phrase, was spliced into titles for everybody.
+
+     The kinds below are universal, and each is a shape of occasion rather than an industry
+     noun: a PERFORMANCE is the thing the organisation exists to do, done for real and judged;
+     PREPARATION is practising for it; a GATHERING is people talking; a MILESTONE is a moment
+     something is due. Every kind of organisation has all four. `ctx.vocab` — the org's resolved
+     domain vocabulary, the same one the rest of the product renders in — names them, and where
+     it says nothing the universal word is used. Nothing here decides what a word means. */
+  const eventVerb = /\b(play|plays|playing|match|fixture|game|meeting|meet|training|session|practice|rehears|launch|review|deadline|final|exam|assessment|inspection|hearing|presentation|showcase|performance|concert)\b/i.test(raw);
+  /* AND AN OCCASION NOBODY GAVE US A WORD FOR IS STILL AN OCCASION. The list above is a
+     vocabulary, and a vocabulary in the kernel is the thing this whole change is about:
+     "Parents evening on Thursday at 6pm" — the commonest occasion in a school — matched nothing
+     and produced no proposal at all, so the school simply could not record it. Rather than
+     lengthening the list until it happens to contain every industry's nouns, a sentence that
+     names something AND fixes it to a day AND gives a clock time is an occasion in any line of
+     work. The clock is what keeps this from swallowing ordinary prose about a Tuesday. */
+  const namedOccasion = /^\s*(?:the\s+|our\s+|a\s+|an\s+)?([a-z][a-z '\-]{2,40}?)\s+(?:is\s+)?(?:on|at|this|next)?\s*\b(?:mon|tues|wednes|thurs|fri|satur|sun)day\b/i.exec(raw);
+  if ((eventVerb || (namedOccasion && time)) && (dayIdx >= 0 || rel != null)) {
+    const kind =
+        /\b(match|fixture|game|final|plays?|playing|launch|exam|inspection|hearing|concert|showcase|performance)\b/i.test(raw) ? 'performance'
+      : /\b(training|session|practice|rehears\w*)\b/i.test(raw) ? 'preparation'
+      : /\b(meeting|meet|review|presentation)\b/i.test(raw) ? 'gathering'
+      : /\b(deadline|assessment)\b/i.test(raw) ? 'milestone'
+      : 'gathering';
     let startAt = null;
     if (dayIdx >= 0) startAt = nextWeekday(now, dayIdx, time ? time.h : 0, time ? time.min : 0);
     else if (rel != null) startAt = atTime(now + rel * DAY, time ? time.h : 0, time ? time.min : 0);
-    const title = /first team/i.test(raw) ? 'First Team ' + type : (type[0].toUpperCase() + type.slice(1));
-    proposals.push({ type: 'event', fields: { type, title, startAt, scope: /first team/i.test(raw) ? 'team' : 'team' },
+    /* AND THE TITLE IS WHAT THEY CALLED IT. A pack word is the right answer only when the
+       person named no occasion at all ("we play Saturday"). When they did say one — "board
+       meeting", "product launch", "exam" — echoing their own noun back is both more accurate
+       and the only version that cannot tell a school its board meeting is a parents evening.
+       The pack still decides the KIND's word, which is what the rest of the product renders. */
+    const said = raw.match(/\b(match|fixture|game|final|launch|exam|inspection|hearing|concert|showcase|performance|training|session|practice|rehearsal|meeting|review|presentation|deadline|assessment)\b/i);
+    const word = eventWord(kind, ctx.vocab);
+    const spoken = said ? said[1] : (!eventVerb && namedOccasion ? namedOccasion[1].trim() : word);
+    const title = spoken.replace(/(^|\s)\S/g, c => c.toUpperCase());
+    proposals.push({ type: 'event', fields: { kind, type: word, title, startAt, scope: 'team' },
       confidence: 0.7, plainLanguage: `${title} on ${new Date(startAt).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}` });
   }
 

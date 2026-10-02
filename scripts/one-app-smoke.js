@@ -64,8 +64,35 @@ ok('OA6 every edit control on the tree still hangs off manage_tree, which a memb
     const edits = (tree.match(/openAddNode|openEditNode|deleteNode/g) || []).length;
     return edits > 0 && /Auth\.canDo\('manage_tree'\)/.test(tree);
   })());
-ok('OA7 settings is added for the account owner, which is where billing will go',
-  /id: 'settings'/.test(extra) && /Auth\.isSuperAdmin\(\)/.test(extra));
+/* OA7 REWRITTEN, September 2026, and the reason is the same one OA6 records for the org tree.
+
+   It asserted `Auth.isSuperAdmin()` on the Settings nav entry, which was right for the design it
+   was written against and is wrong for the one the founder has since chosen: Personal Settings
+   for every authenticated user, Organisation Settings for authorised administrators, Platform
+   diagnostics for superadmins — and explicitly "do not give ordinary members administrative
+   Settings merely to make the route visible".
+
+   Under the old rule an ordinary member had NO Settings at all, so there was nowhere to answer
+   "can this phone use its microphone" or "which build am I running" — the second being the
+   question the founder needed answerable while holding the device.
+
+   So this inverts exactly as OA6 did: the ROUTE is in everyone's nav, and what stays gated is the
+   ADMINISTRATIVE part. Seeing and changing are two different things, and the whole safety of
+   opening the first is that it does not touch the second. Strictly stronger than the old
+   assertion, which checked only the nav and said nothing about what was inside. */
+const _app = appjs.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+ok('OA7 settings is in EVERY account\'s nav — a member has their own settings to see',
+  /id: 'settings'/.test(extra) && /when: \(\) => true/.test(extra));
+ok('OA7b …and what is administrative inside it is gated on the permissions the server enforces',
+  /SETTINGS_TAB_ACCESS/.test(_app)
+  && /org:\s*\(\) => Auth\.canDo\('manage_settings'\)/.test(_app)
+  && /platform:\s*\(\) => Auth\.isSuperAdmin\(\)/.test(_app));
+ok('OA7c …the personal tab needs no permission, because none of it is anybody else\'s to grant',
+  /you:\s*\(\) => true/.test(_app));
+ok('OA7d …a tab somebody may not use cannot be switched to, whatever they type in a console',
+  /if \(!_maySeeSettingsTab\(tab\)\) tab = 'you';/.test(_app));
+ok('OA7e …and every person lands on their OWN tab rather than on the organisation\'s',
+  /switchSettingsTab\('you'\);/.test(_app));
 
 /* ── OA8: a `when` that throws reads as NO. An older cached session has no `leads` field, and
    showing somebody a control they cannot use is worse than not showing it. ── */

@@ -1,0 +1,498 @@
+/* Truth layer — DECISION INTELLIGENCE V1, AND THE NINE QUESTIONS IT IS ALLOWED TO ANSWER.
+
+   The founder's nine, in order:
+
+     1. What do we know?                                  6. What are reasonable options?
+     2. What don't we know?                               7. What could each option help us learn?
+     3. What might explain it?                            8. Is there enough evidence to suggest
+     4. What relevant things have we tried before?           something worth testing?
+     5. What happened afterward?                          9. What should we observe afterward?
+
+   AND THE INSTRUCTION THAT MATTERS MOST: do NOT force an answer to all nine. "Not enough evidence
+   yet" is a valid and important output. If action would be premature, prefer gathering
+   information. If no action is justified, watching is legitimate. Do not activate bestForPattern
+   merely because it exists. Do not create a "best action" ranking. Do not invent probabilities.
+
+   So this suite is as much about what the product REFUSES to say as about what it says. Six and
+   seven have no machinery behind them and none is manufactured here: the coach writes the option
+   themselves, in their own words, which is the "human chooses" step the spine already had. An
+   options generator would be the system proposing what to do and then, one release later,
+   ranking its own proposals — and there is no honest way to rank them, because nothing in the
+   record establishes what will work.
+
+   FOUR AND FIVE NEEDED NO NEW STORE. A group Focus has recorded `origin.inquiryId` since the
+   origin field existed, and the group screen has listed what the group has tried for as long as
+   it has had a history. What was missing was the JOIN: the history was rendered for the NODE,
+   undifferentiated, so a coach looking at one question could not tell which of five past attempts
+   was about the thing in front of them. Nine needed nothing at all — `falsifiers` has been
+   computed since ai/diagnose.js was written and projected since the frontier pass, and had simply
+   never reached a screen a group could read.
+
+   EVERY ASSERTION RUNS WITH MODELS OFF. Provider-down is not a degraded mode for this journey; it
+   is the state the Alma pilot runs in, so it is the state the suite runs in.
+
+   Run: node scripts/decision-intelligence-http-smoke.js */
+
+'use strict';
+process.env.DB_OPTIONAL = '1';
+process.env.NODE_ENV    = 'test';
+process.env.IQ_DETERMINISTIC_ONLY = '1';
+
+const fs   = require('fs');
+const path = require('path');
+const S = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken,
+        groupCandidates, _noteGroupCandidates } = S;
+
+let pass = 0, fail = 0;
+/* Thunks, so an expression that explodes is a named failure rather than a crash that loses the
+   rest of the run — PROTOCOL lie #8. */
+const ok = (n, c) => {
+  let v = false;
+  try { v = typeof c === 'function' ? c() : c; } catch (_) { v = false; }
+  if (v) { pass++; console.log('  PASS', n); } else { fail++; console.error('  FAIL', n); }
+};
+
+const O = 'dci';
+/* Fourteen members, five contributors — the two-sided cohort floor needs k >= 5 AND n-k >= 5, so
+   a smaller squad could only ever prove that the floor withholds. */
+const SQUAD = Array.from({ length: 14 }, (_, i) => 'p' + (i + 1));
+const users = { coach: { id: 'coach', name: 'Coach', email: 'c@dci.io', role: 'coach', orgCode: O,
+                         status: 'active', leadershipNodeIds: ['squad'] } };
+for (const id of SQUAD) users[id] = { id, name: id.toUpperCase(), email: `${id}@dci.io`,
+  role: 'member', orgCode: O, status: 'active', assignedNodeIds: ['squad'] };
+
+_loadAllStores({
+  orgMeta: { [O]: { orgName: "Alma Men's Soccer", orgMode: 'sports' } },
+  orgUsers: { [O]: users },
+  orgNodes: { [O]: { squad: { nodeId: 'squad', name: 'First Team', parentId: null, childNodeIds: [],
+    memberIds: SQUAD, leaderIds: ['coach'], rev: 1 } } },
+});
+_rebuildEmailIndex();
+
+/* TWO DIFFERENT THINGS THE SQUAD NOTICED, because question 4 is "what have we tried about THIS"
+   and a suite with one inquiry cannot tell a correct join from a missing filter. */
+for (const id of SQUAD.slice(0, 5)) {
+  _noteGroupCandidates(O, id, `member:${id}`, [{ id: 'dc_' + id, level: 'observation',
+    text: 'talking drops off after we lose', sourceSpan: 'nobody talks after a loss',
+    concerns: 'group', originRef: 'oc_' + id, originKind: 'direct_observation', turnId: 'tc_' + id }],
+    'communication', 'Communication after results');
+  _noteGroupCandidates(O, id, `member:${id}`, [{ id: 'dt_' + id, level: 'observation',
+    text: 'the last twenty minutes are getting away from us', sourceSpan: 'we fade late',
+    concerns: 'group', originRef: 'ot_' + id, originKind: 'direct_observation', turnId: 'tt_' + id }],
+    'late_game', 'How the last twenty minutes go');
+}
+
+const server = app.listen(0, async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const H = who => ({ Authorization: `Bearer ${issueToken(who, O, who === 'coach' ? 'coach' : 'member')}`,
+                      'Content-Type': 'application/json' });
+  const call = (m, u, b, who) => fetch(base + u, { method: m, headers: H(who),
+    body: b === undefined ? undefined : JSON.stringify(b) })
+    .then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+  const inquiries = who => call('GET', '/api/group/squad/inquiry', undefined, who)
+    .then(r => ((r.j || {}).inquiries) || []);
+  const byTopic = async (who, concept) =>
+    (await inquiries(who)).find(i => ((i.topic || {}).canonicalConcept) === concept) || {};
+
+  try {
+    /* ══ THE JOURNEY STARTS WHERE IT ACTUALLY STARTS ══════════════════════════════════════ */
+    console.log('\n  SETUP — FIVE PEOPLE INDEPENDENTLY OFFER WHAT THEY SAW');
+    for (const id of SQUAD.slice(0, 5)) {
+      for (const c of (groupCandidates[O] || []).filter(x => x.contributorId === id && x.status === 'detected')) {
+        await call('POST', '/api/group/squad/contribute', { candidateId: c.candidateId, valence: 'worth_attention' }, id);
+      }
+    }
+    const comms = await byTopic('coach', 'communication');
+    const late  = await byTopic('coach', 'late_game');
+    ok('DI-S1 two separate things the squad noticed are open, each on its own evidence',
+      !!comms.inquiryId && !!late.inquiryId && comms.inquiryId !== late.inquiryId);
+
+    console.log('\n  Q1 — WHAT DO WE KNOW');
+    ok('DI-1a the observation, and what it rests on, counted as separate origins rather than voices',
+      comms.independentOrigins === 5 && comms.contributors === 5);
+    ok('DI-1b …at a band the kernel computed rather than anybody declared',
+      (comms.confidence || {}).band === 'supported' && typeof (comms.confidence || {}).score === 'number');
+    ok('DI-1c …and it is the OBSERVATION that is known, with nothing yet claiming to explain it',
+      comms.hypothesis === null && (comms.alternatives || []).length === 0);
+
+    console.log('\n  Q8 — IS THERE ENOUGH TO SUGGEST SOMETHING WORTH TESTING (asked FIRST, because the answer is no)');
+    ok('DI-8a with nobody having offered a reason, the honest answer is that there is not',
+      (comms.readiness || {}).state === 'not_enough_evidence');
+    ok('DI-8b …and it says why in a sentence about the record rather than about a rule',
+      /nobody has offered an explanation yet/i.test(String((comms.readiness || {}).because || '')));
+
+    console.log('\n  Q3 — WHAT MIGHT EXPLAIN IT');
+    await call('POST', `/api/group/squad/inquiry/${comms.inquiryId}/explanation`,
+      { text: 'players are worried about criticising each other' }, 'coach');
+    const comms1 = await byTopic('coach', 'communication');
+    ok('DI-3a a human explanation is carried as a candidate with its own standing',
+      comms1.hypothesis === 'players are worried about criticising each other'
+      && (comms1.hypothesisStanding || {}).band === 'tentative'
+      && (comms1.hypothesisStanding || {}).supportedBy === 0);
+    ok('DI-3b …and the INQUIRY\'s own confidence did not move because somebody explained it',
+      (comms1.confidence || {}).band === 'supported');
+
+    console.log('\n  Q2 — WHAT WE STILL DO NOT KNOW');
+    ok('DI-2a offering an explanation OPENS an unknown rather than closing one',
+      (comms1.stillUnknown || []).some(u => /nothing recorded supports it yet/i.test(String(u))));
+
+    console.log('\n  Q8 AGAIN — ONE UNEVIDENCED EXPLANATION IS STILL NOT ENOUGH');
+    ok('DI-8c a theory nobody has evidenced does not turn into something worth testing',
+      (comms1.readiness || {}).state === 'not_enough_evidence'
+      && /nothing recorded supports/i.test(String((comms1.readiness || {}).because || '')));
+
+    await call('POST', `/api/group/squad/inquiry/${comms.inquiryId}/explanation`,
+      { text: 'the schedule changed and people leave straight after' }, 'p7');
+    const comms2 = await byTopic('coach', 'communication');
+    ok('DI-8d with two competing and nothing separating them, the answer becomes LEARN MORE, not choose',
+      (comms2.readiness || {}).state === 'gather_information'
+      && /nothing recorded separates them yet/i.test(String((comms2.readiness || {}).because || '')));
+    ok('DI-8e …and neither explanation is marked as the one to back',
+      comms2.hypothesis !== null
+      && (comms2.hypothesisStanding || {}).supportedBy === 0
+      && (comms2.alternatives || []).every(a => a.band === 'tentative'));
+
+    console.log('\n  Q6 / Q7 — REASONABLE OPTIONS, AND WHAT EACH WOULD TEACH US');
+    /* FOUNDER-RATIFIED, September 2026, and this section was rewritten to it. The earlier posture
+       asserted the ABSENCE of any option set. Its argument was right about the dangerous half —
+       a generator would propose what to do and then, one release later, rank its own proposals,
+       and nothing in the record establishes what will work — so the ranking ban below is
+       untouched. What it was wrong about is offering: the ratified law requires a small justified
+       option set WHEN ENOUGH IS KNOWN, each carrying its basis and source class, with uncertainty
+       preserved, no ranked winner, no auto-created Focus, and honest withholding otherwise.
+
+       The withholding half is asserted FIRST and against the same state the old assertion ran in,
+       so the property that mattered is still proven rather than traded away. */
+    ok('DI-6a while the record cannot separate two explanations, no option set is offered at all',
+      comms2.options === null && (comms2.readiness || {}).state === 'gather_information');
+    ok('DI-6b …and no ranking, score or probability over anything a group might do',
+      () => {
+        const s = JSON.stringify(comms2);
+        return !/"bestAction"|"ranked":true|"rank":|"probability"|"likelihood"|"successRate"|"score":\s*0\.\d+\s*,\s*"option"/.test(s);
+      });
+    ok('DI-7a the one thing it does offer is an OBSERVATION that would separate the rivals, which is what would teach us something',
+      Array.isArray(comms2.wouldHelp));
+
+    console.log('\n  Q4 — WHAT RELEVANT THINGS HAVE WE TRIED BEFORE');
+    ok('DI-4a nothing has been tried about this yet, and that is stated rather than implied',
+      Array.isArray(comms2.triedBefore) && comms2.triedBefore.length === 0);
+    const madeComms = await call('POST', '/api/group/squad/focus',
+      { text: 'Debrief within 24h of a loss, captain-led', fromInquiryId: comms.inquiryId }, 'coach');
+    const madeLate = await call('POST', '/api/group/squad/focus',
+      { text: 'Ten minutes of small-sided at the end of every session', fromInquiryId: late.inquiryId }, 'coach');
+    ok('DI-4b both focuses record which question they came out of',
+      ((madeComms.j || {}).focus || {}).origin.inquiryId === comms.inquiryId
+      && ((madeLate.j || {}).focus || {}).origin.inquiryId === late.inquiryId);
+    const comms3 = await byTopic('coach', 'communication');
+    ok('DI-4c what the group tried ABOUT THIS appears against this question',
+      (comms3.triedBefore || []).some(t => /Debrief within 24h/.test(String(t.text))));
+    ok('DI-4d …and the one about the other question does NOT, which is the join that was missing',
+      (comms3.triedBefore || []).every(t => !/small-sided/.test(String(t.text))));
+    ok('DI-4e …and a focus with no outcome yet reads as running, never as having done nothing',
+      (comms3.triedBefore || []).every(t => t.outcome === null && t.status === 'active'));
+
+    console.log('\n  Q5 — WHAT HAPPENED AFTERWARD');
+    const focusId = ((madeComms.j || {}).focus || {}).focusId;
+    const rec = await call('POST', `/api/group/squad/focus/${focusId}/outcome`, { result: 'better' }, 'coach');
+    ok('DI-5a the coach records what came of it, in the group\'s own vocabulary',
+      rec.status === 200);
+    const comms4 = await byTopic('coach', 'communication');
+    ok('DI-5b …and it is attached to the question it was about, not to the node in general',
+      (comms4.triedBefore || []).some(t => /Debrief within 24h/.test(String(t.text)) && t.outcome === 'better'));
+    ok('DI-5c …and the OTHER question still shows nothing, because nothing was recorded about it',
+      ((await byTopic('coach', 'late_game')).triedBefore || []).every(t => t.outcome === null));
+    ok('DI-5d recording an outcome did not move what the group KNOWS about why it happens',
+      (comms4.hypothesisStanding || {}).supportedBy === 0
+      && (comms4.readiness || {}).state === 'gather_information');
+
+    console.log('\n  Q9 — WHAT SHOULD WE OBSERVE AFTERWARD');
+    ok('DI-9a falsifiers travel with the inquiry, computed rather than written by anybody',
+      Array.isArray(comms4.falsifiers));
+
+    /* ══ AND THE OTHER HALF: WHEN THE KERNEL SAYS THERE IS SOMETHING WORTH TESTING ═══════════
+       The gate is not a new judgement. `readiness.state === 'worth_testing'` is question 8, which
+       this product has answered deterministically since the spine was built: one explanation with
+       something behind it and nothing competing. Options exist only in that state, and each names
+       something the record already holds rather than a tactic somebody generated.
+
+       THE PRECONDITION IS SEEDED AT THE KERNEL, THE ANSWER IS READ THROUGH THE PRODUCTION ROUTE.
+       Giving a hypothesis support is ordinary kernel state (`signal.supports`); what is under
+       test is the projection a coach reads, so that is driven over HTTP exactly as the rest of
+       this suite drives it. */
+    console.log('\n  Q6 / Q7 — AND WHEN THERE IS SOMETHING WORTH TESTING');
+    {
+      const state = Object.values((S.inquiryStates[O] || {})[`group:squad`] || {})
+        .find(x => x && String(x.inquiryId) === String(late.inquiryId));
+      const h = { id: 'h_late_supported', statement: 'legs go and the shape stretches in the last twenty minutes',
+        supportRefs: [], challengeRefs: [], status: 'open',
+        confidence: { score: 0.6, band: 'tentative' }, createdAt: Date.now() };
+      state.hypotheses = [h];
+      /* Two of the group's existing accounts now bear on that explanation, which is what gives it
+         support. Repetition is not corroboration — these are separate origins already counted. */
+      (state.signals || []).slice(0, 2).forEach(s => { s.supports = h.id; h.supportRefs.push(s.ref); });
+      state.leadingHypothesisId = h.id;
+
+      const ready = await byTopic('coach', 'late_game');
+      ok('DI-6c one explanation with support and nothing competing IS something worth testing',
+        (ready.readiness || {}).state === 'worth_testing');
+      const opt = ready.options || {};
+      ok('DI-6d …and only now does an option set exist at all',
+        !!opt && Array.isArray(opt.options) && opt.options.length > 0);
+      /* SMALL. A menu is not a product feature; three is already generous for a phone. */
+      ok('DI-6e …and it stays small enough to read rather than becoming a catalogue',
+        opt.options.length <= 4);
+      const test = opt.options.find(o => o.id === 'test_explanation');
+      ok('DI-6f …naming the explanation the kernel already judged worth testing, not an invented tactic',
+        !!test && /legs go and the shape stretches/.test(String(test.text)));
+      ok('DI-6g …carrying its basis as REFS to governed evidence, never as somebody\'s words',
+        !!test && test.basis.sourceClass === 'internal_evidence'
+        && Array.isArray(test.basis.evidenceRefs) && test.basis.evidenceRefs.length > 0);
+      ok('DI-6h …and answering question 7: what choosing it would teach us',
+        opt.options.every(o => typeof o.wouldTeach === 'string' && o.wouldTeach.length > 0));
+      /* UNCERTAINTY SURVIVES THE OPTION. Support is not proof, and an option is not a prediction. */
+      ok('DI-6i …while saying plainly that support is not evidence it will work',
+        !!test && /not evidence that acting on it will change anything/i.test(String(test.uncertainty)));
+      /* NO WINNER. The payload says order is not preference rather than leaving it to be guessed. */
+      ok('DI-6j …with nothing ranked, scored or chosen for the group',
+        opt.ranked === false && opt.chosen === null
+        && opt.options.every(o => !('score' in o) && !('rank' in o) && !('recommended' in o)));
+      ok('DI-6k …and "learn more" is one of the choices, so not acting yet is a decision rather than a gap',
+        opt.options.some(o => o.id === 'learn_more'));
+      /* AND NOTHING WAS CREATED BY LOOKING. Reading options is a read, so what must be true is
+         that the count did not MOVE — an absolute zero here would only be asserting that no
+         earlier section of this journey had started anything, which is a different claim. */
+      const triedBeforeReading = (ready.triedBefore || []).length;
+      ok('DI-6l …and reading the options started no Focus',
+        ((await byTopic('coach', 'late_game')).triedBefore || []).length === triedBeforeReading);
+
+      /* ── WHAT WAS ALREADY TRIED AND DID NOT HELP IS NOT OFFERED AGAIN ──────────────────────
+         The founder's experiment law: a materially identical failed tactic must not be
+         resurfaced as new, and when reasonable attempts are exhausted, another model-generated
+         variation is the wrong next move rather than the obvious one. Driven through the real
+         Focus + outcome routes, which is where a group records what happened. */
+      const tryIt = await call('POST', '/api/group/squad/focus',
+        { text: 'Fitness block on Tuesdays', fromInquiryId: late.inquiryId }, 'coach');
+      await call('POST', `/api/group/squad/focus/${((tryIt.j || {}).focus || {}).focusId}/outcome`,
+        { result: 'no_change' }, 'coach');
+      const after = await byTopic('coach', 'late_game');
+      const opt2 = after.options || {};
+      ok('DI-6m a tactic that was tried and did not help is not offered as a fresh option',
+        Array.isArray(opt2.options)
+        && !opt2.options.some(o => /Fitness block/i.test(String(o.text || ''))));
+      ok('DI-6n …it becomes a CAUTION carried beside the options, so the attempt is visible',
+        (opt2.cautions || []).some(c => /Fitness block/i.test(String(c.text)) && c.outcome === 'no_change'));
+      /* THE POINT WHERE ANOTHER SUGGESTION IS THE WRONG ANSWER, stated rather than implied. */
+      ok('DI-6o …and with everything tried about this having failed, no further tactic is offered',
+        !opt2.options.some(o => o.id === 'test_explanation'));
+      ok('DI-6p …leaving learning more, and saying in words why another variation is not the move',
+        opt2.options.every(o => o.id === 'learn_more')
+        && /another variation is not the useful next move/i.test(String(opt2.because || '')));
+      /* AND A PRIOR ATTEMPT THAT DID HELP IS PRECEDENT RATHER THAN PRESCRIPTION. */
+      const helpedTry = await call('POST', '/api/group/squad/focus',
+        { text: 'Rotate the press in the last twenty', fromInquiryId: late.inquiryId }, 'coach');
+      await call('POST', `/api/group/squad/focus/${((helpedTry.j || {}).focus || {}).focusId}/outcome`,
+        { result: 'better' }, 'coach');
+      const opt3 = (await byTopic('coach', 'late_game')).options || {};
+      const prec = (opt3.options || []).find(o => String(o.id).startsWith('reuse_precedent'));
+      ok('DI-6q something that DID help here can be offered again, carried as organisational learning',
+        !!prec && prec.basis.sourceClass === 'organisational_learning' && prec.basis.outcome === 'better');
+      ok('DI-6r …and says it is precedent under those conditions rather than proof it caused anything',
+        !!prec && /not proof it caused the change/i.test(String(prec.uncertainty)));
+    }
+
+
+    /* ══ EVERY QUESTION THIS GROUP HAS IS SOMETHING A COACH CAN OPEN ══════════════════════════
+       Found by opening the app rather than by reading the code: a squad with four live inquiries
+       had ONE object. The other three returned 404 from the thread route, appeared in
+       `/api/objects` at no scope, and reached Home, the attention list, the Library and the
+       connections reader nowhere. A coach could READ them — the group screen renders every one in
+       full — and could not open one, talk to it, attach anything to it, or have a Focus's loop
+       point at it.
+
+       That is not the three-slot surface being too small. `high`, `low` and `question` are what a
+       squad is shown FIRST and are untouched. This is the object INDEX, which was being derived
+       from the surface: whichever inquiry won the ranking was the only one that existed. */
+    console.log('\n  REACHABLE — EVERY ONE OF THE GROUP\'S QUESTIONS, NOT JUST THE ONE THAT WON A SLOT');
+    {
+      const listed = await call('GET', '/api/objects?kind=inquiry&scope=group:squad', undefined, 'coach');
+      const ids = ((listed.j || {}).objects || []).map(o => String(o.id));
+      ok('DI-X1 both of this group\'s questions are objects, not just the ranked one',
+        ids.includes(comms.inquiryId) && ids.includes(late.inquiryId));
+      const all = await call('GET', '/api/objects?kind=inquiry&scope=all', undefined, 'coach');
+      ok('DI-X2 …and both reach the merged list Home reads',
+        ((all.j || {}).objects || []).map(o => String(o.id)).includes(late.inquiryId));
+      const th = await call('GET', `/api/objects/inquiry/${late.inquiryId}/thread?scope=group:squad`, undefined, 'coach');
+      ok('DI-X3 …and the one that did NOT win the slot opens, where it used to 404',
+        th.status === 200 && !!(th.j || {}).present);
+      ok('DI-X4 …carrying its own topic in words rather than a canonical key',
+        !/football\.|_/.test(String(((th.j || {}).present || {}).summary && th.j.present.summary.title || 'x')));
+      /* AND NOT ONE OBJECT MORE THAN THE GROUP ROUTE ALREADY RETURNED. This files what
+         `/api/group/:n/inquiry` has always returned to the same reader through the same gate; if
+         the two ever disagree, something here widened rather than connected. */
+      const viaGroup = await inquiries('coach');
+      ok('DI-X5 …and the index matches the group route exactly, so this connected rather than widened',
+        ids.slice().sort().join(',') === viaGroup.map(i => String(i.inquiryId)).sort().join(','));
+      const outsiderSees = await call('GET', '/api/objects?kind=inquiry&scope=group:squad', undefined, 'p1');
+      ok('DI-X6 …and a member of the group sees the same ones, through the same gate',
+        ((outsiderSees.j || {}).objects || []).length === ids.length);
+    }
+
+    /* ══ AN INQUIRY IS NOT STRUCTURALLY LAST ON THE FIRST SCREEN ══════════════════════════════
+       `_objectBucket` fell through to `(raw.confidence || {}).band` for an object's PRIORITY, so
+       an inquiry arrived at the Priority Office carrying `supported` in the priority field.
+       PRIORITY_RANK is urgent/high/medium/low/none; `supported` is in none of them, so the
+       priority term contributed zero. Meanwhile `confidence` — which HAS a band vocabulary and is
+       worth 20 a rank — was being handed `raw.confidence`, an object, and keyed to nothing.
+
+       Both terms that could speak for an inquiry were silent. Measured on a phone: every inquiry
+       in the product scored 8 while any focus scored 108, so a squad's well-supported open
+       question could not reach the first screen past a focus that had already finished.
+
+       Nothing in ai/priority-office.js changed. It was given a band where it expected a priority
+       and an object where it expected a band. */
+    console.log('\n  RANKED — WITH THE FIELDS THE SCORER ACTUALLY DOCUMENTS');
+    {
+      const inqObjs = ((await call('GET', '/api/objects?kind=inquiry&scope=all', undefined, 'coach')).j || {}).objects || [];
+      const focObjs = ((await call('GET', '/api/objects?kind=focus&scope=all', undefined, 'coach')).j || {}).objects || [];
+      const lead = inqObjs.find(o => String(o.id) === comms.inquiryId) || {};
+      ok('DI-Y1 a supported inquiry no longer carries a confidence band in its PRIORITY field',
+        lead.priority === 'low' || lead.priority === 'medium' || lead.priority === 'high' || lead.priority === 'urgent');
+      ok('DI-Y2 …and scores on more than the polarity term alone, which was all it had',
+        Number(lead.score) > 8);
+      ok('DI-Y3 …so a well-supported open question is not structurally below a finished focus',
+        !!focObjs.length && Number(lead.score) > Number(focObjs[0].score));
+      /* AND THE SCORE STILL COMES FROM THE ONE OWNER. A browser that re-ranks is a second
+         Priority Office nobody can test, and so is a server route that scores its own way. */
+      ok('DI-Y4 …with the number computed by ai/priority-office.js and nowhere else',
+        () => {
+          const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+          const i = src.indexOf('function _objectBucket');
+          const body = src.slice(i, src.indexOf('\nfunction ', i + 10));
+          return /priorityOffice\._score\(priorityOffice\.normalizeItem\(/.test(body)
+            && !/score\s*=\s*\d/.test(body);
+        });
+    }
+
+    /* ══ THE SAME JOURNEY, ENTERED FROM THE OTHER END ═════════════════════════════════════════
+       The brief: a person must be able to enter from the Inquiry side AND the Focus side without
+       contradictory identity or wording. This is where the id-namespace defect lived — the same
+       question is `inquiry:<id>` to whatever points at it and `low:<id>` to whoever reads it. */
+    console.log('\n  BOTH ENDS — THE SAME OBJECT, THE SAME WORDS, WHICHEVER END YOU STAND AT');
+    const rel = await call('GET', `/api/objects/focus/${focusId}/related`, undefined, 'coach');
+    ok('DI-B1 from the FOCUS, the loop reaches the question it was started out of',
+      rel.status === 200 && !!(rel.j || {}).loop
+      && String(((rel.j || {}).loop || {}).addresses || '').includes(comms.inquiryId));
+    const st = await call('GET', '/api/group/squad/state', undefined, 'coach');
+    const surface = (st.j || {}).low || (st.j || {}).high || (st.j || {}).question || {};
+    ok('DI-B2 from the INQUIRY side, the squad surface is the same object by id',
+      String(surface.inquiryId || '') === comms.inquiryId || String(surface.inquiryId || '') === late.inquiryId);
+    /* READ AS `low`, WHICH IS THE NAME THE SQUAD SURFACE HANDS A COACH. The same inquiry is also
+       carried as an `inquiry` object in the open-question slot, so it has two names at once, and
+       which one a person arrives by is an accident of which screen sent them. Pinning the loop to
+       the exact name they arrived by is the id-namespace defect in a second place. */
+    const relQ = await call('GET', `/api/objects/low/${comms.inquiryId}/related`, undefined, 'coach');
+    ok('DI-B3 …and reading from the QUESTION end reaches the same loop, rather than nothing',
+      relQ.status === 200 && !!(relQ.j || {}).loop);
+    ok('DI-B4 …and both ends report the same outcome word, so the two doors do not disagree',
+      String(((rel.j || {}).loop || {}).outcome || '') === String(((relQ.j || {}).loop || {}).outcome || '')
+      && String(((rel.j || {}).loop || {}).outcome || '') === 'better');
+
+    /* ══ PROVIDER DOWN IS NOT A DEGRADED PATH HERE — IT IS THE PATH ══════════════════════════ */
+    console.log('\n  PROVIDER DOWN — WHICH IS THE STATE THE PILOT RUNS IN');
+    ok('DI-P1 every assertion above ran with models switched off',
+      process.env.IQ_DETERMINISTIC_ONLY === '1');
+    ok('DI-P2 …and the whole journey completed anyway: contribute, explain, focus, outcome, loop',
+      !!comms4.inquiryId && (comms4.triedBefore || []).length === 1
+      && (comms4.triedBefore[0] || {}).outcome === 'better' && !!(rel.j || {}).loop);
+    ok('DI-P3 …and no answer above was a model\'s, because none of these routes calls one',
+      () => {
+        const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+        const fn = src.slice(src.indexOf('function _inquiryFrontier'), src.indexOf('function _leaderSubjectReaders'));
+        return fn.length > 500 && !/ai\.complete|await ai\.|gateway\./.test(fn);
+      });
+
+    /* ══ AND IT REACHES A SCREEN, WHICH IS THE ONLY PLACE ANY OF IT COUNTS ═══════════════════ */
+    console.log('\n  RENDERED — THE SEVEN SECTIONS ARE SEVEN SECTIONS ON THE GROUP SCREEN');
+    {
+      const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+      const i = ui.indexOf('_groupInquiryRow(nodeId, i, leads)');
+      const row = ui.slice(i, ui.indexOf('startGroupExplanation(nodeId, inquiryId)', i));
+      ok('DI-R1 the row is where the question lives, and it reads the projection rather than deriving anything',
+        i > 0 && row.length > 500);
+      ok('DI-R2 what we are seeing, and what it rests on',
+        /independentOrigins/.test(row) && /contested/.test(row));
+      ok('DI-R3 what might explain it — its own heading, with each candidate at its own standing',
+        /What might explain it/.test(row) && /hypothesisStanding/.test(row) && /Nothing supports this yet/.test(row));
+      ok('DI-R4 what we still don\'t know',
+        /What we still don't know/.test(row) && /stillUnknown/.test(row));
+      ok('DI-R5 what would help us learn',
+        /What would help us learn/.test(row) && /wouldHelp/.test(row));
+      ok('DI-R6 what we have tried about this, and what came of it',
+        /What we have tried about this/.test(row) && /triedBefore/.test(row) && /_OUTCOME_WORDS/.test(row));
+      ok('DI-R7 what would show we have this wrong',
+        /What would show we have this wrong/.test(row) && /falsifiers/.test(row));
+      ok('DI-R8 and whether there is enough to try something, printed as plainly when the answer is no',
+        /readiness/.test(row) && /Not enough evidence yet to suggest anything worth trying/.test(row));
+      /* Q6/Q7 REACH THE SCREEN, AND AS READING RATHER THAN AS A ROW OF BUTTONS. The UI
+         subtraction law: a control does not go on screen merely because a backend action exists,
+         and "Work on this as a group" is already the one governed door into a Focus. A menu of
+         action buttons here would be a second path to a canonical write AND would read as a
+         recommendation nobody computed. */
+      ok('DI-R8b the options reach the row, with what each would teach us',
+        /What we could do, and what each would teach us/.test(row)
+        && /options/.test(row) && /wouldTeach/.test(row));
+      ok('DI-R8c …and what was already tried and did not help is carried with them',
+        /\(i\.options\.cautions \|\| \[\]\)\.length \?/.test(row)
+        && /already tried, and nothing recorded says it helped/.test(row));
+      /* CHECKED ON THE CODE, NOT ON THE COMMENTS. The first version of this went red on the very
+         comment that explains why there is no ranking — the same trap AB-H4 fell into, where a
+         negative check matched the sentence that makes the block safe. */
+      const code = row.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+      ok('DI-R9 …with no ranking, star, score or percentage anywhere in the row',
+        !/★|%|rank|score|best option/i.test(code));
+      /* AND THE OPTIONS ARE NOT A SECOND DOOR INTO A CANONICAL WRITE. Scoped to the options
+         block rather than to the whole row: the row legitimately carries three controls (open the
+         thread, suggest an explanation, work on this as a group), and counting them all would
+         assert something about unrelated code. What must be true is that no OPTION renders a
+         control — one that could be tapped into existence would bypass the governed
+         propose -> confirm -> canonical owner path that "Work on this as a group" uses. */
+      const optBlock = (() => {
+        const a = code.indexOf('What we could do, and what each would teach us');
+        if (a < 0) return '';
+        /* Ends at the governed Focus control that follows the section. Slicing to the NAME of
+           that control instead would land inside its own onclick and make this assert the
+           opposite of what it means — which is how it failed the first time it ran. */
+        const b = code.indexOf('${leads ?', a);
+        return b < 0 ? code.slice(a) : code.slice(a, b);
+      })();
+      ok('DI-R9b no option renders a control, so none can be tapped into existence',
+        optBlock.length > 100 && !/onclick=|<button/.test(optBlock));
+      ok('DI-R9c …and the options are numbered, sorted or defaulted nowhere',
+        !/\.sort\(|index \+ 1|recommended|default-option/i.test(optBlock));
+      /* THE HEADINGS ARE SEPARATE HEADINGS. Running them together is how a candidate explanation
+         becomes a finding by layout alone, which is a real way to lie with correct data. */
+      ok('DI-R10 …and each section is a section, not one paragraph wearing four names',
+        (row.match(/iqg-inq-sec-h/g) || []).length >= 5);
+    }
+
+    /* MOBILE. The founder reads this on a phone, and a row that scrolls sideways is a row whose
+       right-hand end nobody reads. Checked at the stylesheet, which is where the rule lives. */
+    console.log('\n  MOBILE — AT 390px, WHICH IS WHERE THIS IS ACTUALLY READ');
+    {
+      const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'styles.css'), 'utf8');
+      const block = css.slice(css.indexOf('.iqg-inq-sec{'), css.indexOf('.iqg-hist{'));
+      ok('DI-M1 the new sections wrap rather than scroll',
+        /flex-wrap:wrap/.test(block) && !/white-space:nowrap/.test(block));
+      ok('DI-M2 …and long text breaks rather than pushing the page wider',
+        (block.match(/overflow-wrap:anywhere/g) || []).length >= 2);
+      ok('DI-M3 …and the readiness line carries no colour that ranks one answer above another',
+        /iqg-inq-ready\{/.test(block) && !/iqg-inq-ready\{[^}]*(--danger|--warning|--success)/.test(block));
+    }
+
+  } catch (e) { fail++; console.error('  FAIL decision-intelligence suite threw:', e && e.stack); }
+
+  server.close();
+  console.log(`\ndecision-intelligence-http-smoke: ${pass} passed, ${fail} failed\n`);
+  process.exit(fail ? 1 : 0);
+});

@@ -141,10 +141,58 @@ function explainObject(obj = {}) {
 
   // THE CLAIM. Stated as something I think, never as a fact — the epistemic ladder in grammar.
   const headline = _sentence(label);
+
+  /* EXCEPT WHEN IT IS NOT A CLAIM AT ALL. A focus is a commitment somebody made, in their own
+     words; it is true because they said it, and there is nothing here for IntelliQ to be
+     confident or unconfident about. Running one through the ladder produced, from a member
+     typing "Work on my first touch":
+
+         "My read is that Work on my first touch. Not sure yet."
+
+     — the product hedging about whether a person meant what they had just typed. The epistemic
+     grammar is right for everything the system BELIEVES and wrong for the one kind of object it
+     is merely HOLDING, so the ladder is skipped rather than softened. `obj.mine` and
+     `obj.groupName` say whose it is; neither is required, and with neither it still reads as a
+     commitment rather than a guess. */
+  if (kind === 'focus') {
+    const who = obj.groupName ? String(obj.groupName) : (obj.mine === false ? 'They' : 'You');
+    const verb = obj.groupName ? 'is working on' : (obj.mine === false ? 'are working on' : 'said you would work on');
+    const body = String(claim || label || '').trim();
+    return {
+      kind, headline,
+      claim: body ? `${who} ${verb} this: ${_sentence(body)}` : `${who} ${verb} this.`,
+      // A commitment has no confidence band. Saying so explicitly is what stops a surface
+      // rendering "not sure yet" beside something a person decided.
+      confidence: null,
+      provenance: null,
+      whyIThinkThat: null,
+      stillUnknown: [],
+      wouldChangeMyMind: [],
+      contested: null,
+      setAside: parkedBecause ? _sentence(String(parkedBecause)) : null,
+    };
+  }
+
+  /* ── WITH NO CLAIM, THERE IS NOTHING TO BE CONFIDENT ABOUT ────────────────────────────────
+     This fallback was `I'm ${sure} about this one.` — and `sure` is read off the band, which on a
+     group inquiry is the OBSERVATION's band, earned by however many people described the thing.
+     So an object with no admitted claim printed "I'm confident about this one" in IntelliQ's own
+     voice, with nothing following it. Found on a phone, under a badge reading "Early thinking",
+     on the same screen.
+
+     It became the common case rather than an edge one when a hypothesis stopped being admitted
+     as the claim until the kernel had given it standing of its own. That gating is right. This
+     sentence was the part that had to change with it: the honest thing to say when there is no
+     read is that there is no read, and then say what IS established — that people have described
+     something and the reason for it is still open.
+
+     The band is deliberately NOT spoken here. A confidence word beside "I don't have a read yet"
+     is the same lie in a quieter register: the reader has no claim to attach it to, so they will
+     attach it to the observation, which is not what it was measured on. */
   const claimLine = claim
     ? `${_pick(['I think', 'My read is', 'What I make of it'], seed + 'c')} ${_sentence(String(claim).replace(/^I think\s+/i, ''))} ${_cap(sure)}.`
         .replace('What I make of it ', 'What I make of it: ').replace('My read is ', 'My read is that ')
-    : `I'm ${sure} about this one.`;
+    : `I don't have a read on this yet${prov ? ' — what has been described is on the record, and the reason for it is still open' : ''}.`;
 
   // WHY I THINK THAT. Counts and independence — never a name, never a quote.
   const reasons = (Array.isArray(because) ? because : []).map(_sentence).filter(Boolean);
@@ -163,7 +211,38 @@ function explainObject(obj = {}) {
     kind,
     headline,
     claim: claimLine,
-    confidence: sure,
+    /* ── AND THE BADGE HAD TO GO WITH THE SENTENCE ────────────────────────────────────────────
+       The block above says the band is "deliberately NOT spoken here", because a confidence word
+       beside "I don't have a read yet" is the same lie in a quieter register. That fixed the
+       PROSE and left this field alone, so the sentence stopped saying it and the card went on
+       rendering it -- as a badge, in capitals, directly above the sentence denying it.
+
+       Driven at 390px on the group's own question, the card read:
+
+           Communication after results
+           WELL SUPPORTED
+           I don't have a read on this yet -- what has been described is on the record, and
+           the reason for it is still open.
+
+       Two adjacent lines contradicting each other in IntelliQ's own voice, and the reader
+       resolves it the wrong way round every time because a badge is louder than a sentence. The
+       band is the OBSERVATION's, earned by five people describing something; the claim it gets
+       attached to is the missing EXPLANATION.
+
+       So the structured field follows the same rule as the sentence. `null` means "there is
+       nothing to be confident ABOUT", which is exactly what a focus already returns and what
+       every consumer of this field therefore already handles. The provenance line stays: "five
+       people, five independent sources" is a fact about the record that remains true and is the
+       right thing to show when there is no read yet.
+
+       AND WHAT THIS CHANGE IS NOT. The badge a person actually saw came from `ai/present.js`
+       `summary.standing`; mutation confirmed that reverting THIS line alone leaves the rendered
+       screens correct, because no surface I could find renders `explained.confidence`. So this
+       is the consistency half -- the same law stated at the second owner so the next renderer to
+       reach for this field gets the right answer -- and not a repair whose effect can be shown on
+       a screen. Recorded rather than implied, because a comment claiming a visible fix that
+       cannot be demonstrated is how the comment three lines above this one went wrong. */
+    confidence: claim ? sure : null,
     provenance: prov,
     whyIThinkThat: why,
     stillUnknown: unknown,

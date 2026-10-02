@@ -121,7 +121,10 @@ ok('PC-E5 …which is the EXISTING law, not an exception: every writing action c
    green. Anchored to a real key boundary now. */
 ok('PC-E6 every action in the vocabulary has a human label — no identifier reaches a confirm card',
   (() => { const src = R('server.js');
-    const map = src.slice(src.indexOf('create_focus: \'Start this focus\''), src.indexOf('})[c.type] || c.type'));
+    /* Start at the map OWNER rather than one label's exact value. `create_focus` deliberately has
+       a context-sensitive human label inside an existing Focus, and pinning this vocabulary test
+       to the old literal made a clearer card look like a missing card. */
+    const map = src.slice(src.indexOf('label: ({'), src.indexOf('})[c.type] || c.type'));
     return map.length > 200
       && Object.keys(actions.ACTIONS).every(t => new RegExp(`(^|[^A-Za-z0-9_])${t}:`).test(map)); })());
 

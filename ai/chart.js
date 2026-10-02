@@ -39,6 +39,29 @@
    L-CH5  A CHART SAYS WHAT IT CANNOT SHOW. Every spec carries `limitations`. A picture with no
           stated limits is read as complete.
 
+   L-CH6  A LINE IS A CLAIM ABOUT CHANGE OVER TIME, and it may only be drawn when the record
+          actually contains change over time.
+
+          The founder reported this from a real screen: two accounts recorded on the SAME DATE
+          were drawn as a VERTICAL LINE. The renderer collapses a zero-width time range to the
+          middle of the axis, so every point landed on one x and the path between them went
+          straight up. A vertical line is not a degenerate trend, it is a picture of an infinite
+          rate of change — the most dramatic shape the chart can produce, produced by the least
+          information it can hold.
+
+          So the shape is DECIDED FROM THE DATA and declared on the series, and the gate refuses a
+          declaration that disagrees with its own points:
+
+            2+ distinct timestamps  -> `trend`     a line may be drawn
+            exactly 1               -> `state`     one moment: draw the points, never a line
+            0 (categorical)         -> `category`  bars; time is not an axis here
+
+          "Distinct" is by TIMESTAMP, not by day, deliberately. Two things recorded four hours
+          apart are two moments and the record can honestly say which came first; the question of
+          whether four hours is long enough to mean anything belongs to the reader, not to a
+          renderer silently rounding. A caller that wants day-grain says so by passing day-grain
+          timestamps.
+
    ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────────────────────
 
    No banding, no confidence, no cohort arithmetic of its own. This module RECEIVES a series the
@@ -72,6 +95,31 @@ const _num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
 const _arr = v => (Array.isArray(v) ? v : []);
 const _refs = p => [...new Set(_arr(p && p.refs).map(r => _s(r, 120)).filter(Boolean))];
 
+/* L-CH6 — WHAT SHAPE THE RECORD SUPPORTS, computed from the points and never from a preference.
+   One function, used by every builder and re-run by the gate, so a declared shape and the data it
+   claims to describe cannot drift apart. */
+const SHAPES = Object.freeze(['trend', 'state', 'category']);
+function timeShape(points = []) {
+  /* `_num` IS NOT SAFE HERE, and finding out why is the reason this comment exists. `_num` is
+     `Number.isFinite(Number(v)) ? Number(v) : null`, and `Number(null)` is 0 — a perfectly finite
+     number. So a spread's `at: null` came back as the timestamp zero, every categorical series
+     read as having ONE distinct moment, and bars were shaped `state` and made to carry a caveat
+     about a time axis they do not have. Caught by CG19h. Absence is checked before conversion. */
+  const times = [...new Set(_arr(points)
+    .filter(p => p && p.at !== null && p.at !== undefined && p.at !== '')
+    .map(p => _num(p.at))
+    .filter(t => t !== null))];
+  if (!times.length) return { shape: 'category', distinctTimes: 0 };
+  return { shape: times.length >= 2 ? 'trend' : 'state', distinctTimes: times.length };
+}
+
+/* The sentence a `state` chart owes its reader. Said by the chart rather than left to a caller,
+   for the same reason the firming caveat is intrinsic: the single most important thing about a
+   one-moment picture is that it is not a movement, and a caveat that depends on somebody
+   remembering to pass it is a caveat that will eventually be missing. */
+const STATE_LIMITATION =
+  'Everything here was recorded at the same moment, so this shows what the record holds — not a change over time.';
+
 /* ── 1. HOW A BELIEF FIRMED UP ───────────────────────────────────────────────────────────────
 
    The founder's first pick, and the one that teaches the law while it answers the question.
@@ -99,11 +147,14 @@ function buildFirming({ title = '', occasions = [], threshold = null, limitation
     const bi = BAND_STEPS.indexOf(_s(o.band, 40));
     if (bi >= 0) bandPts.push({ at, value: bi, refs, label: _s(o.band, 40) });
   }
-  const series = [{ key: 'origins', name: 'Separate supporting accounts', unit: 'count', points: pts }];
+  const series = [{ key: 'origins', name: 'Separate supporting accounts', unit: 'count',
+    points: pts, ...timeShape(pts) }];
   if (bandPts.length) series.push({
     key: 'band', name: 'What the evidence supported', unit: 'band', points: bandPts,
-    ticks: BAND_STEPS.slice(),
+    ticks: BAND_STEPS.slice(), ...timeShape(bandPts),
   });
+  // L-CH6 — one moment is not a movement, and the chart says so itself.
+  const oneMoment = series.some(x => x.shape === 'state');
   return {
     kind: 'firming', title: _s(title || 'How this firmed up', 160), series,
     /* The line that says where a call becomes possible. Drawn because the shape of this chart is
@@ -118,6 +169,7 @@ function buildFirming({ title = '', occasions = [], threshold = null, limitation
     limitations: [
       'Separate first-hand accounts, not repeated messages — the same account said again does not move this.',
       'Counts occasions on the record. Something that happened and was never said is not here.',
+      ...(oneMoment ? [STATE_LIMITATION] : []),
       ...(_arr(limitations).map(l => _s(l, 200))),
     ],
   };
@@ -136,12 +188,16 @@ function buildTimeline({ title = '', events = [], limitations = [] } = {}) {
     points.push({ at, value: at, refs, label: _s(e.label, 160), marker: _s(e.marker, 40) || 'event' });
   }
   points.sort((a, b) => a.at - b.at);
+  const shape = timeShape(points);
   return {
     kind: 'timeline', title: _s(title || 'What happened, in order', 160),
-    series: [{ key: 'events', name: 'On the record', unit: 'date', points }],
+    series: [{ key: 'events', name: 'On the record', unit: 'date', points, ...shape }],
     threshold: null,
     limitations: [
       'What is written down, not everything that happened.',
+      // L-CH6. A timeline of one moment is a list with a date on it, and saying so is the
+      // difference between a reader seeing "this happened" and "this happened, then that".
+      ...(shape.shape === 'state' ? [STATE_LIMITATION] : []),
       ...(_arr(limitations).map(l => _s(l, 200))),
     ],
   };
@@ -174,9 +230,11 @@ function buildSpread({ title = '', categories = [], cohort = null, floor = null,
        nobody opened — both are zero. Collapsing those is exactly the error the material module
        refuses to make in words, and it would be worse in a chart, because nobody argues with a
        bar. */
+    /* CATEGORICAL BY CONSTRUCTION — every point carries `at: null`, so time is not an axis here
+       and `timeShape` says `category`. Declared rather than assumed, so the gate re-derives it. */
     series: [
-      { key: 'got', name: 'Said they had it', unit: 'count', points: got },
-      { key: 'not_yet', name: 'Said not yet', unit: 'count', points: not },
+      { key: 'got', name: 'Said they had it', unit: 'count', points: got, ...timeShape(got) },
+      { key: 'not_yet', name: 'Said not yet', unit: 'count', points: not, ...timeShape(not) },
     ],
     threshold: null,
     cohort: cohort ? { k: _num(cohort.k), n: _num(cohort.n) } : null,
@@ -229,6 +287,21 @@ function governChart(spec = {}, { basis = null } = {}) {
     // L-CH3. The whitelist, enforced. A caller inventing `score` or `rating` gets refused here,
     // which is the only place the removed scoring system could realistically come back.
     if (!UNITS.includes(unit)) { violations.push({ kind: 'invented_scale', series: _s(s && s.key, 80), unit }); continue; }
+
+    /* L-CH6 — THE SHAPE IS RE-DERIVED HERE, not trusted. The builders declare it; this recomputes
+       it from the points and refuses a disagreement, exactly as L-CH2 recomputes a count rather
+       than believing one. A caller that could declare `trend` over a single timestamp could draw
+       the vertical line this law exists to prevent, and it would arrive looking like every other
+       chart. A series with no declaration at all is refused too: an undeclared shape is a
+       renderer's guess, and the renderer's guess is what produced the defect. */
+    const declared = _s(s && s.shape, 20);
+    const actual = timeShape(_arr(s && s.points));
+    if (!SHAPES.includes(declared)) {
+      violations.push({ kind: 'undeclared_shape', series: _s(s && s.key, 80) });
+    } else if (declared !== actual.shape) {
+      violations.push({ kind: 'shape_disagrees_with_time', series: _s(s && s.key, 80),
+        declared, actual: actual.shape, distinctTimes: actual.distinctTimes });
+    }
     for (const p of _arr(s && s.points)) {
       plotted++;
       const refs = _refs(p);
@@ -288,12 +361,17 @@ function refusalNote(violations = []) {
       return 'Held back — part of this chart could not be traced to the record it claims to show.';
     case 'invented_scale':
       return 'Held back — nothing here is scored, and this asked for a scale that would be one.';
+    /* L-CH6. Said as what it is rather than as a fault: the record is fine, there is simply only
+       one moment in it, and a reader told "held back" would go looking for a problem. */
+    case 'shape_disagrees_with_time':
+    case 'undeclared_shape':
+      return 'Held back — this asked for a line through a record that only has one moment in it.';
     default:
       return 'Held back — this could not be drawn from the record as it stands.';
   }
 }
 
 module.exports = {
-  CHART_KINDS, UNITS, BAND_STEPS,
+  CHART_KINDS, UNITS, BAND_STEPS, SHAPES, STATE_LIMITATION, timeShape,
   buildFirming, buildTimeline, buildSpread, governChart, refusalNote,
 };

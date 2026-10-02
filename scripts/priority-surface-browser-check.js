@@ -16,7 +16,12 @@ process.env.NODE_ENV    = 'test';
 process.env.IQ_COMPOSER = '1';
 
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". This was a HARD-CODED chromium-1194 path: correct in today's
+   image and wrong the moment it updates, which is the mirror of the bug the other four gates
+   had (they resolved a build playwright-core names and nothing had checked, then hung on it).
+   Two wrong answers to one question. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const S = require('../server.js');

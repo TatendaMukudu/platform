@@ -197,6 +197,36 @@ const server = app.listen(0, async () => {
     const after = await call('/api/evidence/imports', tokMia);
     ok('19 · a deleted import disappears from coverage', !after.j.imports.some(g => g.sourceName === 'Set pieces'));
 
+    /* 20 · A FORMAT NOBODY CAN EXTRACT IS NOT ACCEPTED AS TEXT SOMEBODY EXTRACTED.
+       This module's `parse` accepts `pdf`/`docx` as ALREADY-EXTRACTED text and warns that no
+       binary extractor is bundled — a fair contract for a connector that really did the
+       extraction. Over HTTP the claim is unverifiable, and it was being exercised: the Knowledge
+       door advertised .pdf/.doc/.docx the browser cannot read and fell back to the parser's
+       RECEIPT when there was no content, so "PDF document attached: scouting.pdf" became
+       canonical evidence a coach could be answered from.
+
+       The door has since been narrowed to what the browser can really read. That is not the same
+       as the OWNER being safe, and this route is the owner — so the route allowlists the formats
+       a producer can actually deliver. Asserted through the route rather than the module, because
+       the module's own contract is deliberately wider and is not what changed. */
+    const receipt = await call('/api/evidence/import', tokMia, { method: 'POST',
+      body: { format: 'pdf', content: 'PDF document attached: scouting.pdf', sourceName: 'scouting.pdf' } });
+    ok('20 · a PDF "extraction" nothing extracted is refused at the door',
+      receipt.status === 400 && receipt.j.error === 'unsupported_format');
+    ok('20 · …and no evidence was written by the refusal',
+      !(await call('/api/evidence/imports', tokMia)).j.imports.some(g => g.sourceName === 'scouting.pdf'));
+    const docxClaim = await call('/api/evidence/import', tokMia, { method: 'POST',
+      body: { format: 'docx', content: 'Word document: handbook.docx (0 words)', sourceName: 'handbook.docx' } });
+    ok('20 · …the same for a Word file, which the server reads only in a conversation',
+      docxClaim.status === 400 && docxClaim.j.error === 'unsupported_format');
+    ok('20 · …and the refusal says where that file CAN be read rather than just refusing',
+      /conversation/i.test(String(docxClaim.j.note || '')));
+    /* THE CONTROL. Without it, refusing everything would look like a pass. */
+    const stillWorks = await call('/api/evidence/import', tokMia, { method: 'POST',
+      body: { format: 'markdown', content: '# Pressing\nTrigger on the pass into midfield.', sourceName: 'Pressing notes' } });
+    ok('20 · …while the formats a browser really can read still import',
+      stillWorks.status === 200 && stillWorks.j.imported === 1);
+
     // 21 · CONVERSATIONAL CAPTURE — an explicit command in a turn saves through the
     //   governed door; ordinary talk does NOT persist (detection auto, persistence deliberate).
     const orgCmd = await call('/api/assistant/turn', tokCoach, { method: 'POST', body: { text: 'Add this to our organisation knowledge: the pressing triggers are on the goalkeeper pass and the fullbacks.' } });

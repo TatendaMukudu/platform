@@ -124,8 +124,21 @@ const server = app.listen(0, async () => {
     ok('admin can erase a member with their data', del.status === 200);
     const ocAfter = await call('/api/platform/org-checkins', tokCoach);
     ok('erased member has NO check-ins left anywhere', !('Member A' in (ocAfter.j?.checkins || {})));
-    // A's token is still valid but the user record is gone → me/export 404s.
-    ok('erased member has no exportable data left', (await call('/api/me/export', tokA)).status === 404);
+    /* THIS ASSERTION USED TO SAY: "A's token is still valid but the user record is gone →
+       me/export 404s", and asserted 404. Its own comment documented the defect as the expected
+       behaviour, which is PROTOCOL lie #6 — an assertion that defends the bug.
+
+       A token belonging to an erased account is NOT still valid. Reproduced at head 99a6544:
+       deactivate, suspend, or outright DELETE an account and its old token still answered 200 on
+       every `requireAuth` route, because nothing resolved the current user. The law is that
+       erasure ends the session, and 401 is the answer — not 404, which would say "you are still
+       somebody, there is merely nothing here". See `_authoriseRequest` and
+       scripts/session-authority-http-smoke.js.
+
+       The GDPR property this line exists for is unchanged and is now stronger: after erasure
+       there is no route by which A's data can be reached, because A cannot authenticate at all. */
+    ok('an erased member\'s token no longer authenticates — erasure ends the session, it does not merely empty it',
+      (await call('/api/me/export', tokA)).status === 401);
 
     // ── Observation / recognition (works even if the subject never logs in) ──
     // Re-seed a fresh member B is gone; use coach → B? B still exists. Coach recognises B.
@@ -287,7 +300,15 @@ const server = app.listen(0, async () => {
     const workAssist = await call('/api/assistant/turn', tokB, { method: 'POST', body: { text: 'explain this assignment', workItemId: asgId } });
     ok('the assignee gets grounded assigned-work assistance via the ONE runtime (their own work)',
        workAssist.status === 200 && workAssist.j.response.assignedWork && workAssist.j.response.assignedWork.items.length === 1);
-    const strangerAssist = await call('/api/assistant/turn', tokA, { method: 'POST', body: { text: 'explain this assignment', workItemId: asgId } });
+    /* THE STRANGER HAS TO BE ALIVE. This used `tokA`, and A was ERASED a hundred lines above — so
+       once a deleted account stopped authenticating, the assertion broke, and while it passed it
+       was proving something much weaker than it claimed: not "another member gets no context" but
+       "a token belonging to nobody gets no context", which is true of every route in the product.
+
+       The coach is a real, present person who is not the assignee. Their token is the one that
+       makes this a test of the authorisation on assigned work rather than a test of whether a
+       dead token works. */
+    const strangerAssist = await call('/api/assistant/turn', tokCoach, { method: 'POST', body: { text: 'explain this assignment', workItemId: asgId } });
     ok('another member gets NO context for work that is not theirs (no leak)',
        strangerAssist.status === 200 && strangerAssist.j.response.assignedWork.items.length === 0);
     const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'What went well': 'clear progress', 'What was hard': 'time pressure' }, note: 'done' } });
@@ -711,14 +732,34 @@ const server = app.listen(0, async () => {
        (await call('/api/workspace?lens=me', tokB)).j?.items?.some(i => i.scope === 'personal_private') &&
        !(await call('/api/workspace', tokCoach)).j?.items?.some(i => i.text === "I'm exhausted this week"));
 
-    // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
+    /* ── LLM self-test: a HOST operation, not an organisation's ──────────────────────────────
+       This block said "admin-gated" and asserted that a tenant SUPERADMIN gets a 200. That was
+       the defect, written down as the expected behaviour. The self-test reports the host's
+       provider configuration and spends the host's model budget; being the top of an
+       organisation is not being the operator of the machine it runs on. Reproduced alongside it
+       at head 99a6544: the same permission let an unrelated tenant's superadmin REPLACE the pilot
+       organisation through `seed-alma` and flip deterministic-only mode for everybody.
+
+       The status-report shape is still worth guarding, so it is driven through the authority that
+       now owns it rather than deleted. See scripts/tenant-boundary-http-smoke.js for the
+       reproduction and the byte-for-byte no-mutation assertions. */
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);
-    const llm = await call('/api/admin/llm-selftest', tokCoach, { method: 'POST' });
-    ok('an admin can run the LLM self-test and gets a status report',
+    ok('…and NEITHER CAN A TENANT SUPERADMIN — the host is not their machine (this used to be 200)',
+       (await call('/api/admin/llm-selftest', tokCoach, { method: 'POST' })).status === 403);
+    /* THE OPERATOR'S PATH. The key is set here rather than at the top of the file because it is
+       inert without the header: `_isPlatformAdmin` reads both, so no other assertion in this
+       suite changes meaning by its presence. */
+    process.env.IQ_PLATFORM_KEY = 'endpoint-smoke-host-key';
+    const llm = await fetch(`${base}/api/admin/llm-selftest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-platform-key': 'endpoint-smoke-host-key' },
+    }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+    ok('the PLATFORM OPERATOR can run the LLM self-test and gets a status report',
        llm.status === 200 && llm.j?.ok === true && typeof llm.j.status?.enabled === 'boolean');
     ok('with no key, the self-test reports deterministic-fallback mode (no crash)',
        llm.j?.status?.enabled === false && Array.isArray(llm.j.results) && typeof llm.j.note === 'string');
+    delete process.env.IQ_PLATFORM_KEY;
 
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);

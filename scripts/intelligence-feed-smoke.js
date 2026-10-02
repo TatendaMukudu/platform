@@ -49,10 +49,28 @@ ok('suppression happens before the feed reaches ranking', feed.collect({ reasone
 ok('collection is deterministic', JSON.stringify(feed.collect({ reasoner, proactive, outcomeIntelligence, processReflection, selfModel, orgPlaybook })) === JSON.stringify(feed.collect({ reasoner, proactive, outcomeIntelligence, processReflection, selfModel, orgPlaybook })));
 ok('canonical polarity vocabulary has exactly the seven ratified values', [...feed.POLARITIES].sort().join(',') === ['risk','friction','progress','milestone','opportunity','strength','neutral'].sort().join(','));
 ok('risk and friction are Low', ['risk', 'friction'].every(p => feed.bucketOf(p) === 'low'));
-ok('progress, milestone, opportunity and strength are High', ['progress', 'milestone', 'opportunity', 'strength'].every(p => feed.bucketOf(p) === 'high'));
+ok('progress, milestone and strength are High, while an opportunity is only a candidate direction',
+  ['progress', 'milestone', 'strength'].every(p => feed.bucketOf(p) === 'high') && feed.bucketOf('opportunity') === null);
 ok('neutral and data gaps enter neither bucket', feed.bucketOf('neutral') === null && feed.bucketOf({ polarity: 'risk', patternType: 'data_gap' }) === null);
 ok('legacy producer terms normalize at the one owner', feed.normalizePolarity('difficulty') === 'friction' && feed.normalizePolarity('condition') === 'opportunity');
 ok('unknown polarity fails closed to neutral and neither', feed.normalizePolarity('surprise') === 'neutral' && feed.bucketOf('surprise') === null);
+
+const usefulButUnconfirmed = feed.fromProactive([{
+  id: 'delivery-only', patternType: 'recovering', polarity: 'progress', priority: 'medium',
+  kernelConfidence: null, reliabilityLabel: 'reliable here', headline: 'Worth a look', body: 'A noticing was useful before.',
+}])[0];
+const supportedButUnpopular = feed.fromProactive([{
+  id: 'evidence-first', patternType: 'recovering', polarity: 'progress', priority: 'medium',
+  kernelConfidence: 'supported', reliabilityLabel: 'unproven here', headline: 'Supported change', body: 'The record supports this.',
+}])[0];
+ok('delivery usefulness never becomes evidence standing',
+  usefulButUnconfirmed.evidenceStanding === 'none'
+    && usefulButUnconfirmed.confidence === 'none'
+    && usefulButUnconfirmed.deliveryReliability === 'reliable_here');
+ok('poor delivery feedback never weakens evidence standing',
+  supportedButUnpopular.evidenceStanding === 'supported'
+    && supportedButUnpopular.confidence === 'supported'
+    && supportedButUnpopular.deliveryReliability === 'unproven_here');
 
 console.log(`\n=== intelligence-feed-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);

@@ -54,9 +54,16 @@ const bucket = (score, table) => (table.find(([t]) => score >= t) || [0, 'none']
 const PACKS = Object.freeze({
   universal: {
     events: {
-      meeting:  { requires: ['meeting_time', 'meeting_owner'], leadDays: 1, ownerRole: 'admin' },
-      deadline: { requires: ['completion_status'], leadDays: 1, ownerRole: 'admin' },
-      default:  { requires: [], leadDays: 1, ownerRole: 'admin' },
+      /* `priority` is HOW MUCH IT MATTERS THAT THIS OCCASION GOES WELL, on 0..1, and it is
+         declared here because only the pack knows. The kernel used to decide it with
+         `ev.type === 'match' ? 0.8 : 0.5` — a football noun, in the engine, applied to every
+         organisation including this one, which declares no `match` event at all. So a school
+         naming an event "match" scored higher than the same school's exam, and a business's
+         launch could not reach the band a fixture reached. Anything a pack leaves undeclared
+         is 0.5, which is what everything except a match got before. */
+      meeting:  { requires: ['meeting_time', 'meeting_owner'], leadDays: 1, priority: 0.5, ownerRole: 'admin' },
+      deadline: { requires: ['completion_status'], leadDays: 1, priority: 0.65, ownerRole: 'admin' },
+      default:  { requires: [], leadDays: 1, priority: 0.5, ownerRole: 'admin' },
     },
     requirements: {
       meeting_time:      { freshDays: 30, sensitivity: 'team-shared', matches: /\b(time|when|starts?|begins?|schedule)\b/i },
@@ -67,9 +74,10 @@ const PACKS = Object.freeze({
   },
   sports: {
     events: {
-      match:    { requires: ['kickoff_time', 'game_plan', 'availability'], leadDays: 2, ownerRole: 'coach' },
-      training: { requires: ['session_time'], leadDays: 1, ownerRole: 'coach' },
-      default:  { requires: [], leadDays: 1, ownerRole: 'coach' },
+      /* 0.8 is the number the kernel used to hold for this one event type. It belongs here. */
+      match:    { requires: ['kickoff_time', 'game_plan', 'availability'], leadDays: 2, priority: 0.8, ownerRole: 'coach' },
+      training: { requires: ['session_time'], leadDays: 1, priority: 0.5, ownerRole: 'coach' },
+      default:  { requires: [], leadDays: 1, priority: 0.5, ownerRole: 'coach' },
     },
     requirements: {
       kickoff_time: { freshDays: 30, sensitivity: 'team-shared', leadDays: 1, matches: /\b(kick[ -]?off|kickoff|start time|starts? at)\b/i },
@@ -327,9 +335,33 @@ function stateToUncertainties(state, opts = {}) {
     const dependentsN = ev && ev.participants ? clamp(ev.participants / 25, 0.2, 1) : 0.5;
     const startMs = ev && ev.startAt ? parseTime(ev.startAt) : (cs.neededBy ? parseTime(cs.neededBy) : null);
     const proximity = startMs ? clamp(1 - Math.max(0, (startMs - now) / DAY) / 14, 0, 1) : 0.3;
-    const priority = ev && ev.type === 'match' ? 0.8 : 0.5;
+    /* ── THE PACK DECLARES ITS OWN ONTOLOGY; THE KERNEL READS IT ────────────────────────────
+       Two numbers decide what a person is shown first, and both were keyed to football inside
+       the engine:
+
+           const priority = ev && ev.type === 'match' ? 0.8 : 0.5;
+           const leadDays = /kickoff|availability|game_plan/.test(req.claimType) ? 2 : 1;
+
+       Driven, with the UNIVERSAL pack — an organisation that declares no `match` event type at
+       all: the identical situation scored 0.710 as a `deadline` and 0.770 as a `match`. A
+       school's exam and a business's launch could not reach the band a fixture reached, and a
+       non-sport organisation could raise its own scores by choosing a football word.
+
+       The second line was worse than domain-specific, it was WRONG: the sports pack declares
+       `kickoff_time.leadDays: 1`, and the regex overrode its own pack with 2. A declaration
+       nothing reads is not a declaration.
+
+       Both now come from the pack, most specific first: the requirement's own lead time, then
+       the event type's, then one day. An undeclared priority is 0.5 — what everything except a
+       match already got — so no pack changes behaviour by staying silent. */
+    const pack = resolvePack((state.organisation || {}).pack);
+    const packEvent = (ev && pack.events[ev.type]) || null;
+    const priority = packEvent && Number.isFinite(packEvent.priority) ? packEvent.priority : 0.5;
     const impact = deriveImpact({ dependents: dependentsN, proximity, priority, irreversibility: 0.6, scope: 0.6, safety: 0 });
-    const leadDays = req.provenance && /kickoff|availability|game_plan/.test(req.claimType) ? 2 : 1;
+    const packReq = pack.requirements[req.claimType] || null;
+    const leadDays = (packReq && Number.isFinite(packReq.leadDays)) ? packReq.leadDays
+                   : (packEvent && Number.isFinite(packEvent.leadDays)) ? packEvent.leadDays
+                   : 1;
     const urgency = deriveUrgency({ neededByMs: cs.neededBy ? parseTime(cs.neededBy) : startMs, leadDays, now });
 
     const base = { affects: ev ? { type: 'event', id: ev.id, title: ev.title } : null,

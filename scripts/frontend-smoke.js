@@ -15,21 +15,15 @@ const seed = require('../scripts/seed-alma');
 
 // Resolve the pre-installed Chromium binary (pinned build dir may vary).
 const fs = require('fs'), path = require('path');
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* THE DISCOVERY LIVES IN ONE PLACE NOW. This file already scanned for an installed build, which
+   is why it SKIPPED cleanly while the four browser gates HUNG on a path playwright-core resolved
+   and nothing had checked. Same search, one owner, so the two cannot drift again.
+
+   The skip contract is deliberately unchanged: this smoke degrades to its non-rendered checks
+   when there is no browser, while a gate whose whole purpose is the browser fails loudly. */
 function findChrome() {
-  // 1. Let playwright-core resolve it (honours PLAYWRIGHT_BROWSERS_PATH; works in CI
-  //    once `npx playwright install chromium` has run).
-  try { const p = chromium.executablePath(); if (p && fs.existsSync(p)) return p; } catch (_) {}
-  // 2. Scan the pre-installed browser dir used by this environment.
-  for (const root of ['/opt/pw-browsers', process.env.PLAYWRIGHT_BROWSERS_PATH].filter(Boolean)) {
-    try {
-      for (const d of fs.readdirSync(root)) {
-        if (!d.startsWith('chromium-') || d.includes('headless_shell')) continue;
-        const p = path.join(root, d, 'chrome-linux', 'chrome');
-        if (fs.existsSync(p)) return p;
-      }
-    } catch (_) {}
-  }
-  return null;
+  try { return chromiumPath(chromium); } catch (_) { return null; }
 }
 
 let pass = 0, fail = 0;

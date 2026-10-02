@@ -290,8 +290,11 @@ function applyPreferences(insight, prefs) {
    celebrating. `days` is the person's own count; the leader form never carries it. */
 function milestoneFinding({ key, subjectId, days, best, priority } = {}) {
   const d = Number(days) || 0;
+  const usageOnly = key === 'checkin_streak';
   return {
-    polarity: 'milestone',
+    // Product usage is not a human outcome. It may remain available as neutral context, but it
+    // cannot manufacture a High or spend attention merely because somebody opened the product.
+    polarity: usageOnly ? 'neutral' : 'milestone',
     patternType: key || 'milestone',
     subjectId,
     severity: 'low',
@@ -299,14 +302,16 @@ function milestoneFinding({ key, subjectId, days, best, priority } = {}) {
     confidence: 'clear',
     render: {
       self: {
-        headline: best ? 'A personal best' : 'Nice streak going',
-        body: `${d} days of checking in, unbroken${best ? ' — your longest run yet' : ''}. Consistency like that compounds.`,
+        headline: usageOnly ? 'Checking in consistently' : (best ? 'A personal best' : 'Milestone reached'),
+        body: usageOnly
+          ? `${d} days of check-ins are on record${best ? ', the longest run recorded here' : ''}.`
+          : `${d} days are on record${best ? ' — the longest run yet' : ''}.`,
         suggestion: null,
       },
       leader: {
-        headline: 'Consistently engaged',
-        body: 'They’ve been checking in consistently lately — a good moment to acknowledge it.',
-        suggestion: 'Consider recognising their consistency.',
+        headline: usageOnly ? 'Check-ins are arriving consistently' : 'A milestone is on record',
+        body: usageOnly ? 'Check-ins have been arriving consistently lately.' : 'A meaningful milestone is on record.',
+        suggestion: null,
       },
     },
   };

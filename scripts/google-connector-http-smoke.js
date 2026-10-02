@@ -19,7 +19,14 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 const C = 'gcal';
 _loadAllStores({
   orgMeta:  { [C]: { orgName: 'G', orgMode: 'business' } },
-  orgUsers: { [C]: { uma: { id: 'uma', name: 'Uma', role: 'member', orgCode: C, status: 'active' } } },
+  orgUsers: { [C]: {
+    uma: { id: 'uma', name: 'Uma', role: 'member', orgCode: C, status: 'active' },
+    /* A REAL MEMBER WHO HAS SIMPLY NOT CONSENTED. Step 6 issued a token for `nobody`, an id in no
+       store, so the request is now answered 401 by the session owner and never reaches the
+       consent ledger. The whole point of the step is that consent is what stops the pull —
+       proving it with a person who does not exist proves only that a stranger is a stranger. */
+    nobody: { id: 'nobody', name: 'Unconsented Member', role: 'member', orgCode: C, status: 'active' },
+  } },
   // Uma has consented to the calendar + email insight scopes and connected both sources.
   userConsents: { [`${C}:uma`]: {
     'external:calendar': { granted: true }, 'external:email': { granted: true }, 'external:health': { granted: true },

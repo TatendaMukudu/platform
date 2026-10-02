@@ -120,30 +120,35 @@ const DOMAIN_VOCAB = {
     group:'group', groups:'groups', event:'session', events:'sessions',
     observation:'note', observations:'notes', metric:'measure', metrics:'measures',
     commitment:'commitment', intervention:'support', outcome:'outcome', goal:'goal',
+    eventPerformance:'session', eventPreparation:'practice', eventGathering:'meeting', eventMilestone:'deadline',
   },
   sports: {
     person:'player', people:'players', member:'player', members:'players',
     group:'team', groups:'teams', event:'match', events:'matches',
     observation:'coach note', observations:'coach notes', metric:'match load', metrics:'match loads',
     commitment:'training target', intervention:'modified session', outcome:'performance gain', goal:'target',
+    eventPerformance:'match', eventPreparation:'training session', eventGathering:'team meeting', eventMilestone:'deadline',
   },
   education: {
     person:'student', people:'students', member:'student', members:'students',
     group:'class', groups:'classes', event:'lesson', events:'lessons',
     observation:'teacher feedback', observations:'teacher feedback', metric:'test result', metrics:'test results',
     commitment:'assignment', intervention:'tutoring', outcome:'grade improvement', goal:'learning goal',
+    eventPerformance:'exam', eventPreparation:'revision session', eventGathering:'meeting', eventMilestone:'submission deadline',
   },
   business: {
     person:'team member', people:'team members', member:'team member', members:'team members',
     group:'department', groups:'departments', event:'meeting', events:'meetings',
     observation:'manager feedback', observations:'manager feedback', metric:'performance metric', metrics:'performance metrics',
     commitment:'deliverable', intervention:'support plan', outcome:'delivery', goal:'objective',
+    eventPerformance:'launch', eventPreparation:'working session', eventGathering:'meeting', eventMilestone:'deadline',
   },
   nonprofit: {
     person:'participant', people:'participants', member:'participant', members:'participants',
     group:'cohort', groups:'cohorts', event:'session', events:'sessions',
     observation:'mentor note', observations:'mentor notes', metric:'progress measure', metrics:'progress measures',
     commitment:'goal', intervention:'support plan', outcome:'milestone reached', goal:'goal',
+    eventPerformance:'showcase', eventPreparation:'preparation session', eventGathering:'meeting', eventMilestone:'reporting deadline',
   },
 };
 

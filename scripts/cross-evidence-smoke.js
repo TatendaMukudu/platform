@@ -57,10 +57,18 @@ const focus = { kind: 'focus', id: 'foc1', about: 'focus:foc1',
        With a single signal the two methods agree and the assertion proves nothing. */
     signals: [{ ref: 'e1', originRef: 'o_ravi', status: 'active', at: 120 },
               { ref: 'e4', originRef: 'o_ravi', status: 'active', at: 130 }] } };
+const priorFocus = { kind: 'focus', id: 'foc0', about: 'focus:foc0',
+  explained: { headline: 'Earlier recovery check' },
+  raw: { focusId: 'foc0', text: 'an earlier tactic', outcome: { result: 'did_not_help', at: 250 },
+    addresses: { kind: 'inquiry', id: 'inq1' } } };
 const other = { kind: 'inquiry', id: 'inq2', about: 'inquiry:inq2',
   explained: { headline: 'Travel and academics' },
   raw: { inquiryId: 'inq2', signals: [{ ref: 'e2', originRef: 'o_coach', status: 'active', at: 250 }] } };
-const ALL = [inq, high, focus, other];
+const otherFocus = { kind: 'focus', id: 'other', about: 'focus:other',
+  explained: { headline: 'Change the travel plan' },
+  raw: { focusId: 'other', outcome: { result: 'worse', at: 275 },
+    addresses: { kind: 'inquiry', id: 'inq2' } } };
+const ALL = [inq, high, focus, priorFocus, other, otherFocus];
 
 console.log('\n  A/B — THE EDGES ARE CANONICAL REFS');
 const E = X.edges(ALL);
@@ -123,10 +131,27 @@ ok('CE-G3 …and what has been OBSERVED on that thing since the outcome, as a co
   L.observedSince && L.observedSince.records === 1 && L.observedSince.refs.length === 1);
 ok('CE-G4 …the loop is a description of what was recorded and never a prediction',
   !/will |expect|predict|likely|going to|should improve/i.test(JSON.stringify(L)));
+ok('CE-G5 a closed Focus on the same governed A is returned as a prior attempt',
+  L.priorAttempts.length === 1 && L.priorAttempts[0].focus === 'focus:foc0'
+  && L.priorAttempts[0].outcome === 'did_not_help');
+ok('CE-G6 …without copying its tactic, conversation or evidence into the relationship reader',
+  !JSON.stringify(L.priorAttempts).includes('Earlier recovery check')
+  && !JSON.stringify(L.priorAttempts).includes('an earlier tactic'));
+ok('CE-G7 a closed Focus on a different A is not treated as comparable merely because it is a Focus',
+  !L.priorAttempts.some(a => a.focus === 'focus:other'));
+/* ── AND IT SAYS WHICH LOOP IS OPEN, NOT THAT THE PERSON NEVER DECLARED ANYTHING ────────────
+   Live finding #9: a Focus the founder had written in full read back as though it were empty.
+   The missing thing was the LINK to an originating Inquiry — `addresses` — and the sentence
+   said "this focus does not say what it was started to work on", which is false on its face to
+   anybody looking at the title they typed. This assertion pinned that exact wording, so the
+   copy defect was load-bearing on a green gate: it had to be asserted in BOTH directions to
+   stop the next repair from quietly restoring it. */
 ok('CE-I1 a focus with nothing recorded says WHERE the loop is open rather than answering anyway',
   (() => { const bare = { kind: 'focus', id: 'f0', raw: { focusId: 'f0' } };
     const l = X.loop([bare], 'focus:f0');
-    return l.open.length === 2 && l.open.some(t => /does not say what it was started/.test(t))
+    return l.open.length === 2
+      && l.open.some(t => /not linked to a question on the record/.test(t))
+      && !l.open.some(t => /does not say what it was started/.test(t))
       && l.open.some(t => /no outcome/.test(t)); })());
 ok('CE-I2 …and a loop is only ever built for a focus, because only a focus has an outcome',
   X.loop(ALL, 'inquiry:inq1') === null && X.loop(ALL, 'high:hi1') === null);

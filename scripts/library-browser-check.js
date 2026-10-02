@@ -18,7 +18,12 @@ process.env.IQ_COMPOSER = '1';
 
 const path = require('path');
 const { chromium } = require('playwright-core');
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { chromiumPath } = require('./lib/chromium-path.js');
+/* One owner for "which browser". This was a HARD-CODED chromium-1194 path: correct in today's
+   image and wrong the moment it updates, which is the mirror of the bug the other four gates
+   had (they resolved a build playwright-core names and nothing had checked, then hung on it).
+   Two wrong answers to one question. See scripts/lib/chromium-path.js. */
+const EXE = chromiumPath(chromium);
 const IPHONE = { width: 390, height: 844 };   // the founder's device class
 
 const ai = require('../ai/gateway.js');
@@ -185,17 +190,82 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
   await go('focus');
   await page.evaluate(id => MemberApp.openObjectThread('focus', id), String(myFocusId)).catch(() => {});
   await page.waitForTimeout(1600);
-  const acc = await page.$eval('#iqt-mat-file', el => el.getAttribute('accept')).catch(() => null);
+  /* THE PICKER THAT REMAINS. The page-level Material control this used to read was retired by
+     founder decision (findings R1 #30): the Composer's paperclip already attaches to whatever
+     object is open, and reads pictures the old picker refused. The invariant below is about a
+     picker offering exactly what it can read, and it is the Composer's picker that must now
+     satisfy it — asserting a retired element would be asserting that a removal did not happen. */
+  const acc = await page.$eval('input.iq-attach-input', el => el.getAttribute('accept')).catch(() => null);
   /* THE ACCEPT ATTRIBUTE AS THE BROWSER SEES IT. Read off the live element rather than off the
      template, because the two disagreed: the guard was `window.AttachmentHandler`, the handler is
      a top-level const, and a top-level const is not a property of window — so the attribute
      rendered empty and the picker offered every file on the phone. Every source-level assertion
      was green throughout, because the source said the right thing. */
-  ok('B7 the Material picker exists on the object thread and advertises a NON-EMPTY accept list — an empty one offers everything', !!acc);
-  ok('B7b …and it does not offer a PDF or an image, which it would have to refuse after the file was chosen',
-    !!acc && !/\.pdf/i.test(acc) && !/image/i.test(acc));
-  ok('B7c …while still offering the formats it can read, including the founder\'s PowerPoint case',
-    !!acc && /\.pptx/.test(acc) && /\.docx/.test(acc) && /\.xlsx/.test(acc) && /\.csv/.test(acc));
+  ok('B7 the picker exists on the object thread and advertises a NON-EMPTY accept list — an empty one offers everything', !!acc);
+  /* AND THE COMPOSER'S PICKER MAY OFFER A PICTURE, because it can actually read one: the bytes go
+     to the vision gateway and the description binds to the same object. The old assertion said
+     the opposite because the old picker refused images — which is the reason it was the worse
+     door, not a rule the product has. */
+  ok('B7b …and what it offers, it can read — a picture included, since the Composer reads those',
+    !!acc && /image/i.test(acc));
+  /* ── B7c — THE LAW, NOT THE LIST, AND WHY THAT CHANGED ────────────────────────────────────
+     This used to assert the literal set `.pptx .docx .xlsx .csv`, and it passed every time. It
+     was reading a hard-coded attribute, not a capability. Word, PowerPoint and spreadsheets are
+     read by JSZip and SheetJS, which arrive from a CDN — and in THIS environment that CDN is
+     unreachable (`net::ERR_TUNNEL_CONNECTION_FAILED`, measured, not assumed). So those three
+     formats have never once been readable in any browser check this engagement has run, while
+     this assertion said they were on offer. It was green, and it was wrong: exactly the class
+     this whole engagement keeps finding, in the file written to catch that class.
+
+     The picker is now derived from what actually loaded, so what this must assert is the
+     INVARIANT: offered is exactly readable. That holds on a coach's phone with the libraries in
+     cache, holds on a stadium connection without them, and fails the moment either side drifts —
+     which the literal list could not do. */
+  const readerState = await page.evaluate(() => ({
+    kinds: AttachmentHandler.readableMaterialKinds(),
+    exts: Object.keys(AttachmentHandler.materialExtensions()),
+    known: Object.keys(AttachmentHandler.MATERIAL_EXTENSIONS),
+    jszip: typeof JSZip !== 'undefined', xlsx: typeof XLSX !== 'undefined',
+  })).catch(() => null);
+  /* THE SAME INVARIANT, AGAINST THE LIST THIS PICKER ACTUALLY OWNS. It compared the attribute to
+     the MATERIAL list, which belonged to the retired page-level control; the Composer's picker
+     carries the composer list, which is wider because that path can read more — a picture goes to
+     the vision gateway rather than being refused.
+
+     STILL NOT A TAUTOLOGY, and this is the defect it exists for: the attribute is read off the
+     LIVE ELEMENT and compared with what the handler says it should be. That is exactly how the
+     `window.AttachmentHandler` guard was caught — the source said the right thing while the
+     rendered attribute was empty and the picker offered every file on the phone. */
+  const composerList = await page.evaluate(() => AttachmentHandler.composerAcceptAttr()).catch(() => null);
+  ok('B7c the picker offers EXACTLY what its handler says it can read, as the browser renders it',
+    !!composerList && acc === composerList);
+  /* ── AND WHAT "READABLE" MEANS CHANGED UNDERNEATH THIS ────────────────────────────────────
+     This used to assert that .docx/.pptx are withheld unless JSZip loaded and .xlsx unless SheetJS
+     did. That was right when the BROWSER parsed them. The founder's September decision moved
+     Office parsing SERVER-SIDE precisely because those two libraries arrive from a CDN this
+     environment cannot reach — so the browser now sends the bytes and the server reads them, and
+     `KIND_NEEDS` is deliberately empty.
+
+     So the old assertion had become the opposite of the law: it demanded that the three formats
+     disappear exactly when the change was designed to keep them working. Measured here —
+     JSZip=false, XLSX=false, and .docx/.xlsx/.pptx correctly on offer.
+
+     What must be true now is the same invariant from the other side: a format is offered IFF
+     something can really read it, whether that reader is in this browser or on the server. PDF is
+     the control — nothing anywhere reads it, so it must never be advertised however the rest
+     moves. (This contradiction survived because the gate could not run; see
+     scripts/lib/chromium-path.js.) */
+  ok('B7d Office formats are offered even with no CDN, because the server reads them now',
+    !!readerState && !readerState.jszip && !readerState.xlsx
+    && /\.docx/.test(acc) && /\.xlsx/.test(acc) && /\.pptx/.test(acc));
+  ok('B7d2 …while a format nothing anywhere can read is not advertised',
+    !!acc && !/\.pdf/.test(acc) && !/\.doc\b/.test(acc.replace(/\.docx/g, '')));
+  ok('B7e …while the formats that need no library are always there, so a lost CDN never leaves a dead door',
+    !!acc && /\.txt/.test(acc) && /\.csv/.test(acc) && /\.md/.test(acc));
+  /* AND THE ENVIRONMENT FACT IS PRINTED rather than inferred, because a future reader of this
+     output has to be able to tell "the capability regressed" from "this box has no internet". */
+  console.log(`    [readers] JSZip=${readerState && readerState.jszip} `
+    + `XLSX=${readerState && readerState.xlsx} → offering ${acc}`);
 
   /* ── 7. THE DEGRADED REPLY, RENDERED ──────────────────────────────────────────────────── */
   console.log('\n  A DEGRADED REPLY, ON THE SCREEN');
@@ -222,6 +292,70 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
     !!rendered && /normal response isn't available right now/.test(rendered.text));
   ok('B9c …and naming no provider, model, key or error',
     !!rendered && !/provider|key|401|anthropic|openai|error/i.test(rendered.text));
+
+  /* ── 8. WHO GETS THE ROW ───────────────────────────────────────────────────────────────────
+     Found by measuring the rendered page rather than reading the CSS. At 390px the row is 369px
+     wide and the item's own words had 153px of it: a folder select and a Remove button sat beside
+     them permanently. Nothing was cut off — it wrapped, which is worse to read and easier to miss.
+     The label of a single-sentence focus became a four-line ribbon 126px wide, in the one place
+     whose whole job is recognising something again at a glance.
+
+     Filing is a once-per-item act; reading the label happens every time the page opens. This
+     asserts the priority, not the pixel count — a layout that puts the words first satisfies it
+     however it is built, and the arrangement that caused the defect cannot. */
+  console.log('\n  AT PHONE WIDTH, THE WORDS GET THE ROW');
+  /* Filed fresh here: an earlier section takes its item back off the shelf, so measuring what is
+     left would measure an empty page and every assertion below would be vacuous. The text is long
+     enough to be worth truncating — a short label fits either layout and proves nothing. */
+  const toMeasure = await api('POST', '/api/me/focus',
+    { text: 'Set-piece marking on the near post, especially in the second half' });
+  const measureId = toMeasure.j && toMeasure.j.focus && toMeasure.j.focus.id;
+  await api('POST', '/api/library/shelf', { kind: 'focus', id: measureId });
+  await go('notes');
+  /* An earlier section left the page filtered to the "Set pieces" folder, so the list was showing
+     its empty state rather than any row. Pressed rather than reset in code — it is the control the
+     empty state tells the person to use, so driving it is worth more than assigning the field. */
+  await page.click('.shelf-chip:has-text("Everything")').catch(() => {});
+  await page.waitForTimeout(700);
+  const geom = await page.evaluate(() => {
+    const row = document.querySelector('.shelf-row');
+    if (!row) return null;
+    const open = row.querySelector('.shelf-open');
+    const lab  = row.querySelector('.shelf-label');
+    const mgmt = [...row.querySelectorAll('.shelf-move-select, .shelf-x')];
+    const vis = el => { const c = getComputedStyle(el); return el.offsetHeight > 0 && c.display !== 'none' && c.visibility !== 'hidden'; };
+    return {
+      rowW: row.getBoundingClientRect().width,
+      openW: open ? open.getBoundingClientRect().width : 0,
+      /* Line count rather than clipping. "Is it cut off" was the first thing asserted here and it
+         never failed: nothing is ever cut off, because the label wraps. The symptom is the shape
+         of the wrap, so that is what gets measured. */
+      labelLines: (() => {
+        if (!lab) return 99;
+        const cs = getComputedStyle(lab);
+        const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+        return Math.round(lab.getBoundingClientRect().height / lh);
+      })(),
+      mgmtCount: mgmt.length,
+      mgmtVisible: mgmt.every(vis),
+      mgmtTaps: mgmt.every(el => el.getBoundingClientRect().height >= 44),
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok('B10 a filed row is on the page to measure', !!geom && geom.rowW > 0);
+  ok('B10b the item\'s own words take most of the row, rather than sharing it with the filing controls',
+    !!geom && geom.openW > geom.rowW * 0.8);
+  /* The fixture text above is one sentence and is fixed in this file, so the line count is a fair
+     thing to pin: two lines when the words have the row, four when they are sharing it. */
+  ok('B10c …reading as a sentence rather than a narrow ribbon of wrapped fragments',
+    !!geom && geom.labelLines <= 2);
+  /* THE HALF THAT STOPS THIS BEING WON BY DELETION. Giving the words the row by removing the
+     controls would pass B10b and break the product. */
+  ok('B10d …while the folder control and Remove are both still there',
+    !!geom && geom.mgmtCount === 2 && geom.mgmtVisible);
+  ok('B10e …still thumb-sized, now that they no longer borrow the card\'s height',
+    !!geom && geom.mgmtTaps);
+  ok('B10f …and nothing runs off the side of the screen', !!geom && !geom.overflow);
 
   await browser.close();
   server.close();

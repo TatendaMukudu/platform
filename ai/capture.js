@@ -63,7 +63,27 @@ function detectCommand(text) {
   return { scope: orgScope ? 'organisation' : 'personal', payload, phrase: raw.slice(0, 80) };
 }
 
-const QUESTION_RE = /\?\s*$|^\s*(?:who|what|when|where|why|how|which|whose|whom|is|are|am|do|does|did|can|could|should|would|will|may|might|shall|has|have|had)\b/i;
+/* ── A QUESTION MARK IS NOT AN ENGLISH INVENTION, AND THIS ONLY KNEW THE ENGLISH ONE ──────────
+   Both regexes below used `\\?`, the ASCII question mark and nothing else. Arabic ends a question
+   with U+061F, Armenian with U+055E, Ethiopic with U+1367, and a CJK keyboard produces the
+   FULL-WIDTH U+FF1F rather than the ASCII one -- so a question typed on a Japanese or Chinese
+   phone, ending in exactly the character that means "this is a question", was not read as one.
+
+   This is the same rule written for the writing systems that exist rather than for one of them.
+   It is a CLASS OF PUNCTUATION, not another word list: nothing here names a language, and a
+   script nobody has thought of that uses one of these marks is covered already.
+
+   ASCII `;` IS DELIBERATELY EXCLUDED. Modern Greek marks a question with it, and it is a list
+   separator in most of the world’s writing -- reading every semicolon as a question would turn
+   ordinary English notes into questions. U+037E, the ENCODED Greek erotimatiko, is safe and is
+   included. Every mark is written as an escape rather than as itself, because U+037E is
+   indistinguishable from an ASCII semicolon in most fonts and a reader has to be able to see
+   which one is in the class. */
+const QUESTION_MARKS = /[?\uFF1F\u061F\u055E\u1367\u2E2E\u2047\u2048\u2049\u037E]/;
+/* ONE OWNER FOR THE CLASS. This one decides whether to OFFER to keep something, and offering to
+   file somebody’s question as a durable record is the wrong offer in any script. It is the same
+   set of characters, so it is the same constant rather than a second copy of it. */
+const QUESTION_RE = new RegExp(`${QUESTION_MARKS.source}\\s*$|^\\s*(?:who|what|when|where|why|how|which|whose|whom|is|are|am|do|does|did|can|could|should|would|will|may|might|shall|has|have|had)\\b`, "i");
 // Markers that a message is carrying INFORMATION worth keeping (minutes, stats, a
 // policy, a plan) rather than a passing remark.
 const INFO_RE = /\b(minutes|agenda|notes?|stats?|statistics|results?|score(?:s|line)?|policy|policies|procedure|plan|line-?up|lineup|roster|schedule|fixture|report|summary|record|data|figures?|budget|objectives?|targets?|decisions?|action items?)\b/i;
@@ -87,10 +107,11 @@ function looksDeclarative(text) {
 // or opens with an interrogative / info-imperative — not brittle topic keywords, so
 // "what are our pressing triggers" and "tell me the game plan" both qualify.
 const QUESTION_LEAD = /^(?:\s*(?:hey|hi|ok|okay|so|and|also|please|pls)\b[ ,]*)*(?:who|what|whats|what's|when|where|why|how|hows|how's|which|whose|whom|is|are|was|were|do|does|did|can|could|should|would|will|may|might|shall|tell me|explain|describe|show me|list|give me|walk me through|remind me (?:what|when|who|where|how|which))\b/i;
+
 function looksLikeQuestion(text) {
   const raw = String(text == null ? '' : text).trim();
   if (!raw) return false;
-  if (/\?/.test(raw)) return true;
+  if (QUESTION_MARKS.test(raw)) return true;
   return QUESTION_LEAD.test(raw);
 }
 

@@ -130,6 +130,21 @@ const server = app.listen(0, async () => {
     ok('FS7e …the chips are built from the route, with the live head-count shown, because "12 people" says what no adjective does',
       /fetch\('\/api\/me\/audiences'/.test(app_) && /iq-aud-n/.test(app_));
 
+    /* FS7f: Both rendered Focus entry points must expose the same governed invite picker.
+       This is a source guard; FP13-FP16 exercise the real HTTP writer and reader. */
+    const manual = app_.slice(app_.indexOf('  _openFocusForm('), app_.indexOf('  /* THE ONE CARD.'));
+    const proposed = app_.slice(app_.indexOf('  _renderFocusProposal('), app_.indexOf('  _focusPropMore('));
+    ok('FS7f manual and assistant Focus cards each mount server audiences and named contacts',
+      /_renderAudiences\(id\)/.test(manual) && /-people" hidden/.test(manual) &&
+      /_renderAudiences\(id\)/.test(proposed) && /-people" hidden/.test(proposed));
+    ok('FS7g neither Focus writer silently drops named participants, and an empty choice is refused',
+      /kind === 'named_people' && !picked.length/.test(manual) &&
+      /participants: kind === 'named_people' \? picked : \[\]/.test(manual) &&
+      /kind === 'named_people' && !picked.length/.test(app_.slice(app_.indexOf('  async startFocusFromChat('), app_.indexOf('  /* THE FOCUS, ATTACHED'))));
+    ok('FS7h an empty leader audience is hidden and selected invitee names are read back',
+      /Number\.isFinite\(a\.reaches\) && a\.reaches > 0/.test(manual) &&
+      /names\.join\(', '\)/.test(manual));
+
     /* ── FS8: THE ONE THAT MATTERS FOR THE FEEL. A new input surface must inherit the shell
        rather than invent one, or this drifts apart again the next time somebody adds a box. ── */
     /* FS8 — THE BILL, not an allow-list.

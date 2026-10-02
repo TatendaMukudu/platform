@@ -30,7 +30,8 @@ function normalizeItem(item = {}, source = 'unknown') {
   const patternType = _key(item.patternType || item.type || item.kind || item.action);
   const polarity = _key(item.polarity || (item.outcomeLine ? 'neutral' : 'neutral'));
   const priority = _key(item.priority || item.severity || 'low');
-  const confidence = _key(item.kernelConfidence || item.confidence || item.reliability || 'none');
+  const evidenceStanding = _key(item.evidenceStanding || item.kernelStanding || item.kernelConfidence || item.confidence || 'none');
+  const deliveryReliability = _key(item.deliveryReliability || item.reliabilityLabel || item.reliability || 'none');
   const fallbackKey = `${source}:${patternType}:${item.subjectId || item.scope || item.title || item.headline || _hash(JSON.stringify(item))}`;
   const id = _s(item.id || item.dedupeKey || fallbackKey, 120);
   const title = _s(item.headline || item.title || item.signal || item.opening || item.question || patternType.replace(/_/g, ' '), 160);
@@ -46,7 +47,11 @@ function normalizeItem(item = {}, source = 'unknown') {
     bucket: _key(item.bucket || item.suggestedSurface || item.group || item.kind || patternType),
     polarity,
     priority,
-    confidence,
+    evidenceStanding,
+    deliveryReliability,
+    // Compatibility adapter. Ranking and downstream claim language can read this without ever
+    // receiving a delivery/usefulness label as epistemic support.
+    confidence: evidenceStanding,
     title,
     body,
     question: item.question ? _s(item.question, 360) : null,
@@ -90,7 +95,8 @@ function buildQueue({ reads = [], insights = [], outcomeBriefs = [], feedItems =
     const score = _score(i, prefs);
     const rationale = [...i.rationale];
     rationale.push(`priority:${i.priority}`);
-    if (i.confidence && i.confidence !== 'none') rationale.push(`confidence:${i.confidence}`);
+    if (i.evidenceStanding && i.evidenceStanding !== 'none') rationale.push(`evidence_standing:${i.evidenceStanding}`);
+    if (i.deliveryReliability && i.deliveryReliability !== 'none') rationale.push(`delivery_reliability:${i.deliveryReliability}`);
     if (i.source === 'outcome_intelligence') rationale.push('outcome_history');
     if (i.source === 'process_reflection') rationale.push('process_question');
     if (i.source === 'self_model') rationale.push('personal_accommodation');
